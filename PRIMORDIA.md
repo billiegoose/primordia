@@ -50,6 +50,8 @@ primordia/
 │   └── api/
 │       ├── chat/
 │       │   └── route.ts           ← Streams Claude responses via SSE
+│       ├── deploy-context/
+│       │   └── route.ts           ← Returns PR + linked-issue info for preview deploys
 │       └── evolve/
 │           └── route.ts           ← Creates a labeled GitHub Issue
 │
@@ -160,6 +162,21 @@ These were noted at project inception but are explicitly out of scope for the MV
 ## Changelog
 
 ### 2026-03-14 — Search for existing evolve issues + live CI progress for follow-ups
+
+---
+
+### 2026-03-14 — Deploy previews are now self-aware (show PR + issue context)
+
+**What changed**:
+- New `app/api/deploy-context/route.ts`: server-side endpoint that reads `VERCEL_GIT_PULL_REQUEST_ID`, fetches the PR from GitHub, extracts the linked issue (via `Closes #N` in the PR body), and returns a formatted context string.
+- `app/api/chat/route.ts`: now accepts an optional `systemContext` field in the POST body and appends it to the hardcoded system prompt, so Claude is aware of the WIP context.
+- `components/ChatInterface.tsx`: on mount, if `VERCEL_ENV === "preview"`, calls `/api/deploy-context` and (a) prepends a visible amber system-message notice to the chat, (b) passes the context as `systemContext` in every `/api/chat` call. System messages render as a distinct amber notice bar rather than a chat bubble.
+
+**Why**: Deploy previews are live but unmerged works-in-progress. Loading the PR and linked issue into the chat makes the assistant aware it's running on a preview build, and gives users immediate visibility into which PR/issue the preview corresponds to.
+
+---
+
+### 2026-03-14 — Check for related open issues before creating a new evolve request
 
 **What changed**:
 - `/api/evolve/route.ts` now supports three actions: `search` (find open evolve issues via GitHub Search API), `comment` (add a `@claude` follow-up comment to an existing issue), and `create` (existing behavior, now explicit). The `comment` action returns `issueNumber` so the frontend can start CI polling.
