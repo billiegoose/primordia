@@ -48,7 +48,7 @@ export async function POST(request: Request) {
     }
   }
 
-  // ── Comment: add a @claude follow-up comment to an existing issue ──────────
+  // ── Comment: add a @claude follow-up comment to an existing issue or its PR ─
   if (action === "comment") {
     if (!body.issueNumber || !body.request || typeof body.request !== "string") {
       return Response.json(
@@ -58,16 +58,27 @@ export async function POST(request: Request) {
     }
     const commentBody = buildCommentBody(body.request);
     try {
-      const result = await addIssueComment({
+      // If a PR already exists for this issue, comment on the PR instead.
+      const existingPr = await findOpenPrForIssue({
         token,
         repo,
         issueNumber: body.issueNumber,
+      });
+      // GitHub's issue comments endpoint works for PRs too (PRs are issues).
+      const targetNumber = existingPr ? existingPr.number : body.issueNumber;
+      const result = await addIssueComment({
+        token,
+        repo,
+        issueNumber: targetNumber,
         body: commentBody,
       });
-      // Return issueNumber so the frontend can start CI polling on the existing issue
+      // Return issueNumber so the frontend can start CI polling on the existing issue.
+      // Also return prNumber/prUrl when the comment was posted to a PR.
       return Response.json({
         outcome: "commented",
         issueNumber: body.issueNumber,
+        prNumber: existingPr?.number ?? null,
+        prUrl: existingPr?.html_url ?? null,
         commentUrl: result.html_url,
       });
     } catch (err) {
@@ -178,8 +189,39 @@ interface OpenIssue {
   html_url: string;
 }
 
+interface GitHubPR {
+  number: number;
+  html_url: string;
+  head: { ref: string };
+}
+
 interface GitHubComment {
   html_url: string;
+}
+
+async function findOpenPrForIssue({
+  token,
+  repo,
+  issueNumber,
+}: {
+  token: string;
+  repo: string;
+  issueNumber: number;
+}): Promise<GitHubPR | null> {
+  const url = `https://api.github.com/repos/${repo}/pulls?state=open&per_page=30`;
+
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+  });
+
+  if (!response.ok) return null;
+
+  const prs = (await response.json()) as GitHubPR[];
+  return prs.find((p) => p.head.ref.includes(`issue-${issueNumber}-`)) ?? null;
 }
 
 async function searchOpenEvolveIssues({

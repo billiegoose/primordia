@@ -279,6 +279,8 @@ export default function ChatInterface() {
       const data = (await res.json()) as {
         outcome?: string;
         issueNumber?: number;
+        prNumber?: number | null;
+        prUrl?: string | null;
         commentUrl?: string;
         error?: string;
       };
@@ -289,6 +291,11 @@ export default function ChatInterface() {
 
       setEvolveResult({ type: "commented", commentUrl: data.commentUrl });
 
+      // Show "PR #N" when the comment was posted to a PR, otherwise "Issue #N".
+      const targetLabel = data.prNumber
+        ? `[PR #${data.prNumber}](${data.prUrl})`
+        : `[Issue #${issueNumber}](${data.commentUrl})`;
+
       // Add confirmation message and a CI-status message updated in-place —
       // same live polling as the new-issue flow.
       const statusMsgId = `evolve-status-${issueNumber}`;
@@ -296,7 +303,7 @@ export default function ChatInterface() {
         ...prev,
         {
           role: "assistant",
-          content: `Got it! I've added your request as a [comment on Issue #${issueNumber}](${data.commentUrl}). Claude Code will pick it up and continue on the existing branch. Progress will appear below.`,
+          content: `Got it! I've added your request as a [comment](${data.commentUrl}) on ${targetLabel}. Claude Code will pick it up and continue on the existing branch. Progress will appear below.`,
         },
         {
           role: "assistant",

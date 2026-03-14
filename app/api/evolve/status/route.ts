@@ -114,7 +114,9 @@ export async function GET(request: Request) {
         title: matchingPr.title,
       };
 
-      // ── 3. Scan PR comments for a Vercel deploy preview URL ─────────────
+      // ── 3. Scan PR comments for Claude's comment and a Vercel preview URL ──
+      // When a follow-up @claude comment is posted on the PR (rather than the
+      // issue), Claude's progress comment will also appear on the PR.
 
       const prCommentsRes = await fetch(
         `https://api.github.com/repos/${repo}/issues/${matchingPr.number}/comments?per_page=30`,
@@ -123,6 +125,22 @@ export async function GET(request: Request) {
 
       if (prCommentsRes.ok) {
         const prComments = (await prCommentsRes.json()) as GitHubComment[];
+
+        // If Claude's comment wasn't found on the issue, check the PR.
+        if (!claudeComment) {
+          const claudeCommentRaw = prComments.find(
+            (c) =>
+              c.user.type === "Bot" ||
+              c.user.login.toLowerCase().includes("claude")
+          );
+          if (claudeCommentRaw) {
+            claudeComment = {
+              body: claudeCommentRaw.body,
+              htmlUrl: claudeCommentRaw.html_url,
+              updatedAt: claudeCommentRaw.updated_at,
+            };
+          }
+        }
 
         for (const comment of prComments) {
           const match = comment.body.match(/https:\/\/[\w-]+\.vercel\.app/);
