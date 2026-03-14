@@ -12,7 +12,6 @@
 // Required environment variables:
 //   GITHUB_TOKEN  — personal access token with repo + issues write access
 //   GITHUB_REPO   — "owner/repo" string, e.g. "alice/primordia"
-//   EVOLVE_LABEL  — label name to apply (default: "primordia-evolve")
 
 export async function POST(request: Request) {
   const body = (await request.json()) as { request?: string };
@@ -23,7 +22,6 @@ export async function POST(request: Request) {
 
   const token = process.env.GITHUB_TOKEN;
   const repo = process.env.GITHUB_REPO;
-  const label = process.env.EVOLVE_LABEL ?? "primordia-evolve";
 
   if (!token || !repo) {
     return Response.json(
@@ -44,7 +42,6 @@ export async function POST(request: Request) {
       repo,
       title: `[Primordia Evolve] ${body.request.slice(0, 80)}`,
       body: issueBody,
-      labels: [label],
     });
 
     return Response.json({
@@ -101,13 +98,11 @@ async function createGitHubIssue({
   repo,
   title,
   body,
-  labels,
 }: {
   token: string;
   repo: string;
   title: string;
   body: string;
-  labels: string[];
 }): Promise<GitHubIssue> {
   const url = `https://api.github.com/repos/${repo}/issues`;
 
@@ -119,7 +114,7 @@ async function createGitHubIssue({
       "Content-Type": "application/json",
       "X-GitHub-Api-Version": "2022-11-28",
     },
-    body: JSON.stringify({ title, body, labels }),
+    body: JSON.stringify({ title, body }),
   });
 
   if (!response.ok) {

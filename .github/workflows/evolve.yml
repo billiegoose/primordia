@@ -2,26 +2,21 @@
 #
 # The Primordia Evolve Pipeline
 # ──────────────────────────────────────────────────────────────────────────────
-# Triggered when:
-#   - A GitHub Issue is labeled "primordia-evolve" (the issue body always
-#     contains @claude, added by the app's /api/evolve route)
-#   - @claude is mentioned in an issue, issue comment, or PR review comment
+# Triggered when @claude is mentioned in an issue, issue comment, or PR review
+# comment. The app's /api/evolve route always prepends @claude to the issue
+# body it creates, so no special label or extra setup is required.
 #
 # Uses the official anthropics/claude-code-action to handle branching,
 # committing, PR creation, and issue commenting automatically.
 #
 # Required GitHub repository secrets:
 #   ANTHROPIC_API_KEY  — used by Claude Code Action
-#
-# Required repository setup:
-#   - A label named "primordia-evolve" must exist in the repo
-#   - Vercel must be connected to the repo for preview deployments
 
 name: Primordia Evolve Pipeline
 
 on:
   issues:
-    types: [labeled, opened, assigned]
+    types: [opened, assigned]
   issue_comment:
     types: [created]
   pull_request_review_comment:
@@ -32,7 +27,6 @@ on:
 jobs:
   evolve:
     if: |
-      (github.event_name == 'issues' && github.event.label.name == 'primordia-evolve') ||
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude'))) ||
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
