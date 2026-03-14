@@ -326,8 +326,11 @@ function MessageBubble({ message }: { message: Message }) {
 function SimpleMarkdown({ text }: { text: string }) {
   if (!text) return null;
 
-  // Split on links [text](url), bold **text**, and inline `code`
-  const parts = text.split(/(\[([^\]]+)\]\(([^)]+)\)|\*\*([^*]+)\*\*|`([^`]+)`)/g);
+  // Split on links [text](url), bold **text**, and inline `code`.
+  // Use non-capturing inner groups so split() only puts the full token in the
+  // array — not each inner capture group — which would otherwise cause bold
+  // text to be rendered twice (once as <strong>, once as a plain <span>).
+  const parts = text.split(/(\[(?:[^\]]+)\]\((?:[^)]+)\)|\*\*(?:[^*]+)\*\*|`(?:[^`]+)`)/g);
 
   const rendered: React.ReactNode[] = [];
   let i = 0;

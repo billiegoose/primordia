@@ -159,6 +159,14 @@ These were noted at project inception but are explicitly out of scope for the MV
 
 ## Changelog
 
+### 2026-03-14 — Fix bold text duplication in SimpleMarkdown
+
+**What changed**: Fixed a bug in `SimpleMarkdown` where bold text (`**text**`) was rendered twice — once as a `<strong>` element and once as a plain `<span>`.
+
+**Why**: `String.split()` with a regex that has capturing groups includes those captured sub-groups in the result array. The split regex had inner capturing groups (e.g., `([^*]+)` inside `\*\*([^*]+)\*\*`), so for each bold token the array contained both the full `**text**` match and the inner `text` capture. The fix converts all inner groups to non-capturing (`(?:...)`) so only the full token appears in the split result.
+
+---
+
 ### 2026-03-14 — Initial Scaffold
 
 **What changed**: Built the entire initial scaffold from scratch.
