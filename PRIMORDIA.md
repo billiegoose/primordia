@@ -161,6 +161,14 @@ These were noted at project inception but are explicitly out of scope for the MV
 
 ## Changelog
 
+### 2026-03-14 — Fix evolve workflow to auto-create PR instead of showing a Create PR link
+
+**What changed**: Added `id: claude` to the "Run Claude Code" step in `evolve.yml` and added a new "Create Pull Request" step after it. The new step runs only on `issues` events and only when the action produced a `branch_name` output. It calls `gh pr create` with a title derived from the issue title and a body that closes the originating issue.
+
+**Why**: `anthropics/claude-code-action@v1` in interactive mode (triggered by `@claude` in an issue) creates a branch, commits changes, and pushes — but then posts a "Create PR" link in the issue comment rather than opening the PR automatically. The action exposes a `branch_name` output that the new post-step uses to call `gh pr create` directly, completing the pipeline end-to-end without manual intervention.
+
+---
+
 ### 2026-03-14 — Add README.md
 
 **What changed**: Created `README.md` with a project overview, how-it-works explanation for both chat and evolve modes, tech stack table, step-by-step setup instructions, environment variable reference, and a link to `PRIMORDIA.md` for deeper architecture details.
