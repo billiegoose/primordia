@@ -113,7 +113,6 @@ jobs:
         run: |
           claude \
             --print \
-            --no-interactive \
             --allowedTools "Edit,Write,Read,Bash,Glob,Grep" \
             -p "$(cat /tmp/evolve_prompt.txt)"
 
