@@ -1,5 +1,5 @@
 // app/api/merge-pr/route.ts
-// Merges a PR via the GitHub API using a squash merge.
+// Merges a PR via the GitHub API using a regular merge commit.
 // Called when the user clicks "Accept Changes" in the merge card on a deploy preview.
 //
 // POST body: { prNumber: number }
@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
     {
       method: "PUT",
       headers,
-      body: JSON.stringify({ merge_method: "squash" }),
+      body: JSON.stringify({ merge_method: "merge" }),
     }
   );
 

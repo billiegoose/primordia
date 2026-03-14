@@ -161,6 +161,14 @@ These were noted at project inception but are explicitly out of scope for the MV
 
 ## Changelog
 
+### 2026-03-14 — Switch Accept Changes merge from squash to regular merge commit
+
+**What changed**: `app/api/merge-pr/route.ts`: changed `merge_method` from `"squash"` to `"merge"` in the GitHub API call.
+
+**Why**: User requested regular merge commits instead of squash merges to preserve individual commit history from the PR branch.
+
+---
+
 ### 2026-03-14 — Accept Changes card for deploy-preview merge
 
 **What changed**:
