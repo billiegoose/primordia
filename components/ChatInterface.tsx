@@ -13,6 +13,8 @@
 //   4. If no matches, a new issue is created automatically.
 //
 // The mode toggle is always visible so users can switch without losing their draft message.
+// After an evolve submit, the UI polls /api/evolve/status and updates Claude's
+// CI progress comment in-place as the bot continuously edits it on GitHub.
 
 import { useState, useRef, useEffect, FormEvent } from "react";
 import ModeToggle from "./ModeToggle";
@@ -24,6 +26,8 @@ type Mode = "chat" | "evolve";
 interface Message {
   role: "user" | "assistant" | "system";
   content: string;
+  // Optional stable ID used to find and update a message in-place.
+  id?: string;
 }
 
 interface RelatedIssue {
@@ -37,6 +41,12 @@ interface EvolveResult {
   issueNumber?: number;
   issueUrl?: string;
   commentUrl?: string;
+}
+
+interface EvolveStatus {
+  claudeComment?: { body: string; htmlUrl: string; updatedAt: string };
+  pr?: { number: number; htmlUrl: string; title: string };
+  deployPreviewUrl?: string;
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -59,6 +69,8 @@ export default function ChatInterface() {
   const [evolveLoadingMsg, setEvolveLoadingMsg] = useState<string>("Checking for related issues…");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Holds the active polling interval so we can cancel it on unmount or mode reset.
+  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Auto-scroll to the latest message
   useEffect(() => {
@@ -79,6 +91,15 @@ export default function ChatInterface() {
     setRelatedIssues(null);
     setPendingRequest(null);
   }, [mode]);
+
+  // Cancel any in-flight polling when the component unmounts
+  useEffect(() => {
+    return () => {
+      if (pollingIntervalRef.current !== null) {
+        clearInterval(pollingIntervalRef.current);
+      }
+    };
+  }, []);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -296,13 +317,24 @@ export default function ChatInterface() {
         issueNumber: data.issueNumber,
         issueUrl: data.issueUrl,
       });
+
+      // Add a confirmation message and a CI-status message that will be updated in-place.
+      const statusMsgId = `evolve-status-${data.issueNumber}`;
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: `Got it! I've opened [GitHub Issue #${data.issueNumber}](${data.issueUrl}) for your request. The CI pipeline will now generate a PR with the changes. You can follow along at the link above.`,
+          content: `Got it! I've opened [GitHub Issue #${data.issueNumber}](${data.issueUrl}) for your request. The CI pipeline is now running — progress will appear below.`,
+        },
+        {
+          role: "assistant",
+          id: statusMsgId,
+          content: "⏳ Waiting for CI to start…",
         },
       ]);
+
+      // Begin polling for CI progress
+      startEvolvePolling(data.issueNumber, statusMsgId);
     } catch (err) {
       const errorMsg =
         err instanceof Error ? err.message : "Something went wrong.";
@@ -314,6 +346,104 @@ export default function ChatInterface() {
         },
       ]);
     }
+  }
+
+  // Polls /api/evolve/status every 10 s.
+  // Updates the status message in-place each time Claude's comment changes.
+  // Appends separate one-time messages for PR creation and deploy preview.
+  function startEvolvePolling(issueNumber: number, statusMsgId: string) {
+    // Cancel any previous poll loop
+    if (pollingIntervalRef.current !== null) {
+      clearInterval(pollingIntervalRef.current);
+    }
+
+    // Mutable tracker captured by the interval closure — avoids stale state.
+    const tracker = {
+      lastCommentUpdatedAt: "",
+      prMessageAdded: false,
+      deployMessageAdded: false,
+      pollCount: 0,
+    };
+
+    const MAX_POLLS = 90; // ~15 minutes at 10 s intervals
+
+    pollingIntervalRef.current = setInterval(async () => {
+      tracker.pollCount++;
+
+      if (tracker.pollCount > MAX_POLLS) {
+        clearInterval(pollingIntervalRef.current!);
+        pollingIntervalRef.current = null;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === statusMsgId
+              ? {
+                  ...m,
+                  content:
+                    m.content +
+                    "\n\n⚠️ Stopped watching after 15 minutes. Check GitHub for the latest status.",
+                }
+              : m
+          )
+        );
+        return;
+      }
+
+      try {
+        const res = await fetch(
+          `/api/evolve/status?issueNumber=${issueNumber}`
+        );
+        if (!res.ok) return;
+
+        const status = (await res.json()) as EvolveStatus;
+
+        // ── Update Claude's comment in-place whenever it changes ──────────
+        if (
+          status.claudeComment &&
+          status.claudeComment.updatedAt !== tracker.lastCommentUpdatedAt
+        ) {
+          tracker.lastCommentUpdatedAt = status.claudeComment.updatedAt;
+          const { body, htmlUrl } = status.claudeComment;
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === statusMsgId
+                ? {
+                    ...m,
+                    content: `**CI Progress** ([view on GitHub](${htmlUrl})):\n\n${body}`,
+                  }
+                : m
+            )
+          );
+        }
+
+        // ── Append a PR message once ───────────────────────────────────────
+        if (status.pr && !tracker.prMessageAdded) {
+          tracker.prMessageAdded = true;
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content: `✅ PR created: [#${status.pr!.number} — ${status.pr!.title}](${status.pr!.htmlUrl})`,
+            },
+          ]);
+        }
+
+        // ── Append a deploy preview message once, then stop polling ───────
+        if (status.deployPreviewUrl && !tracker.deployMessageAdded) {
+          tracker.deployMessageAdded = true;
+          clearInterval(pollingIntervalRef.current!);
+          pollingIntervalRef.current = null;
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content: `🚀 Deploy preview ready: [${status.deployPreviewUrl}](${status.deployPreviewUrl})`,
+            },
+          ]);
+        }
+      } catch {
+        // Silently ignore transient network errors between polls
+      }
+    }, 10_000);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -331,8 +461,19 @@ export default function ChatInterface() {
       {/* Header */}
       <header className="flex items-center justify-between mb-6 flex-shrink-0">
         <div>
-          <h1 className="text-xl font-bold tracking-tight text-white">
+          <h1 className="text-xl font-bold tracking-tight text-white flex items-baseline gap-2">
             Primordia
+            {process.env.VERCEL_ENV === "preview" &&
+              process.env.VERCEL_GIT_PULL_REQUEST_ID && (
+                <a
+                  href={`https://github.com/${process.env.VERCEL_GIT_REPO_OWNER}/${process.env.VERCEL_GIT_REPO_SLUG}/pull/${process.env.VERCEL_GIT_PULL_REQUEST_ID}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm font-normal text-blue-400 hover:text-blue-300"
+                >
+                  #{process.env.VERCEL_GIT_PULL_REQUEST_ID}
+                </a>
+              )}
           </h1>
           <p className="text-xs text-gray-400 mt-0.5">
             A self-evolving application
@@ -353,7 +494,7 @@ export default function ChatInterface() {
       {/* Message list */}
       <div className="flex-1 overflow-y-auto space-y-4 pb-4">
         {messages.map((msg, i) => (
-          <MessageBubble key={i} message={msg} />
+          <MessageBubble key={msg.id ?? i} message={msg} />
         ))}
         {isLoading && mode === "evolve" && (
           <div className="text-sm text-gray-500 animate-pulse">
@@ -468,7 +609,7 @@ export default function ChatInterface() {
               >
                 #{evolveResult.issueNumber}
               </a>{" "}
-              opened — a PR will be generated shortly.
+            opened — watching for CI progress, PR, and deploy preview…
             </>
           )}
         </div>

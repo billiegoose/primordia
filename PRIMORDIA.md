@@ -170,6 +170,34 @@ These were noted at project inception but are explicitly out of scope for the MV
 
 ---
 
+### 2026-03-14 — Fix Vercel env var name for PR ID
+
+**What changed**: Renamed `VERCEL_GIT_PULL_REQUEST_NUMBER` → `VERCEL_GIT_PULL_REQUEST_ID` in `next.config.ts` and `ChatInterface.tsx`.
+
+**Why**: `VERCEL_GIT_PULL_REQUEST_NUMBER` is not a real Vercel system env var. The correct name is `VERCEL_GIT_PULL_REQUEST_ID`. Without this fix the PR badge in the header would never render on preview deployments.
+
+---
+
+### 2026-03-14 — Show PR link in header for deploy previews
+
+**What changed**: On Vercel preview deployments, the top header now displays a linked `#N` badge right after "Primordia", pointing to the GitHub PR for that preview. Production deployments are unaffected.
+
+**How**: `next.config.ts` now exposes four Vercel system env vars (`VERCEL_ENV`, `VERCEL_GIT_PULL_REQUEST_NUMBER`, `VERCEL_GIT_REPO_OWNER`, `VERCEL_GIT_REPO_SLUG`) via the `env` block, which Next.js inlines at build time so client components can read them. `ChatInterface.tsx` conditionally renders the link when `VERCEL_ENV === "preview"` and a PR number is present.
+
+**Why**: Makes it easy to identify which PR each preview tab corresponds to.
+
+---
+
+### 2026-03-14 — Live CI progress in Primordia chat
+
+**What changed**:
+- New `app/api/evolve/status/route.ts` endpoint: given an issue number, fetches (a) the latest Claude bot comment body + `updated_at`, (b) any open PR whose branch matches `claude/issue-{N}-*`, and (c) a Vercel deploy preview URL from PR comments.
+- `components/ChatInterface.tsx` now starts polling that endpoint every 10 s after a successful evolve submit. A dedicated "CI Progress" message is added to the chat and **updated in-place** every time Claude's comment changes on GitHub, so users see the bot's live task-list as it ticks off items. Separate one-time messages are appended when the PR is created and when the deploy preview URL becomes available. Polling stops automatically on deploy preview or after 15 minutes.
+
+**Why**: Claude's github comment is continuously edited as CI progresses; showing only a one-time 400-char snapshot missed all the live updates. The new approach mirrors the comment in real time directly in the Primordia chat.
+
+---
+
 ### 2026-03-14 — Fix WCAG 2 AA color contrast issues
 
 **What changed**: Improved color contrast for two elements that failed the WCAG 2 AA 4.5:1 minimum ratio for normal text:
