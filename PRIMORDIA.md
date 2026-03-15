@@ -29,6 +29,7 @@ The core idea: **the app becomes whatever its users need it to be**, with no cod
 | Hosting | Vercel | Zero-config deploys; automatic preview URLs per PR |
 | Version control | GitHub | Issues → Actions → PRs pipeline |
 | CI/AI code gen | GitHub Actions + Claude Code CLI | Runs `claude --print --no-interactive` against issues |
+| Local AI code gen | `@anthropic-ai/claude-agent-sdk` | `query()` replaces spawning `claude` CLI in local dev flow |
 
 ### File Map
 
@@ -43,6 +44,9 @@ primordia/
 ├── tsconfig.json
 ├── package.json
 │
+├── lib/
+│   └── local-evolve-sessions.ts  ← Shared session state + business logic for local evolve
+│
 ├── app/                           ← Next.js App Router
 │   ├── layout.tsx                 ← Root layout (font, metadata, body styling)
 │   ├── page.tsx                   ← Entry point — renders <ChatInterface>
@@ -52,8 +56,16 @@ primordia/
 │       │   └── route.ts           ← Streams Claude responses via SSE
 │       ├── deploy-context/
 │       │   └── route.ts           ← Returns PR + linked-issue info for preview deploys
+│       ├── merge-pr/
+│       │   └── route.ts           ← Merges a PR via GitHub API (deploy preview only)
 │       └── evolve/
-│           └── route.ts           ← Creates a labeled GitHub Issue
+│           ├── route.ts           ← Creates/searches/comments GitHub Issues (production)
+│           ├── status/
+│           │   └── route.ts       ← Polls CI progress for a GitHub issue
+│           └── local/
+│               ├── route.ts       ← POST start session, GET status (development)
+│               └── manage/
+│                   └── route.ts   ← POST accept/reject a local session (development)
 │
 ├── components/
 │   ├── ChatInterface.tsx          ← Main chat UI; handles chat + evolve modes
@@ -75,7 +87,7 @@ User types message
   → Message appended to chat
 ```
 
-#### Evolve Request
+#### Evolve Request (production — NODE_ENV=production)
 ```
 User types change request in evolve mode
   → POST /api/evolve
@@ -89,6 +101,27 @@ User types change request in evolve mode
   → Vercel: preview deployment auto-created for the PR
   → Repo owner reviews + merges PR
   → Vercel: production deployment triggered
+```
+
+#### Evolve Request (local dev — NODE_ENV=development)
+```
+User types change request in evolve mode
+  → POST /api/evolve/local
+  → git worktree add ../primordia-preview-{ts} -b preview-{ts}
+  → symlink node_modules + .env.local into worktree
+  → @anthropic-ai/claude-agent-sdk query() in worktree
+      → streams SDKMessage events → formatted progressText
+      → text blocks + tool_use blocks appended as markdown
+  → spawn: npm run dev (PORT=next available ≥ 3001) in worktree
+  → UI polls /api/evolve/local?sessionId=... for status + progressText
+      → rendered as "**Local Evolve Progress**:\n\n{progressText}"
+         (same format as the GitHub CI comment display)
+  → Preview link shown in chat when Next.js prints "Ready"
+  → User clicks Accept → POST /api/evolve/local/manage { action: "accept" }
+      → git merge preview-{ts} --no-ff
+      → kill dev server, git worktree remove, git branch -d
+  → User clicks Reject → POST /api/evolve/local/manage { action: "reject" }
+      → kill dev server, git worktree remove, git branch -D
 ```
 
 ---
@@ -161,6 +194,28 @@ These were noted at project inception but are explicitly out of scope for the MV
 
 ## Changelog
 
+### 2026-03-15 — Local evolve flow now uses `@anthropic-ai/claude-agent-sdk`
+
+**What changed**:
+- `lib/local-evolve-sessions.ts`: replaced `spawn('claude', ...)` with `query()` from `@anthropic-ai/claude-agent-sdk`. The session now stores a `progressText` field (formatted markdown) instead of raw `logs`. As the SDK emits `assistant` messages, text blocks are appended verbatim and `tool_use` blocks are summarised as `- 🔧 Read \`path\`` style lines. A `summarizeToolUse()` helper handles the common Claude Code tools (Read, Write, Edit, Glob, Grep, Bash, TodoWrite).
+- `app/api/evolve/local/route.ts`: GET endpoint now returns `progressText` instead of `logs`. Error handler updated to use `appendProgress`.
+- `components/ChatInterface.tsx`: `LocalEvolveSession` interface renamed `logs` → `progressText`. The polling handler now renders `**Local Evolve Progress**:\n\n{progressText}` — the same pattern as `**CI Progress** ...\n\n{body}` used by the GitHub/CI flow, so both paths have a consistent progress display style.
+- `package.json`: added `@anthropic-ai/claude-agent-sdk` dependency.
+
+**Why**: Spawning the `claude` CLI produced unstructured stdout that was truncated to 20 lines. Using the SDK gives structured message events (text blocks, tool-use blocks, result), enabling a formatted progress display that mirrors what the GitHub CI comment shows — checklist setup steps, then Claude's live commentary and tool calls, then a ✅ finish line.
+
+---
+
+### 2026-03-14 — Local development evolve flow (bypass GitHub entirely)
+
+**What changed**:
+- `lib/local-evolve-sessions.ts` (new): module-level singleton that holds all active local evolve sessions in a `Map`. Contains the full business logic: creates a git worktree at `../primordia-preview-{timestamp}`, symlinks `node_modules` and `.env.local`, spawns `claude --dangerouslySkipPermissions -p "..."` as a child process, then starts `npm run dev` on the next available port ≥ 3001. Also exposes `acceptSession` (merge + cleanup) and `rejectSession` (cleanup only).
+- `app/api/evolve/local/route.ts` (new): `POST` starts a session and returns a `sessionId` immediately (fire-and-forget); `GET ?sessionId=...` returns `{ status, logs, port, previewUrl }` for client polling.
+- `app/api/evolve/local/manage/route.ts` (new): `POST { action: "accept"|"reject", sessionId }` — accept merges the preview branch into main and kills the dev server; reject just cleans up.
+- `components/ChatInterface.tsx`: in evolve mode, branches on `process.env.NODE_ENV === "development"` to call the new local flow instead of the GitHub Issues flow. Adds `localEvolveSession` state, a `localPollingRef` interval (5 s), `handleLocalEvolveSubmit`, `handleLocalAccept`, `handleLocalReject`, an updated evolve-mode banner, and an accept/reject card that appears when the preview server is ready. The existing GitHub flow is unchanged.
+- `PRIMORDIA.md`: updated File Map and Data Flow sections.
+
+**Why**: When iterating locally, creating a GitHub Issue → waiting for CI → waiting for a Vercel deploy is slow. The new flow lets a developer see changes in a local preview server within minutes and accept/reject without touching GitHub.
 ### 2026-03-14 — Make "Primordia" header text a link to the production app
 
 **What changed**: `next.config.ts` now exposes `VERCEL_PROJECT_PRODUCTION_URL` to client components. `components/ChatInterface.tsx`: the "Primordia" h1 text is now wrapped in an `<a>` tag (when the production URL is available) pointing to `https://${VERCEL_PROJECT_PRODUCTION_URL}` with `target="_blank"`. Styled with `text-white no-underline hover:text-gray-300` to preserve the same appearance as the plain text.
