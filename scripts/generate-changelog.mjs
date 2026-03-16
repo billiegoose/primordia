@@ -1,101 +1,60 @@
 #!/usr/bin/env node
 // scripts/generate-changelog.mjs
 //
-// Generates public/changelog.json from git history.
-// Run automatically as a prebuild/predev step (see package.json).
+// Generates public/changelog.json from changelog/*.md files.
 //
-// Handles shallow clones:
-// - Vercel: does a shallow clone with no remote configured, so
-//   `git fetch --deepen` fails.  Instead we use `git pull --unshallow`
-//   with the public HTTPS URL constructed from Vercel system env vars.
-//   See: https://github.com/vercel/vercel/discussions/5737#discussioncomment-7984929
-// - GitHub Actions / local: deepen with --filter=tree:0 (commits only,
-//   no blobs or trees).
+// Filename convention: YYYY-MM-DD-HH-MM-SS Description of change.md
+//   - The date+time portion is used for sorting (newest first).
+//   - Everything after the first space is the human-readable title.
+//   - The file body contains the full description (markdown).
+//
+// Run automatically as a prebuild/predev step (see package.json).
 
-import { execSync } from "child_process";
-import { writeFileSync, mkdirSync } from "fs";
+import { readFileSync, readdirSync, writeFileSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "..");
-const COMMIT_LIMIT = 300;
+const changelogDir = join(repoRoot, "changelog");
 
-const isVercel = !!process.env.VERCEL;
+// Matches: YYYY-MM-DD-HH-MM-SS Description of change.md
+const FILENAME_RE = /^(\d{4}-\d{2}-\d{2})-(\d{2}-\d{2}-\d{2}) (.+)\.md$/;
 
-if (isVercel) {
-  // Vercel shallow clones have no remote configured, so `git fetch --deepen`
-  // fails with "no remote".  Pull directly from the public HTTPS URL instead.
-  const owner = process.env.VERCEL_GIT_REPO_OWNER;
-  const slug = process.env.VERCEL_GIT_REPO_SLUG;
-  const ref = process.env.VERCEL_GIT_COMMIT_REF || "main";
+let entries = [];
 
-  if (owner && slug) {
-    const repoUrl = `https://github.com/${owner}/${slug}.git`;
-    try {
-      execSync(`git pull --unshallow "${repoUrl}" "main:${ref}"`, {
-        cwd: repoRoot,
-        stdio: "pipe",
-      });
-      console.log("changelog: git pull --unshallow succeeded (Vercel)");
-    } catch (e) {
-      // Not fatal — e.g. already unshallow, or private repo without token.
-      console.warn("changelog: git pull --unshallow skipped (not fatal):", e.message);
-    }
-  } else {
-    console.warn(
-      "changelog: VERCEL_GIT_REPO_OWNER/SLUG not set; skipping unshallow"
-    );
-  }
-} else {
-  // Non-Vercel (GitHub Actions, local dev): deepen the shallow clone so we
-  // get enough history.
-  // --filter=tree:0  → fetch only commit objects (no trees, no blobs).
-  // Safe to skip if the repo already has full history.
-  try {
-    execSync(`git fetch --deepen=${COMMIT_LIMIT} --filter=tree:0`, {
-      cwd: repoRoot,
-      stdio: "pipe",
-    });
-    console.log("changelog: git fetch (deepen) succeeded");
-  } catch {
-    // Not fatal — the remote may be unavailable or the clone already has
-    // enough depth.  We'll work with whatever commits are locally available.
-    console.warn("changelog: git fetch --deepen skipped (not fatal)");
-  }
-}
-
-// Read git log.  Use ASCII unit-separator (0x1f) as the field delimiter so
-// commit subjects that contain spaces/punctuation don't break parsing.
-let logOutput = "";
 try {
-  logOutput = execSync(
-    `git log --format="%H%x1f%an%x1f%aI%x1f%s" --max-count=${COMMIT_LIMIT}`,
-    { cwd: repoRoot }
-  ).toString();
+  const files = readdirSync(changelogDir)
+    .filter((f) => FILENAME_RE.test(f))
+    .sort()    // lexicographic sort = chronological order
+    .reverse(); // newest first
+
+  for (const file of files) {
+    const m = file.match(FILENAME_RE);
+    if (!m) continue;
+
+    const [, datePart, timePart, title] = m;
+    // Convert YYYY-MM-DD + HH-MM-SS → ISO 8601 datetime string
+    const isoDate = `${datePart}T${timePart.replace(/-/g, ":")}`;
+
+    let content = "";
+    try {
+      content = readFileSync(join(changelogDir, file), "utf-8").trim();
+    } catch {
+      console.warn(`changelog: could not read ${file}, skipping`);
+    }
+
+    entries.push({ filename: file, date: isoDate, title, content });
+  }
 } catch (e) {
-  console.warn("changelog: git log failed:", e.message);
+  console.warn("changelog: could not read changelog/ directory:", e.message);
 }
 
-const commits = logOutput
-  .split("\n")
-  .filter(Boolean)
-  .map((line) => {
-    const [hash, author, date, ...subjectParts] = line.split("\x1f");
-    return {
-      hash: hash.trim(),
-      shortHash: hash.trim().slice(0, 7),
-      author: author.trim(),
-      date: date.trim(),
-      // Subject may itself contain the delimiter on pathological inputs; join it back.
-      message: subjectParts.join("\x1f").trim(),
-    };
-  })
-  .filter((c) => c.hash && c.message);
-
-// Write to public/ so Next.js can serve it statically and server components
-// can read it from the filesystem at build/render time.
+// Write to public/ so Next.js server components can read it at build/render time.
 const publicDir = join(repoRoot, "public");
 mkdirSync(publicDir, { recursive: true });
-writeFileSync(join(publicDir, "changelog.json"), JSON.stringify(commits, null, 2));
-console.log(`changelog: wrote ${commits.length} commits → public/changelog.json`);
+writeFileSync(
+  join(publicDir, "changelog.json"),
+  JSON.stringify(entries, null, 2)
+);
+console.log(`changelog: wrote ${entries.length} entries → public/changelog.json`);
