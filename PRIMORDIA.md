@@ -207,4 +207,4 @@ These were noted at project inception but are explicitly out of scope for the MV
 
 ## Changelog
 
-> Detailed changelog entries live in `changelog/`. Each file is named `YYYY-MM-DD-HH-MM-SS Description.md`; the filename is the short description and the body has the full what+why detail. The auto-generated `/changelog` page is built from these files at build time.
+> Detailed changelog entries live in `changelog/`. Each file is named `YYYY-MM-DD-HH-MM-SS Description.md`; the filename is the short description and the body has the full what+why detail. The auto-generated `/changelog` page is built from these files at build time. Having each entry as a separate timestamped file prevents merge conflicts.
