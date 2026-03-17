@@ -180,7 +180,7 @@ When implementing changes, follow these principles:
 5. **TypeScript everywhere.** Explicit types make the codebase more navigable for AI models.
 6. **Tailwind for styling.** Do not add CSS files or CSS-in-JS libraries.
 7. **App Router conventions.** Follow Next.js App Router patterns: `page.tsx`, `layout.tsx`, `route.ts`.
-8. **Add a changelog file last.** After every set of changes, create a new file in `changelog/` named `YYYY-MM-DD-HH-MM-SS Description of change.md` (UTC time, e.g. `2026-03-16-21-00-00 Fix login bug.md`). The filename is the short description; the file body is the full "what changed + why" detail in markdown.
+8. **Add exactly one changelog file per pull request.** After every set of changes, create a single new file in `changelog/` named `YYYY-MM-DD-HH-MM-SS Description of change.md` (UTC time, e.g. `2026-03-16-21-00-00 Fix login bug.md`). The filename is the short description; the file body is the full "what changed + why" detail in markdown. One PR = one changelog entry, even if the PR went through multiple iterations.
 
 ---
 
@@ -209,5 +209,6 @@ These were noted at project inception but are explicitly out of scope for the MV
 
 > **Changelog entries are stored exclusively in `changelog/`** — never in this file.
 > Each file is named `YYYY-MM-DD-HH-MM-SS Description.md`; the filename is the short description and the body has the full what+why detail.
+> **One PR = one changelog entry.** Do not create multiple changelog files for a single pull request — consolidate all changes into one entry.
 > The auto-generated `/changelog` page and `lib/generated/system-prompt.ts` are both built from these files at build time via `scripts/generate-changelog.mjs`. Having each entry as a separate timestamped file prevents merge conflicts.
 > Do **not** add changelog bullets here. The prebuild step reads `changelog.json` and bakes the last 30 filenames into the static chat system prompt automatically.
