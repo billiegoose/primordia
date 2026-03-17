@@ -27,6 +27,7 @@
 
 import { useState, useRef, useEffect, FormEvent } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import ModeToggle from "./ModeToggle";
 import { SimpleMarkdown } from "./SimpleMarkdown";
 
@@ -96,6 +97,13 @@ export default function ChatInterface() {
   const [evolveLoadingMsg, setEvolveLoadingMsg] = useState<string>("Checking for related issues…");
   // Local evolve session state (development only)
   const [localEvolveSession, setLocalEvolveSession] = useState<LocalEvolveSession | null>(null);
+  // When this app IS the preview instance, these params are set in the URL.
+  // The parent dev server appends ?sessionId=...&parentOrigin=... to the preview link.
+  const searchParams = useSearchParams();
+  const previewSessionId = searchParams.get("sessionId");
+  const previewParentOrigin = searchParams.get("parentOrigin");
+  const isPreviewInstance = !!(previewSessionId && previewParentOrigin);
+  const [previewActionState, setPreviewActionState] = useState<"idle" | "loading" | "accepted" | "rejected">("idle");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Holds the active polling interval so we can cancel it on unmount or mode reset.
@@ -403,11 +411,19 @@ export default function ChatInterface() {
           localPollingRef.current = null;
 
           if (data.status === "ready" && data.previewUrl) {
+            // Append sessionId + parentOrigin so the preview instance can show
+            // its own Accept/Reject bar and call back to this parent server.
+            const parentOrigin = window.location.origin;
+            const previewUrlWithParams =
+              `${data.previewUrl}?sessionId=${sessionId}` +
+              `&parentOrigin=${encodeURIComponent(parentOrigin)}`;
             setMessages((prev) => [
               ...prev,
               {
                 role: "assistant",
-                content: `🚀 Preview ready: [${data.previewUrl}](${data.previewUrl})\n\nReview the changes, then use the **Accept** or **Reject** buttons below.`,
+                content:
+                  `🚀 Preview ready: [${data.previewUrl}](${previewUrlWithParams})\n\n` +
+                  `Open the preview link and use the **Accept** or **Reject** bar there to apply or discard the changes.`,
               },
             ]);
           }
@@ -484,6 +500,44 @@ export default function ChatInterface() {
     }
 
     setIsLoading(false);
+  }
+
+  // ── Preview-instance accept/reject (development only) ─────────────────────
+  // These run inside the *child* preview server. They POST to the parent server
+  // (identified by previewParentOrigin) which holds the session state.
+
+  async function handlePreviewAccept() {
+    if (!previewSessionId || !previewParentOrigin || previewActionState !== "idle") return;
+    setPreviewActionState("loading");
+    try {
+      const res = await fetch(`${previewParentOrigin}/api/evolve/local/manage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "accept", sessionId: previewSessionId }),
+      });
+      const data = (await res.json()) as { outcome?: string; error?: string };
+      if (!res.ok) throw new Error(data.error ?? `API error: ${res.statusText}`);
+      setPreviewActionState("accepted");
+    } catch {
+      setPreviewActionState("idle");
+    }
+  }
+
+  async function handlePreviewReject() {
+    if (!previewSessionId || !previewParentOrigin || previewActionState !== "idle") return;
+    setPreviewActionState("loading");
+    try {
+      const res = await fetch(`${previewParentOrigin}/api/evolve/local/manage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reject", sessionId: previewSessionId }),
+      });
+      const data = (await res.json()) as { outcome?: string; error?: string };
+      if (!res.ok) throw new Error(data.error ?? `API error: ${res.statusText}`);
+      setPreviewActionState("rejected");
+    } catch {
+      setPreviewActionState("idle");
+    }
   }
 
   // ── GitHub evolve helpers (production) ────────────────────────────────────
@@ -884,41 +938,43 @@ export default function ChatInterface() {
           </div>
         )}
 
-      {/* Local evolve accept/reject card — development only, shown when preview is ready */}
-      {localEvolveSession?.status === "ready" && localEvolveSession.previewUrl && (
+      {/* Preview-instance accept/reject bar — shown only inside the child preview server */}
+      {isPreviewInstance && previewActionState !== "accepted" && previewActionState !== "rejected" && (
         <div className="mb-3 px-4 py-3 rounded-lg bg-green-900/30 border border-green-700/40 text-sm flex-shrink-0 space-y-3">
           <p className="text-green-200 font-semibold">
-            Preview ready:{" "}
-            <a
-              href={localEvolveSession.previewUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline hover:text-green-100"
-            >
-              {localEvolveSession.previewUrl}
-            </a>
+            🔍 This is a local preview — review the changes, then accept or reject.
           </p>
           <p className="text-green-300 text-xs">
-            Review the changes in the preview, then accept to merge into{" "}
-            <code className="bg-green-900/50 px-1 rounded">main</code> or
-            reject to discard.
+            Accepting will merge the preview branch into{" "}
+            <code className="bg-green-900/50 px-1 rounded">main</code>.
+            Rejecting will discard the worktree and branch.
           </p>
           <div className="flex items-center gap-2">
             <button
-              onClick={handleLocalAccept}
-              disabled={isLoading}
+              onClick={handlePreviewAccept}
+              disabled={previewActionState === "loading"}
               className="px-3 py-1.5 text-xs bg-green-700 hover:bg-green-600 rounded text-white disabled:opacity-50"
             >
-              Accept Changes
+              {previewActionState === "loading" ? "…" : "Accept Changes"}
             </button>
             <button
-              onClick={handleLocalReject}
-              disabled={isLoading}
+              onClick={handlePreviewReject}
+              disabled={previewActionState === "loading"}
               className="px-3 py-1.5 text-xs bg-red-800 hover:bg-red-700 rounded text-white disabled:opacity-50"
             >
-              Reject
+              {previewActionState === "loading" ? "…" : "Reject"}
             </button>
           </div>
+        </div>
+      )}
+      {isPreviewInstance && previewActionState === "accepted" && (
+        <div className="mb-3 px-4 py-3 rounded-lg bg-green-900/30 border border-green-700/40 text-sm flex-shrink-0">
+          <p className="text-green-200">✅ Changes accepted and merged into main. You can close this preview.</p>
+        </div>
+      )}
+      {isPreviewInstance && previewActionState === "rejected" && (
+        <div className="mb-3 px-4 py-3 rounded-lg bg-red-900/30 border border-red-700/40 text-sm flex-shrink-0">
+          <p className="text-red-200">🗑️ Preview rejected. You can close this preview.</p>
         </div>
       )}
 
