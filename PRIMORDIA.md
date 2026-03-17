@@ -207,6 +207,7 @@ These were noted at project inception but are explicitly out of scope for the MV
 
 ## Changelog
 
-> Detailed changelog entries live in `changelog/`. Each file is named `YYYY-MM-DD-HH-MM-SS Description.md`; the filename is the short description and the body has the full what+why detail. The auto-generated `/changelog` page is built from these files at build time. Having each entry as a separate timestamped file prevents merge conflicts.
-
-- **2026-03-17** — Chat system prompt now reads `PRIMORDIA.md` and changelog entry names from disk at startup so the assistant has accurate self-knowledge and doesn't hallucinate about the app's architecture.
+> **Changelog entries are stored exclusively in `changelog/`** — never in this file.
+> Each file is named `YYYY-MM-DD-HH-MM-SS Description.md`; the filename is the short description and the body has the full what+why detail.
+> The auto-generated `/changelog` page is built from these files at build time. Having each entry as a separate timestamped file prevents merge conflicts.
+> Do **not** add changelog bullets here. Claude Code reads the filenames from disk and injects them into the chat system prompt automatically.
