@@ -3,7 +3,7 @@
 > **This file is the living brain of Primordia.**
 > Every time Claude Code runs — whether triggered by the evolve pipeline or manually — it should:
 > 1. **Read this file first** to understand the current state of the app.
-> 2. **Update this file last** — add a Changelog entry describing what changed and why.
+> 2. **Update this file last** — keep it up to date and accurate.
 >
 > This file is the source of truth for architecture, features, and history.
 
@@ -178,7 +178,7 @@ When implementing changes, follow these principles:
 5. **TypeScript everywhere.** Explicit types make the codebase more navigable for AI models.
 6. **Tailwind for styling.** Do not add CSS files or CSS-in-JS libraries.
 7. **App Router conventions.** Follow Next.js App Router patterns: `page.tsx`, `layout.tsx`, `route.ts`.
-8. **Add a changelog file last.** After every set of changes, create a new file in `changelog/` named `YYYY-MM-DD-HH-MM-SS Description of change.md` (UTC time, e.g. `2026-03-16-21-00-00 Fix login bug.md`). The filename is the short description; the file body is the full "what changed + why" detail in markdown. This replaces prepending to PRIMORDIA.md's Changelog section. Also update the PRIMORDIA.md Changelog section with a one-line summary pointing to the file.
+8. **Add a changelog file last.** After every set of changes, create a new file in `changelog/` named `YYYY-MM-DD-HH-MM-SS Description of change.md` (UTC time, e.g. `2026-03-16-21-00-00 Fix login bug.md`). The filename is the short description; the file body is the full "what changed + why" detail in markdown.
 
 ---
 
