@@ -208,3 +208,5 @@ These were noted at project inception but are explicitly out of scope for the MV
 ## Changelog
 
 > Detailed changelog entries live in `changelog/`. Each file is named `YYYY-MM-DD-HH-MM-SS Description.md`; the filename is the short description and the body has the full what+why detail. The auto-generated `/changelog` page is built from these files at build time. Having each entry as a separate timestamped file prevents merge conflicts.
+
+- **2026-03-17** Strip thinking spinner img from CI chat messages — `app/api/evolve/status/route.ts` now calls `stripThinkingSpinner()` on each Claude comment body before returning it to the UI, removing the 14×14 px `<img>` spinner that Claude Code appends while working (which renders as a broken/noisy element in the chat).
