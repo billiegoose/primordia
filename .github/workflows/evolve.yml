@@ -86,3 +86,6 @@ jobs:
             --base main \
             --title "$PR_TITLE" \
             --body "$PR_BODY"
+
+          # Trigger Vercel to rebuild with full PR context
+          git commit --allow-empty -m "Trigger Vercel rebuild" && git push origin "$BRANCH"
