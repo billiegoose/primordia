@@ -62,7 +62,7 @@ function summarizeToolUse(name: string, input: Record<string, unknown>): string 
 
 // ─── Git ──────────────────────────────────────────────────────────────────────
 
-function runGit(
+export function runGit(
   args: string[],
   cwd: string,
 ): Promise<{ stdout: string; stderr: string; code: number }> {
@@ -86,6 +86,11 @@ export async function startLocalEvolve(
 ): Promise<void> {
   // Step 1 — Create a new git worktree on a fresh branch
   appendProgress(session, `- [ ] Creating worktree \`${session.branch}\`…\n`);
+
+  // Record the current branch so the preview instance can merge back into it.
+  const parentBranchResult = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], repoRoot);
+  const parentBranch = parentBranchResult.stdout.trim() || 'main';
+
   const wtResult = await runGit(
     ['worktree', 'add', session.worktreePath, '-b', session.branch],
     repoRoot,
@@ -93,6 +98,10 @@ export async function startLocalEvolve(
   if (wtResult.code !== 0) {
     throw new Error(`git worktree add failed:\n${wtResult.stderr}`);
   }
+
+  // Store parent branch in git config so the preview's manage endpoint can find it.
+  await runGit(['config', `branch.${session.branch}.parent`, parentBranch], repoRoot);
+
   // Mark done by replacing the pending item
   session.progressText = session.progressText.replace(
     `- [ ] Creating worktree \`${session.branch}\`…`,
@@ -222,7 +231,7 @@ export async function startLocalEvolve(
 
 // ─── Kill dev server ──────────────────────────────────────────────────────────
 
-function killDevServer(session: LocalSession): void {
+export function killDevServer(session: LocalSession): void {
   const proc = session.devServerProcess;
   if (!proc || proc.killed) return;
   try {
@@ -235,37 +244,4 @@ function killDevServer(session: LocalSession): void {
     proc.kill('SIGTERM');
   }
   session.devServerProcess = null;
-}
-
-// ─── Accept ───────────────────────────────────────────────────────────────────
-
-export async function acceptSession(session: LocalSession, repoRoot: string): Promise<void> {
-  killDevServer(session);
-
-  // Remove the worktree directory (--force handles any leftover uncommitted state)
-  await runGit(['worktree', 'remove', '--force', session.worktreePath], repoRoot);
-
-  // Merge the preview branch into the current branch (expected to be main)
-  const mergeResult = await runGit(
-    ['merge', session.branch, '--no-ff', '-m', `chore: merge local preview ${session.branch}`],
-    repoRoot,
-  );
-  if (mergeResult.code !== 0) {
-    throw new Error(`git merge failed:\n${mergeResult.stderr}`);
-  }
-
-  // Clean up the preview branch
-  await runGit(['branch', '-d', session.branch], repoRoot);
-
-  sessions.delete(session.id);
-}
-
-// ─── Reject ───────────────────────────────────────────────────────────────────
-
-export async function rejectSession(session: LocalSession, repoRoot: string): Promise<void> {
-  killDevServer(session);
-  await runGit(['worktree', 'remove', '--force', session.worktreePath], repoRoot);
-  // Force-delete since the branch was never merged
-  await runGit(['branch', '-D', session.branch], repoRoot);
-  sessions.delete(session.id);
 }

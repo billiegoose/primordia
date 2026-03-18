@@ -14,13 +14,19 @@
 //
 // Evolve flow (development / NODE_ENV=development):
 //   1. User submits a request.
-//   2. POST /api/evolve/local — creates a git worktree, runs Claude Code via the
-//      @anthropic-ai/claude-agent-sdk, then starts a Next.js dev server.
+//   2. POST /api/evolve/local — creates a git worktree on a fresh branch, stores
+//      the parent branch in git config (branch.<name>.parent), runs Claude Code
+//      via @anthropic-ai/claude-agent-sdk, then starts a Next.js dev server with
+//      PREVIEW_BRANCH set in the environment.
 //   3. UI polls /api/evolve/local?sessionId=... for status updates.
 //      Progress is rendered as "**Local Evolve Progress**:\n\n{progressText}" —
 //      the same format used by the GitHub CI flow for its comment body.
-//   4. When ready, shows a preview link + accept/reject buttons.
-//   5. Accept merges the branch into main; reject cleans up.
+//   4. When ready, shows a plain preview link (no URL params needed).
+//   5. The preview instance detects itself via GET /api/evolve/local/manage
+//      (returns { isPreview: true } when PREVIEW_BRANCH is set).
+//   6. Accept/Reject bar in the preview calls its own manage POST endpoint.
+//      The manage route reads the parent branch from git config, merges/cleans up,
+//      then exits the preview process — no cross-origin requests required.
 //
 // The mode toggle is always visible so users can switch without losing their draft message.
 // After an evolve submit, the UI polls for progress and updates the status message in-place.
@@ -96,6 +102,9 @@ export default function ChatInterface() {
   const [evolveLoadingMsg, setEvolveLoadingMsg] = useState<string>("Checking for related issues…");
   // Local evolve session state (development only)
   const [localEvolveSession, setLocalEvolveSession] = useState<LocalEvolveSession | null>(null);
+  // Whether this app is running as a preview instance (detected via API on mount).
+  const [isPreviewInstance, setIsPreviewInstance] = useState(false);
+  const [previewActionState, setPreviewActionState] = useState<"idle" | "loading" | "accepted" | "rejected">("idle");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Holds the active polling interval so we can cancel it on unmount or mode reset.
@@ -134,6 +143,20 @@ export default function ChatInterface() {
         clearInterval(localPollingRef.current);
       }
     };
+  }, []);
+
+  // On mount, ask the server whether this is a local preview instance.
+  // The manage GET endpoint returns { isPreview: true } when the PREVIEW_BRANCH
+  // env var is set (injected by the parent server when spawning the preview process).
+  useEffect(() => {
+    fetch("/api/evolve/local/manage")
+      .then((res) => res.json())
+      .then((data: { isPreview: boolean }) => {
+        if (data.isPreview) setIsPreviewInstance(true);
+      })
+      .catch(() => {
+        // Non-critical — silently ignore
+      });
   }, []);
 
   // On mount, check for missing API keys and warn the user if any are absent.
@@ -407,7 +430,9 @@ export default function ChatInterface() {
               ...prev,
               {
                 role: "assistant",
-                content: `🚀 Preview ready: [${data.previewUrl}](${data.previewUrl})\n\nReview the changes, then use the **Accept** or **Reject** buttons below.`,
+                content:
+                  `🚀 Preview ready: [${data.previewUrl}](${data.previewUrl})\n\n` +
+                  `Open the preview link and use the **Accept** or **Reject** bar there to apply or discard the changes.`,
               },
             ]);
           }
@@ -418,72 +443,43 @@ export default function ChatInterface() {
     }, 5_000);
   }
 
-  async function handleLocalAccept() {
-    if (!localEvolveSession || isLoading) return;
-    setIsLoading(true);
+  // ── Preview-instance accept/reject (development only) ─────────────────────
+  // These run inside the preview server. They POST to this server's own manage
+  // endpoint — no cross-origin needed. The manage route reads PREVIEW_BRANCH
+  // and the parent branch from git config to handle everything.
 
+  async function handlePreviewAccept() {
+    if (!isPreviewInstance || previewActionState !== "idle") return;
+    setPreviewActionState("loading");
     try {
       const res = await fetch("/api/evolve/local/manage", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "accept", sessionId: localEvolveSession.id }),
+        body: JSON.stringify({ action: "accept" }),
       });
-
-      const data = (await res.json()) as { outcome?: string; branch?: string; error?: string };
-
+      const data = (await res.json()) as { outcome?: string; error?: string };
       if (!res.ok) throw new Error(data.error ?? `API error: ${res.statusText}`);
-
-      setLocalEvolveSession(null);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: `✅ Changes accepted and merged into main! The preview server has been shut down.`,
-        },
-      ]);
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Something went wrong.";
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: `Failed to accept changes: ${errorMsg}` },
-      ]);
+      setPreviewActionState("accepted");
+    } catch {
+      setPreviewActionState("idle");
     }
-
-    setIsLoading(false);
   }
 
-  async function handleLocalReject() {
-    if (!localEvolveSession || isLoading) return;
-    setIsLoading(true);
-
+  async function handlePreviewReject() {
+    if (!isPreviewInstance || previewActionState !== "idle") return;
+    setPreviewActionState("loading");
     try {
       const res = await fetch("/api/evolve/local/manage", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "reject", sessionId: localEvolveSession.id }),
+        body: JSON.stringify({ action: "reject" }),
       });
-
       const data = (await res.json()) as { outcome?: string; error?: string };
-
       if (!res.ok) throw new Error(data.error ?? `API error: ${res.statusText}`);
-
-      setLocalEvolveSession(null);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: `🗑️ Preview rejected. The worktree and branch have been cleaned up.`,
-        },
-      ]);
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Something went wrong.";
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: `Failed to reject: ${errorMsg}` },
-      ]);
+      setPreviewActionState("rejected");
+    } catch {
+      setPreviewActionState("idle");
     }
-
-    setIsLoading(false);
   }
 
   // ── GitHub evolve helpers (production) ────────────────────────────────────
@@ -884,41 +880,43 @@ export default function ChatInterface() {
           </div>
         )}
 
-      {/* Local evolve accept/reject card — development only, shown when preview is ready */}
-      {localEvolveSession?.status === "ready" && localEvolveSession.previewUrl && (
+      {/* Preview-instance accept/reject bar — shown only inside the child preview server */}
+      {isPreviewInstance && previewActionState !== "accepted" && previewActionState !== "rejected" && (
         <div className="mb-3 px-4 py-3 rounded-lg bg-green-900/30 border border-green-700/40 text-sm flex-shrink-0 space-y-3">
           <p className="text-green-200 font-semibold">
-            Preview ready:{" "}
-            <a
-              href={localEvolveSession.previewUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline hover:text-green-100"
-            >
-              {localEvolveSession.previewUrl}
-            </a>
+            🔍 This is a local preview — review the changes, then accept or reject.
           </p>
           <p className="text-green-300 text-xs">
-            Review the changes in the preview, then accept to merge into{" "}
-            <code className="bg-green-900/50 px-1 rounded">main</code> or
-            reject to discard.
+            Accepting will merge the preview branch into{" "}
+            <code className="bg-green-900/50 px-1 rounded">main</code>.
+            Rejecting will discard the worktree and branch.
           </p>
           <div className="flex items-center gap-2">
             <button
-              onClick={handleLocalAccept}
-              disabled={isLoading}
+              onClick={handlePreviewAccept}
+              disabled={previewActionState === "loading"}
               className="px-3 py-1.5 text-xs bg-green-700 hover:bg-green-600 rounded text-white disabled:opacity-50"
             >
-              Accept Changes
+              {previewActionState === "loading" ? "…" : "Accept Changes"}
             </button>
             <button
-              onClick={handleLocalReject}
-              disabled={isLoading}
+              onClick={handlePreviewReject}
+              disabled={previewActionState === "loading"}
               className="px-3 py-1.5 text-xs bg-red-800 hover:bg-red-700 rounded text-white disabled:opacity-50"
             >
-              Reject
+              {previewActionState === "loading" ? "…" : "Reject"}
             </button>
           </div>
+        </div>
+      )}
+      {isPreviewInstance && previewActionState === "accepted" && (
+        <div className="mb-3 px-4 py-3 rounded-lg bg-green-900/30 border border-green-700/40 text-sm flex-shrink-0">
+          <p className="text-green-200">✅ Changes accepted and merged into main. You can close this preview.</p>
+        </div>
+      )}
+      {isPreviewInstance && previewActionState === "rejected" && (
+        <div className="mb-3 px-4 py-3 rounded-lg bg-red-900/30 border border-red-700/40 text-sm flex-shrink-0">
+          <p className="text-red-200">🗑️ Preview rejected. You can close this preview.</p>
         </div>
       )}
 

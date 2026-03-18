@@ -1,18 +1,51 @@
 // app/api/evolve/local/manage/route.ts
 // Accept or reject a local evolve session (development only).
 //
-// POST
-//   Body: { action: "accept" | "reject"; sessionId: string }
+// This route runs inside the *preview* Next.js instance (the child worktree
+// server). It discovers its own branch name from git and the parent branch
+// from git config, performs the merge / cleanup in the parent repo, then
+// exits the process.
 //
-//   accept — merges the preview branch into main, kills the dev server,
-//            removes the worktree.
-//   reject — kills the dev server, removes the worktree and branch.
+// GET
+//   Returns { isPreview: boolean, branch: string | null }.
+//   Detects a preview instance by reading the current branch via git and
+//   checking whether git config branch.<name>.parent is set. This is
+//   persistent across server restarts and manual dev server invocations.
+//
+// POST
+//   Body: { action: "accept" | "reject" }
+//
+//   accept — merges the preview branch into the parent branch (read from
+//            git config branch.<branch>.parent), removes the worktree and
+//            branch, then exits this server process.
+//   reject — removes the worktree and branch without merging, then exits.
 
-import {
-  sessions,
-  acceptSession,
-  rejectSession,
-} from '../../../../../lib/local-evolve-sessions';
+import * as path from 'path';
+import { runGit } from '../../../../../lib/local-evolve-sessions';
+
+/** Read the current git branch and check for a stored parent config entry.
+ *  Returns { branch, parentBranch } when this is a preview worktree,
+ *  or { branch: null, parentBranch: null } otherwise. */
+async function getPreviewInfo(
+  cwd: string,
+): Promise<{ branch: string | null; parentBranch: string | null }> {
+  const branchResult = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
+  if (branchResult.code !== 0) return { branch: null, parentBranch: null };
+
+  const branch = branchResult.stdout.trim();
+  const parentResult = await runGit(['config', `branch.${branch}.parent`], cwd);
+  if (parentResult.code !== 0 || !parentResult.stdout.trim()) {
+    return { branch: null, parentBranch: null };
+  }
+
+  return { branch, parentBranch: parentResult.stdout.trim() };
+}
+
+// GET — used by the UI on mount to detect whether this is a preview instance.
+export async function GET() {
+  const { branch } = await getPreviewInfo(process.cwd());
+  return Response.json({ isPreview: !!branch, branch });
+}
 
 export async function POST(request: Request) {
   if (process.env.NODE_ENV !== 'development') {
@@ -22,34 +55,67 @@ export async function POST(request: Request) {
     );
   }
 
-  const body = (await request.json()) as { action?: string; sessionId?: string };
+  const worktreePath = process.cwd();
+  const { branch, parentBranch } = await getPreviewInfo(worktreePath);
 
-  if (!body.action || !body.sessionId) {
-    return Response.json({ error: 'action and sessionId are required' }, { status: 400 });
+  if (!branch) {
+    return Response.json(
+      { error: 'Not a preview instance (no branch.*.parent entry found in git config)' },
+      { status: 400 },
+    );
   }
 
-  const session = sessions.get(body.sessionId);
-  if (!session) {
-    return Response.json({ error: 'Session not found' }, { status: 404 });
-  }
-
-  const repoRoot = process.cwd();
-
-  try {
-    if (body.action === 'accept') {
-      await acceptSession(session, repoRoot);
-      return Response.json({ outcome: 'accepted', branch: session.branch });
-    }
-
-    if (body.action === 'reject') {
-      await rejectSession(session, repoRoot);
-      return Response.json({ outcome: 'rejected' });
-    }
-
+  const body = (await request.json()) as { action?: string };
+  if (body.action !== 'accept' && body.action !== 'reject') {
     return Response.json(
       { error: 'action must be "accept" or "reject"' },
       { status: 400 },
     );
+  }
+
+  // Locate the parent (main) repo root via the shared git common directory.
+  // In a linked worktree, --git-common-dir returns the absolute path of the
+  // main .git folder; path.dirname of that is the main repo root.
+  const commonDirResult = await runGit(['rev-parse', '--git-common-dir'], worktreePath);
+  if (commonDirResult.code !== 0) {
+    return Response.json(
+      { error: `Could not locate parent repo: ${commonDirResult.stderr}` },
+      { status: 500 },
+    );
+  }
+  const gitCommonDir = path.resolve(worktreePath, commonDirResult.stdout.trim());
+  const parentRepoRoot = path.dirname(gitCommonDir);
+
+  try {
+    if (body.action === 'accept') {
+      // Merge the preview branch into the parent branch (in the main repo).
+      const mergeResult = await runGit(
+        ['merge', branch, '--no-ff', '-m', `chore: merge local preview ${branch}`],
+        parentRepoRoot,
+      );
+      if (mergeResult.code !== 0) {
+        return Response.json(
+          { error: `git merge failed:\n${mergeResult.stderr}` },
+          { status: 500 },
+        );
+      }
+
+      // Remove this worktree and delete the preview branch.
+      await runGit(['worktree', 'remove', '--force', worktreePath], parentRepoRoot);
+      await runGit(['branch', '-d', branch], parentRepoRoot);
+
+      // Shut down the preview server shortly after sending the response.
+      setTimeout(() => process.exit(0), 500);
+      return Response.json({ outcome: 'accepted', branch, parentBranch });
+    }
+
+    // action === 'reject'
+    await runGit(['worktree', 'remove', '--force', worktreePath], parentRepoRoot);
+    // Force-delete since the branch was never merged.
+    await runGit(['branch', '-D', branch], parentRepoRoot);
+
+    setTimeout(() => process.exit(0), 500);
+    return Response.json({ outcome: 'rejected' });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return Response.json({ error: msg }, { status: 500 });
