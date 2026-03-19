@@ -10,4 +10,4 @@
 
 ## Why
 
-Type-checking and linting during `next build` slows down every Vercel deployment. Moving these checks into a dedicated CI workflow means Vercel builds stay fast while code quality is still enforced on every PR before it can reach `main`. The Blacksmith runner issue noted in the PR comments is an account-level infra concern separate from this change.
+Type-checking and linting during `next build` slows down every Vercel deployment. Moving these checks into a dedicated CI workflow means Vercel builds stay fast while code quality is still enforced on every PR before it can reach `main`.
