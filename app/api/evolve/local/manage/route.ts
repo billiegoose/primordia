@@ -90,7 +90,7 @@ export async function POST(request: Request) {
     if (body.action === 'accept') {
       // Merge the preview branch into the parent branch (in the main repo).
       const mergeResult = await runGit(
-        ['merge', branch, '--no-ff', '-m', `chore: merge local preview ${branch}`],
+        ['merge', branch, '--no-ff', '-m', `chore: merge ${branch}`],
         parentRepoRoot,
       );
       if (mergeResult.code !== 0) {

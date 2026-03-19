@@ -122,7 +122,7 @@ User types change request in evolve mode
 ```
 User types change request in evolve mode
   → POST /api/evolve/local
-  → git worktree add ../primordia-preview-{ts} -b preview-{ts}
+  → git worktree add ../primordia-worktrees/{slug}-{mnemonicId} -b evolve/{slug}-{mnemonicId}
   → symlink node_modules + .env.local into worktree
   → @anthropic-ai/claude-agent-sdk query() in worktree
       → streams SDKMessage events → formatted progressText

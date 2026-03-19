@@ -11,12 +11,24 @@
 //   Returns: { status, progressText, port, previewUrl, branch }
 
 import * as path from 'path';
+import { createNameId } from 'mnemonic-id';
 import {
   sessions,
   startLocalEvolve,
   appendProgress,
   type LocalSession,
 } from '../../../../lib/local-evolve-sessions';
+
+/** Convert a free-text request into a short kebab-case slug (max 5 words). */
+function toSlug(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '')
+    .trim()
+    .split(/\s+/)
+    .slice(0, 5)
+    .join('-');
+}
 
 export async function POST(request: Request) {
   if (process.env.NODE_ENV !== 'development') {
@@ -31,10 +43,12 @@ export async function POST(request: Request) {
     return Response.json({ error: 'request string required' }, { status: 400 });
   }
 
-  const sessionId = Date.now().toString();
-  const branch = `preview-${sessionId}`;
+  const slug = toSlug(body.request);
+  const mnemonicId = createNameId();
+  const sessionId = slug ? `${slug}-${mnemonicId}` : mnemonicId;
+  const branch = `evolve/${sessionId}`;
   const repoRoot = process.cwd();
-  const worktreePath = path.join(repoRoot, '..', `primordia-preview-${sessionId}`);
+  const worktreePath = path.join(repoRoot, '..', 'primordia-worktrees', sessionId);
 
   const session: LocalSession = {
     id: sessionId,
