@@ -6,9 +6,8 @@
 // To propose a change to the app itself, use the Edit (pencil) icon button in
 // the header, which links to /evolve — a dedicated "submit a request" form.
 //
-// The preview instance accept/reject bar is rendered here when this instance
-// is running as a local preview worktree (isPreviewInstance=true), and the
-// Vercel deploy preview accept/reject bar is rendered on Vercel preview deploys.
+// The accept/reject bar for previews lives in AcceptRejectBar (rendered in the
+// root layout below the fold — scroll down to reveal it).
 
 import { useState, useRef, useEffect, FormEvent } from "react";
 import Link from "next/link";
@@ -28,14 +27,9 @@ interface Message {
 interface GitContext {
   branch: string | null;
   commitMessage: string | null;
-  /** True when this instance is running as a local preview worktree. Detected
-   *  server-side in page.tsx by reading branch.<name>.parent from git config. */
-  isPreviewInstance: boolean;
-  /** The parent branch name to merge into on accept. Defaults to "main". */
-  previewParentBranch: string;
 }
 
-export default function ChatInterface({ branch, commitMessage, isPreviewInstance, previewParentBranch }: GitContext) {
+export default function ChatInterface({ branch, commitMessage }: GitContext) {
   const [messages, setMessages] = useState<Message[]>(() => {
     const initial: Message[] = [
       {
@@ -56,15 +50,6 @@ export default function ChatInterface({ branch, commitMessage, isPreviewInstance
   const [isLoading, setIsLoading] = useState(false);
   // Stores deploy preview context string; injected into the system prompt for chat.
   const [deployContext, setDeployContext] = useState<string | null>(null);
-  // PR number for the current deploy preview (null on production/local builds).
-  const [deployPrNumber, setDeployPrNumber] = useState<number | null>(null);
-  // Base branch of the deploy preview PR (the branch it will be merged into).
-  const [deployPrBaseBranch, setDeployPrBaseBranch] = useState<string>("main");
-  // PR state for the current deploy preview ("open", "closed", or "merged").
-  const [deployPrState, setDeployPrState] = useState<"open" | "closed" | "merged" | null>(null);
-  // Action state for the Vercel preview accept/reject bar.
-  const [vercelActionState, setVercelActionState] = useState<"idle" | "loading" | "accepted" | "rejected">("idle");
-  const [previewActionState, setPreviewActionState] = useState<"idle" | "loading" | "accepted" | "rejected">("idle");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Holds the active polling interval so we can cancel it on unmount.
@@ -126,12 +111,9 @@ export default function ChatInterface({ branch, commitMessage, isPreviewInstance
 
     fetch("/api/deploy-context")
       .then((res) => res.json())
-      .then((data: { context: string | null; prNumber?: number; prUrl?: string; prState?: "open" | "closed" | "merged"; prBranch?: string; prBaseBranch?: string }) => {
+      .then((data: { context: string | null }) => {
         if (!data.context) return;
         setDeployContext(data.context);
-        if (data.prNumber) setDeployPrNumber(data.prNumber);
-        if (data.prState) setDeployPrState(data.prState);
-        if (data.prBaseBranch) setDeployPrBaseBranch(data.prBaseBranch);
         // Prepend a visible system message so the context is front-and-centre.
         // Show only a brief notice; the full PR/issue context is sent to Claude via systemContext.
         setMessages((prev) => [
@@ -237,107 +219,6 @@ export default function ChatInterface({ branch, commitMessage, isPreviewInstance
     }
   }
 
-  // ── Preview-instance accept/reject (development only) ─────────────────────
-  // These run inside the preview server. They POST to this server's own manage
-  // endpoint — no cross-origin needed. The manage route reads PREVIEW_BRANCH
-  // and the parent branch from git config to handle everything.
-
-  async function handlePreviewAccept() {
-    if (!isPreviewInstance || previewActionState !== "idle") return;
-    setPreviewActionState("loading");
-    try {
-      const res = await fetch("/api/evolve/local/manage", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "accept" }),
-      });
-      const data = (await res.json()) as { outcome?: string; error?: string };
-      if (!res.ok) throw new Error(data.error ?? `API error: ${res.statusText}`);
-      setPreviewActionState("accepted");
-    } catch {
-      setPreviewActionState("idle");
-    }
-  }
-
-  async function handlePreviewReject() {
-    if (!isPreviewInstance || previewActionState !== "idle") return;
-    setPreviewActionState("loading");
-    try {
-      const res = await fetch("/api/evolve/local/manage", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "reject" }),
-      });
-      const data = (await res.json()) as { outcome?: string; error?: string };
-      if (!res.ok) throw new Error(data.error ?? `API error: ${res.statusText}`);
-      setPreviewActionState("rejected");
-    } catch {
-      setPreviewActionState("idle");
-    }
-  }
-
-  // ── Vercel preview accept/reject ──────────────────────────────────────────
-  // These run inside the Vercel preview deployment. They POST to this server's
-  // own API routes — no cross-origin needed.
-
-  async function handleVercelAccept() {
-    if (!deployPrNumber || vercelActionState !== "idle") return;
-    setVercelActionState("loading");
-    try {
-      const res = await fetch("/api/merge-pr", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prNumber: deployPrNumber }),
-      });
-      const data = (await res.json()) as { merged?: boolean; message?: string; error?: string };
-      if (!res.ok) throw new Error(data.error ?? `GitHub error: ${res.statusText}`);
-      setVercelActionState("accepted");
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: `✅ PR #${deployPrNumber} has been merged! The changes will be deployed shortly.`,
-        },
-      ]);
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Something went wrong.";
-      setVercelActionState("idle");
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: `Failed to merge PR #${deployPrNumber}: ${errorMsg}` },
-      ]);
-    }
-  }
-
-  async function handleVercelReject() {
-    if (!deployPrNumber || vercelActionState !== "idle") return;
-    setVercelActionState("loading");
-    try {
-      const res = await fetch("/api/close-pr", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prNumber: deployPrNumber }),
-      });
-      const data = (await res.json()) as { closed?: boolean; error?: string };
-      if (!res.ok) throw new Error(data.error ?? `GitHub error: ${res.statusText}`);
-      setVercelActionState("rejected");
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: `🗑️ PR #${deployPrNumber} has been closed. The changes have been discarded.`,
-        },
-      ]);
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Something went wrong.";
-      setVercelActionState("idle");
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: `Failed to close PR #${deployPrNumber}: ${errorMsg}` },
-      ]);
-    }
-  }
-
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     // Submit on Enter (without Shift)
     if (e.key === "Enter" && !e.shiftKey) {
@@ -411,96 +292,6 @@ export default function ChatInterface({ branch, commitMessage, isPreviewInstance
         ))}
         <div ref={messagesEndRef} />
       </div>
-
-      {/* Preview-instance accept/reject bar — shown only inside the child preview server */}
-      {isPreviewInstance && previewActionState !== "accepted" && previewActionState !== "rejected" && (
-        <div className="mb-3 px-4 py-3 rounded-lg bg-green-900/30 border border-green-700/40 text-sm flex-shrink-0 space-y-3">
-          <p className="text-green-200 font-semibold">
-            🔍 This is a local preview — review the changes, then accept or reject.
-          </p>
-          <p className="text-green-300 text-xs">
-            Accepting will merge the preview branch into{" "}
-            <code className="bg-green-900/50 px-1 rounded">{previewParentBranch}</code>.
-            Rejecting will discard the worktree and branch.
-          </p>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handlePreviewAccept}
-              disabled={previewActionState === "loading"}
-              className="px-3 py-1.5 text-xs bg-green-700 hover:bg-green-600 rounded text-white disabled:opacity-50"
-            >
-              {previewActionState === "loading" ? "…" : "Accept Changes"}
-            </button>
-            <button
-              onClick={handlePreviewReject}
-              disabled={previewActionState === "loading"}
-              className="px-3 py-1.5 text-xs bg-red-800 hover:bg-red-700 rounded text-white disabled:opacity-50"
-            >
-              {previewActionState === "loading" ? "…" : "Reject"}
-            </button>
-          </div>
-        </div>
-      )}
-      {isPreviewInstance && previewActionState === "accepted" && (
-        <div className="mb-3 px-4 py-3 rounded-lg bg-green-900/30 border border-green-700/40 text-sm flex-shrink-0">
-          <p className="text-green-200">✅ Changes accepted and merged into <code className="bg-green-900/50 px-1 rounded">{previewParentBranch}</code>. You can close this preview.</p>
-        </div>
-      )}
-      {isPreviewInstance && previewActionState === "rejected" && (
-        <div className="mb-3 px-4 py-3 rounded-lg bg-red-900/30 border border-red-700/40 text-sm flex-shrink-0">
-          <p className="text-red-200">🗑️ Preview rejected. You can close this preview.</p>
-        </div>
-      )}
-
-      {/* Vercel preview accept/reject bar — shown on Vercel deploy preview deployments */}
-      {deployPrNumber !== null && deployPrState === "merged" && vercelActionState !== "accepted" && (
-        <div className="mb-3 px-4 py-3 rounded-lg bg-green-900/30 border border-green-700/40 text-sm flex-shrink-0">
-          <p className="text-green-200">✅ PR #{deployPrNumber} has already been merged. These changes are live in production.</p>
-        </div>
-      )}
-      {deployPrNumber !== null && deployPrState === "closed" && vercelActionState !== "rejected" && (
-        <div className="mb-3 px-4 py-3 rounded-lg bg-red-900/30 border border-red-700/40 text-sm flex-shrink-0">
-          <p className="text-red-200">🗑️ PR #{deployPrNumber} has already been closed. These changes were discarded.</p>
-        </div>
-      )}
-      {deployPrNumber !== null && (deployPrState === "open" || deployPrState === null) && vercelActionState !== "accepted" && vercelActionState !== "rejected" && (
-        <div className="mb-3 px-4 py-3 rounded-lg bg-green-900/30 border border-green-700/40 text-sm flex-shrink-0 space-y-3">
-          <p className="text-green-200 font-semibold">
-            🔍 This is a deploy preview of PR #{deployPrNumber} — review the changes, then accept or reject.
-          </p>
-          <p className="text-green-300 text-xs">
-            Accepting will merge the PR into{" "}
-            <code className="bg-green-900/50 px-1 rounded">{deployPrBaseBranch}</code>.
-            Rejecting will close the PR.
-          </p>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleVercelAccept}
-              disabled={vercelActionState === "loading"}
-              className="px-3 py-1.5 text-xs bg-green-700 hover:bg-green-600 rounded text-white disabled:opacity-50"
-            >
-              {vercelActionState === "loading" ? "…" : "Accept Changes"}
-            </button>
-            <button
-              onClick={handleVercelReject}
-              disabled={vercelActionState === "loading"}
-              className="px-3 py-1.5 text-xs bg-red-800 hover:bg-red-700 rounded text-white disabled:opacity-50"
-            >
-              {vercelActionState === "loading" ? "…" : "Reject"}
-            </button>
-          </div>
-        </div>
-      )}
-      {deployPrNumber !== null && vercelActionState === "accepted" && (
-        <div className="mb-3 px-4 py-3 rounded-lg bg-green-900/30 border border-green-700/40 text-sm flex-shrink-0">
-          <p className="text-green-200">✅ Changes accepted and merged into <code className="bg-green-900/50 px-1 rounded">{deployPrBaseBranch}</code>.</p>
-        </div>
-      )}
-      {deployPrNumber !== null && vercelActionState === "rejected" && (
-        <div className="mb-3 px-4 py-3 rounded-lg bg-red-900/30 border border-red-700/40 text-sm flex-shrink-0">
-          <p className="text-red-200">🗑️ PR #{deployPrNumber} closed. Changes discarded.</p>
-        </div>
-      )}
 
       {/* Input area */}
       <form
