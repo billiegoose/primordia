@@ -54,6 +54,7 @@ interface LocalEvolveSession {
   id: string;
   status: "starting" | "running-claude" | "starting-server" | "ready" | "error";
   progressText: string;
+  port: number | null;
   previewUrl: string | null;
   branch: string;
 }
@@ -217,13 +218,16 @@ export default function EvolveForm() {
           clearInterval(localPollingRef.current!);
           localPollingRef.current = null;
 
-          if (data.status === "ready" && data.previewUrl) {
+          if (data.status === "ready" && data.port !== null) {
+            // Build the URL from the browser's own hostname so it works on remote
+            // machines (e.g. primordia.exe.xyz) as well as plain localhost.
+            const previewUrl = `${window.location.protocol}//${window.location.hostname}:${data.port}`;
             setMessages((prev) => [
               ...prev,
               {
                 role: "assistant",
                 content:
-                  `🚀 Preview ready: [${data.previewUrl}](${data.previewUrl})\n\n` +
+                  `🚀 Preview ready: [${previewUrl}](${previewUrl})\n\n` +
                   `Open the preview link and use the **Accept** or **Reject** bar there to apply or discard the changes.`,
               },
             ]);
