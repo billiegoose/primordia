@@ -22,8 +22,9 @@
 //      Progress is rendered as "**Local Evolve Progress**:\n\n{progressText}" —
 //      the same format used by the GitHub CI flow for its comment body.
 //   4. When ready, shows a plain preview link (no URL params needed).
-//   5. The preview instance detects itself via GET /api/evolve/local/manage
-//      (returns { isPreview: true } when PREVIEW_BRANCH is set).
+//   5. The preview instance detects itself via the isPreviewInstance prop,
+//      resolved server-side in page.tsx by reading branch.<name>.parent from
+//      git config — no client-side API call needed.
 //   6. Accept/Reject bar in the preview calls its own manage POST endpoint.
 //      The manage route reads the parent branch from git config, merges/cleans up,
 //      then exits the preview process — no cross-origin requests required.
@@ -81,16 +82,21 @@ interface LocalEvolveSession {
 interface GitContext {
   branch: string | null;
   commitMessage: string | null;
+  /** True when this instance is running as a local preview worktree. Detected
+   *  server-side in page.tsx by reading branch.<name>.parent from git config. */
+  isPreviewInstance: boolean;
+  /** The parent branch name to merge into on accept. Defaults to "main". */
+  previewParentBranch: string;
 }
 
-export default function ChatInterface({ branch, commitMessage }: GitContext) {
+export default function ChatInterface({ branch, commitMessage, isPreviewInstance, previewParentBranch }: GitContext) {
   const [mode, setMode] = useState<Mode>("chat");
   const [messages, setMessages] = useState<Message[]>(() => {
     const initial: Message[] = [
       {
         role: "assistant",
         content:
-          "Hi! I'm Primordia. You can chat with me, or switch to **evolve mode** to propose a change to this app itself. Your idea will be turned into a GitHub PR automatically.",
+          "Hi! I'm Primordia. You can chat with me, or switch to **evolve mode** to propose a change to this app itself.",
       },
     ];
     if (commitMessage) {
@@ -116,8 +122,6 @@ export default function ChatInterface({ branch, commitMessage }: GitContext) {
   const [evolveLoadingMsg, setEvolveLoadingMsg] = useState<string>("Checking for related issues…");
   // Local evolve session state (development only)
   const [localEvolveSession, setLocalEvolveSession] = useState<LocalEvolveSession | null>(null);
-  // Whether this app is running as a preview instance (detected via API on mount).
-  const [isPreviewInstance, setIsPreviewInstance] = useState(false);
   const [previewActionState, setPreviewActionState] = useState<"idle" | "loading" | "accepted" | "rejected">("idle");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -165,20 +169,6 @@ export default function ChatInterface({ branch, commitMessage }: GitContext) {
       document.title = `Primordia (${branch})`;
     }
   }, [branch]);
-
-  // On mount, ask the server whether this is a local preview instance.
-  // The manage GET endpoint returns { isPreview: true } when the PREVIEW_BRANCH
-  // env var is set (injected by the parent server when spawning the preview process).
-  useEffect(() => {
-    fetch("/api/evolve/local/manage")
-      .then((res) => res.json())
-      .then((data: { isPreview: boolean }) => {
-        if (data.isPreview) setIsPreviewInstance(true);
-      })
-      .catch(() => {
-        // Non-critical — silently ignore
-      });
-  }, []);
 
   // On mount, check for missing API keys and warn the user if any are absent.
   useEffect(() => {
@@ -914,7 +904,7 @@ export default function ChatInterface({ branch, commitMessage }: GitContext) {
           </p>
           <p className="text-green-300 text-xs">
             Accepting will merge the preview branch into{" "}
-            <code className="bg-green-900/50 px-1 rounded">main</code>.
+            <code className="bg-green-900/50 px-1 rounded">{previewParentBranch}</code>.
             Rejecting will discard the worktree and branch.
           </p>
           <div className="flex items-center gap-2">
@@ -937,7 +927,7 @@ export default function ChatInterface({ branch, commitMessage }: GitContext) {
       )}
       {isPreviewInstance && previewActionState === "accepted" && (
         <div className="mb-3 px-4 py-3 rounded-lg bg-green-900/30 border border-green-700/40 text-sm flex-shrink-0">
-          <p className="text-green-200">✅ Changes accepted and merged into main. You can close this preview.</p>
+          <p className="text-green-200">✅ Changes accepted and merged into <code className="bg-green-900/50 px-1 rounded">{previewParentBranch}</code>. You can close this preview.</p>
         </div>
       )}
       {isPreviewInstance && previewActionState === "rejected" && (
