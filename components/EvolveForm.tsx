@@ -21,7 +21,7 @@
 
 import { useState, useRef, useEffect, FormEvent } from "react";
 import Link from "next/link";
-import { SimpleMarkdown } from "./SimpleMarkdown";
+import { MarkdownContent } from "./SimpleMarkdown";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -507,7 +507,7 @@ export default function EvolveForm() {
         <div className="flex-1 space-y-4 mb-6">
           {messages.map((msg, i) => (
             <div key={msg.id ?? i} className="px-4 py-3 rounded-lg bg-gray-800 text-gray-100 text-sm leading-relaxed">
-              <SimpleMarkdown text={msg.content} />
+              <MarkdownContent text={msg.content} />
             </div>
           ))}
           {isLoading && (
