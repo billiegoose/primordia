@@ -114,8 +114,8 @@ export default function ChatInterface({ branch, commitMessage, isPreviewInstance
   const [deployContext, setDeployContext] = useState<string | null>(null);
   // PR number for the current deploy preview (null on production/local builds).
   const [deployPrNumber, setDeployPrNumber] = useState<number | null>(null);
-  // Whether to show the "Accept Changes / merge PR" card.
-  const [showMergeCard, setShowMergeCard] = useState(false);
+  // Action state for the Vercel preview accept/reject bar.
+  const [vercelActionState, setVercelActionState] = useState<"idle" | "loading" | "accepted" | "rejected">("idle");
   // Decision state: shown when related open issues are found before creating a new one
   const [relatedIssues, setRelatedIssues] = useState<RelatedIssue[] | null>(null);
   const [pendingRequest, setPendingRequest] = useState<string | null>(null);
@@ -234,13 +234,6 @@ export default function ChatInterface({ branch, commitMessage, isPreviewInstance
   }
 
   async function handleChatSubmit(userMessage: string) {
-    // On deploy previews, intercept merge/accept intent before sending to Claude.
-    if (deployPrNumber && isMergeIntent(userMessage)) {
-      setMessages((prev) => [...prev, { role: "user", content: userMessage }]);
-      setShowMergeCard(true);
-      return;
-    }
-
     const newMessages: Message[] = [
       ...messages,
       { role: "user", content: userMessage },
@@ -728,25 +721,22 @@ export default function ChatInterface({ branch, commitMessage, isPreviewInstance
     }, 10_000);
   }
 
-  // Merges the deploy-preview PR when the user confirms via the merge card.
-  async function handleMergePr() {
-    if (!deployPrNumber || isLoading) return;
-    setShowMergeCard(false);
-    setIsLoading(true);
+  // ── Vercel preview accept/reject ──────────────────────────────────────────
+  // These run inside the Vercel preview deployment. They POST to this server's
+  // own API routes — no cross-origin needed.
 
+  async function handleVercelAccept() {
+    if (!deployPrNumber || vercelActionState !== "idle") return;
+    setVercelActionState("loading");
     try {
       const res = await fetch("/api/merge-pr", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prNumber: deployPrNumber }),
       });
-
       const data = (await res.json()) as { merged?: boolean; message?: string; error?: string };
-
-      if (!res.ok) {
-        throw new Error(data.error ?? `GitHub error: ${res.statusText}`);
-      }
-
+      if (!res.ok) throw new Error(data.error ?? `GitHub error: ${res.statusText}`);
+      setVercelActionState("accepted");
       setMessages((prev) => [
         ...prev,
         {
@@ -756,16 +746,41 @@ export default function ChatInterface({ branch, commitMessage, isPreviewInstance
       ]);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Something went wrong.";
+      setVercelActionState("idle");
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: `Failed to merge PR #${deployPrNumber}: ${errorMsg}` },
+      ]);
+    }
+  }
+
+  async function handleVercelReject() {
+    if (!deployPrNumber || vercelActionState !== "idle") return;
+    setVercelActionState("loading");
+    try {
+      const res = await fetch("/api/close-pr", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prNumber: deployPrNumber }),
+      });
+      const data = (await res.json()) as { closed?: boolean; error?: string };
+      if (!res.ok) throw new Error(data.error ?? `GitHub error: ${res.statusText}`);
+      setVercelActionState("rejected");
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: `Failed to merge PR #${deployPrNumber}: ${errorMsg}`,
+          content: `🗑️ PR #${deployPrNumber} has been closed. The changes have been discarded.`,
         },
       ]);
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "Something went wrong.";
+      setVercelActionState("idle");
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: `Failed to close PR #${deployPrNumber}: ${errorMsg}` },
+      ]);
     }
-
-    setIsLoading(false);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -936,29 +951,41 @@ export default function ChatInterface({ branch, commitMessage, isPreviewInstance
         </div>
       )}
 
-      {/* Merge card — shown when the user expresses merge/accept intent on a deploy preview */}
-      {showMergeCard && deployPrNumber && !isLoading && (
+      {/* Vercel preview accept/reject bar — shown on Vercel deploy preview deployments */}
+      {deployPrNumber !== null && vercelActionState !== "accepted" && vercelActionState !== "rejected" && (
         <div className="mb-3 px-4 py-3 rounded-lg bg-green-900/30 border border-green-700/40 text-sm flex-shrink-0 space-y-3">
           <p className="text-green-200 font-semibold">
-            Merge PR #{deployPrNumber} into production?
+            🔍 This is a preview of PR #{deployPrNumber} — review the changes, then accept or reject.
           </p>
           <p className="text-green-300 text-xs">
-            This will squash-merge the branch and trigger a production deployment.
+            Accepting will merge the PR and trigger a production deployment. Rejecting will close the PR.
           </p>
           <div className="flex items-center gap-2">
             <button
-              onClick={handleMergePr}
-              className="px-3 py-1.5 text-xs bg-green-700 hover:bg-green-600 rounded text-white"
+              onClick={handleVercelAccept}
+              disabled={vercelActionState === "loading"}
+              className="px-3 py-1.5 text-xs bg-green-700 hover:bg-green-600 rounded text-white disabled:opacity-50"
             >
-              Accept Changes
+              {vercelActionState === "loading" ? "…" : "Accept Changes"}
             </button>
             <button
-              onClick={() => setShowMergeCard(false)}
-              className="px-3 py-1.5 text-xs bg-gray-700 hover:bg-gray-600 rounded text-gray-200"
+              onClick={handleVercelReject}
+              disabled={vercelActionState === "loading"}
+              className="px-3 py-1.5 text-xs bg-red-800 hover:bg-red-700 rounded text-white disabled:opacity-50"
             >
-              Cancel
+              {vercelActionState === "loading" ? "…" : "Reject"}
             </button>
           </div>
+        </div>
+      )}
+      {deployPrNumber !== null && vercelActionState === "accepted" && (
+        <div className="mb-3 px-4 py-3 rounded-lg bg-green-900/30 border border-green-700/40 text-sm flex-shrink-0">
+          <p className="text-green-200">✅ PR #{deployPrNumber} merged. Production deployment is on its way!</p>
+        </div>
+      )}
+      {deployPrNumber !== null && vercelActionState === "rejected" && (
+        <div className="mb-3 px-4 py-3 rounded-lg bg-red-900/30 border border-red-700/40 text-sm flex-shrink-0">
+          <p className="text-red-200">🗑️ PR #{deployPrNumber} closed. Changes discarded.</p>
         </div>
       )}
 
@@ -1064,25 +1091,6 @@ function MessageBubble({ message }: { message: Message }) {
       </div>
     </div>
   );
-}
-
-// ─── isMergeIntent ───────────────────────────────────────────────────────────
-// Returns true when the message clearly expresses an intent to merge / accept
-// the current PR.  Only used on deploy previews.
-
-function isMergeIntent(text: string): boolean {
-  const lower = text.toLowerCase().trim();
-  // Exact short commands
-  if (lower === "merge" || lower === "accept") return true;
-  // "merge this / the / it / pr / branch / pull request / change(s)"
-  if (/\bmerge\s+(this|the|it|pr|branch|pull\s+request|change|changes)\b/.test(lower)) return true;
-  // "accept this / the change(s) / pr / pull request"
-  if (/\baccept\s+(this\s+|the\s+)?(change|changes|pr|pull\s+request)\b/.test(lower)) return true;
-  // "ship this / it"
-  if (/\bship\s+(this|it)\b/.test(lower)) return true;
-  // "approve and merge", "lgtm merge"
-  if (/\b(approve\s+and\s+merge|lgtm\s+merge)\b/.test(lower)) return true;
-  return false;
 }
 
 // SimpleMarkdown is imported from ./SimpleMarkdown
