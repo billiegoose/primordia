@@ -9,4 +9,4 @@
 - Removed the `isMergeIntent` helper function and `showMergeCard` state, which were only needed for the old chat-triggered flow.
 
 ## Why
-Previously, users on a Vercel preview deployment had to type "merge" or "accept" in the chat to trigger a merge card — there was no reject/close option at all. The new bar gives reviewers a clear, always-visible way to either ship or discard a PR directly from the preview URL, matching the UX of the local dev preview flow.
+Previously, users on a Vercel preview deployment had to type "merge" or "accept" in the chat to trigger a merge card — and there was no reject/close option at all. The new bar gives reviewers a clear, always-visible way to either ship or discard a PR directly from the preview URL, matching the UX of the local dev preview flow.
