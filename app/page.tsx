@@ -1,10 +1,38 @@
 // app/page.tsx — The main entry point for Primordia
-// This page renders the chat interface with an optional "evolve" mode toggle.
-// When a user switches to evolve mode, their message is captured as a GitHub Issue
-// instead of being sent to Claude for a normal conversation.
+// This is a React Server Component. It reads the current git branch and full
+// HEAD commit message at request time (no client-side fetch needed), then
+// passes them as props to the ChatInterface client component.
+//
+// On Vercel deployments, built-in env vars are used:
+//   VERCEL_GIT_COMMIT_REF     — branch name
+//   VERCEL_GIT_COMMIT_MESSAGE — full commit message
+//
+// In local dev and git worktrees, falls back to running git commands directly.
 
+import { execSync } from "child_process";
 import ChatInterface from "@/components/ChatInterface";
 
+function runGit(cmd: string): string | null {
+  try {
+    return (
+      execSync(cmd, {
+        encoding: "utf8",
+        stdio: ["pipe", "pipe", "pipe"],
+      }).trim() || null
+    );
+  } catch {
+    return null;
+  }
+}
+
 export default function Home() {
-  return <ChatInterface />;
+  const branch =
+    process.env.VERCEL_GIT_COMMIT_REF ?? runGit("git branch --show-current");
+
+  // Use %B to get the full commit message (subject + body), not just the subject line.
+  const commitMessage =
+    process.env.VERCEL_GIT_COMMIT_MESSAGE ??
+    runGit("git log -1 --pretty=%B");
+
+  return <ChatInterface branch={branch ?? null} commitMessage={commitMessage ?? null} />;
 }
