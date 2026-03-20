@@ -78,15 +78,29 @@ interface LocalEvolveSession {
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-export default function ChatInterface() {
+interface GitContext {
+  branch: string | null;
+  commitMessage: string | null;
+}
+
+export default function ChatInterface({ branch, commitMessage }: GitContext) {
   const [mode, setMode] = useState<Mode>("chat");
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "assistant",
-      content:
-        "Hi! I'm Primordia. You can chat with me, or switch to **evolve mode** to propose a change to this app itself. Your idea will be turned into a GitHub PR automatically.",
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>(() => {
+    const initial: Message[] = [
+      {
+        role: "assistant",
+        content:
+          "Hi! I'm Primordia. You can chat with me, or switch to **evolve mode** to propose a change to this app itself. Your idea will be turned into a GitHub PR automatically.",
+      },
+    ];
+    if (commitMessage) {
+      initial.push({
+        role: "assistant",
+        content: `Ok, here's what's changed:\n\n${commitMessage}`,
+      });
+    }
+    return initial;
+  });
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [evolveResult, setEvolveResult] = useState<EvolveResult | null>(null);
@@ -144,6 +158,13 @@ export default function ChatInterface() {
       }
     };
   }, []);
+
+  // Update the page title with the branch name (client-side only).
+  useEffect(() => {
+    if (branch) {
+      document.title = `Primordia (${branch})`;
+    }
+  }, [branch]);
 
   // On mount, ask the server whether this is a local preview instance.
   // The manage GET endpoint returns { isPreview: true } when the PREVIEW_BRANCH
@@ -796,6 +817,11 @@ export default function ChatInterface() {
                   #{process.env.VERCEL_GIT_PULL_REQUEST_ID}
                 </a>
               )}
+            {branch && (
+              <span className="text-sm font-normal text-gray-400">
+                ({branch})
+              </span>
+            )}
           </h1>
           <p className="text-xs text-gray-400 mt-0.5">
             A self-evolving application ·{" "}
