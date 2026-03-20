@@ -43,8 +43,8 @@ async function getPreviewInfo(
 
 // GET — used by the UI on mount to detect whether this is a preview instance.
 export async function GET() {
-  const { branch } = await getPreviewInfo(process.cwd());
-  return Response.json({ isPreview: !!branch, branch });
+  const { branch, parentBranch } = await getPreviewInfo(process.cwd());
+  return Response.json({ isPreview: !!branch, branch, parentBranch });
 }
 
 export async function POST(request: Request) {

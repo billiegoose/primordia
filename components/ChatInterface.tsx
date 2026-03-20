@@ -118,6 +118,7 @@ export default function ChatInterface({ branch, commitMessage }: GitContext) {
   const [localEvolveSession, setLocalEvolveSession] = useState<LocalEvolveSession | null>(null);
   // Whether this app is running as a preview instance (detected via API on mount).
   const [isPreviewInstance, setIsPreviewInstance] = useState(false);
+  const [previewParentBranch, setPreviewParentBranch] = useState<string>("main");
   const [previewActionState, setPreviewActionState] = useState<"idle" | "loading" | "accepted" | "rejected">("idle");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -172,8 +173,11 @@ export default function ChatInterface({ branch, commitMessage }: GitContext) {
   useEffect(() => {
     fetch("/api/evolve/local/manage")
       .then((res) => res.json())
-      .then((data: { isPreview: boolean }) => {
-        if (data.isPreview) setIsPreviewInstance(true);
+      .then((data: { isPreview: boolean; parentBranch?: string | null }) => {
+        if (data.isPreview) {
+          setIsPreviewInstance(true);
+          if (data.parentBranch) setPreviewParentBranch(data.parentBranch);
+        }
       })
       .catch(() => {
         // Non-critical — silently ignore
@@ -914,7 +918,7 @@ export default function ChatInterface({ branch, commitMessage }: GitContext) {
           </p>
           <p className="text-green-300 text-xs">
             Accepting will merge the preview branch into{" "}
-            <code className="bg-green-900/50 px-1 rounded">main</code>.
+            <code className="bg-green-900/50 px-1 rounded">{previewParentBranch}</code>.
             Rejecting will discard the worktree and branch.
           </p>
           <div className="flex items-center gap-2">
@@ -937,7 +941,7 @@ export default function ChatInterface({ branch, commitMessage }: GitContext) {
       )}
       {isPreviewInstance && previewActionState === "accepted" && (
         <div className="mb-3 px-4 py-3 rounded-lg bg-green-900/30 border border-green-700/40 text-sm flex-shrink-0">
-          <p className="text-green-200">✅ Changes accepted and merged into main. You can close this preview.</p>
+          <p className="text-green-200">✅ Changes accepted and merged into <code className="bg-green-900/50 px-1 rounded">{previewParentBranch}</code>. You can close this preview.</p>
         </div>
       )}
       {isPreviewInstance && previewActionState === "rejected" && (
