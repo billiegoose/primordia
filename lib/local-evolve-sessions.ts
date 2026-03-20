@@ -302,7 +302,7 @@ export async function startLocalEvolve(
     }, 120_000);
   });
 
-  appendProgress(session, `\n✅ **Ready at http://localhost:${session.port}**\n`);
+  appendProgress(session, `\n✅ **Ready on port ${session.port}**\n`);
 }
 
 // ─── Kill dev server ──────────────────────────────────────────────────────────
