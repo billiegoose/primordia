@@ -173,15 +173,49 @@ export async function startLocalEvolve(
     `- [x] Worktree created on branch \`${session.branch}\``,
   );
 
-  // Step 2 — Symlink node_modules to avoid a full bun install (saves minutes)
-  const srcMods = path.join(repoRoot, 'node_modules');
-  const dstMods = path.join(session.worktreePath, 'node_modules');
-  if (fs.existsSync(srcMods) && !fs.existsSync(dstMods)) {
-    fs.symlinkSync(srcMods, dstMods, 'junction');
-    appendProgress(session, `- [x] Symlinked \`node_modules\`\n`);
+  // Step 2 — Run bun install in the worktree.
+  // Bun is fast enough that a full install is preferable to a shared symlink,
+  // which can cause subtle dependency issues when the worktree diverges.
+  appendProgress(session, `- [ ] Running \`bun install\`…\n`);
+  await new Promise<void>((resolve, reject) => {
+    const proc = spawn('bun', ['install'], {
+      cwd: session.worktreePath,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    proc.on('close', (code) => {
+      if (code === 0) {
+        session.progressText = session.progressText.replace(
+          '- [ ] Running `bun install`…',
+          '- [x] `bun install` complete',
+        );
+        resolve();
+      } else {
+        reject(new Error(`bun install failed with exit code ${code}`));
+      }
+    });
+    proc.on('error', (err) => reject(new Error(`bun install spawn failed: ${err.message}`)));
+  });
+
+  // Step 3 — Copy the SQLite database into the worktree so each branch gets
+  // its own isolated data snapshot — analogous to Neon's database branching.
+  // We copy rather than symlink so changes in the preview don't affect the
+  // main dev instance's auth/session data.
+  const dbName = '.primordia-auth.db';
+  const srcDb = path.join(repoRoot, dbName);
+  const dstDb = path.join(session.worktreePath, dbName);
+  if (fs.existsSync(srcDb) && !fs.existsSync(dstDb)) {
+    fs.copyFileSync(srcDb, dstDb);
+    // Copy WAL and SHM files too if the database is in WAL mode
+    for (const ext of ['-shm', '-wal']) {
+      const srcExtra = srcDb + ext;
+      if (fs.existsSync(srcExtra)) {
+        fs.copyFileSync(srcExtra, dstDb + ext);
+      }
+    }
+    appendProgress(session, `- [x] Copied \`${dbName}\` (isolated data branch)\n`);
   }
 
-  // Step 3 — Symlink .env.local so the preview server has the same credentials
+  // Step 4 — Symlink .env.local so the preview server has the same credentials
   const srcEnv = path.join(repoRoot, '.env.local');
   const dstEnv = path.join(session.worktreePath, '.env.local');
   if (fs.existsSync(srcEnv) && !fs.existsSync(dstEnv)) {
@@ -189,7 +223,7 @@ export async function startLocalEvolve(
     appendProgress(session, `- [x] Symlinked \`.env.local\`\n`);
   }
 
-  // Step 4 — Run Claude Code via the Agent SDK
+  // Step 5 — Run Claude Code via the Agent SDK
   session.status = 'running-claude';
   appendProgress(session, `\n### 🤖 Claude Code\n\n`);
 
