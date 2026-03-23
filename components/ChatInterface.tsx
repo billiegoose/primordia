@@ -277,18 +277,9 @@ export default function ChatInterface({ branch, commitMessage }: GitContext) {
       <header className="flex items-center justify-between mb-6 flex-shrink-0">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-white flex flex-wrap items-baseline gap-x-2">
-            {process.env.VERCEL_PROJECT_PRODUCTION_URL ? (
-              <a
-                href={`https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-white no-underline hover:text-gray-300"
-              >
-                Primordia
-              </a>
-            ) : (
-              "Primordia"
-            )}
+            <Link href="/" className="text-white no-underline hover:text-gray-300">
+              Primordia
+            </Link>
             {process.env.VERCEL_ENV === "preview" &&
               process.env.VERCEL_GIT_PULL_REQUEST_ID && (
                 <a

@@ -1,3 +1,64 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ── Landing page animations ─────────────────────────────────────────────── */
+
+@keyframes blob-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33%       { transform: translate(40px, -30px) scale(1.08); }
+  66%       { transform: translate(-20px, 20px) scale(0.94); }
+}
+
+@keyframes blob-drift-b {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33%       { transform: translate(-50px, 30px) scale(1.1); }
+  66%       { transform: translate(30px, -40px) scale(0.92); }
+}
+
+@keyframes blob-drift-c {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33%       { transform: translate(30px, 50px) scale(0.95); }
+  66%       { transform: translate(-40px, -20px) scale(1.06); }
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+
+.animate-blob-a { animation: blob-drift   14s ease-in-out infinite; }
+.animate-blob-b { animation: blob-drift-b 18s ease-in-out infinite; }
+.animate-blob-c { animation: blob-drift-c 22s ease-in-out infinite; }
+
+.animate-fade-up   { animation: fade-up  0.7s ease both; }
+.animate-fade-up-2 { animation: fade-up  0.7s ease 0.15s both; }
+.animate-fade-up-3 { animation: fade-up  0.7s ease 0.3s  both; }
+.animate-fade-up-4 { animation: fade-up  0.7s ease 0.45s both; }
+.animate-fade-in   { animation: fade-in  1.2s ease both; }
+
+.text-shimmer {
+  background: linear-gradient(
+    90deg,
+    #a78bfa 0%,
+    #60a5fa 25%,
+    #f0abfc 50%,
+    #60a5fa 75%,
+    #a78bfa 100%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 4s linear infinite;
+}
