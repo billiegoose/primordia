@@ -43,10 +43,26 @@ export function appendProgress(session: LocalSession, text: string): void {
 
 // ─── Tool use summarizer ──────────────────────────────────────────────────────
 
-function summarizeToolUse(name: string, input: Record<string, unknown>): string {
-  const filePath = String(input.file_path ?? input.path ?? '');
+function summarizeToolUse(
+  name: string,
+  input: Record<string, unknown>,
+  worktreePath: string = '',
+): string {
+  const rawFilePath = String(input.file_path ?? input.path ?? '');
   const command = String(input.command ?? '');
   const pattern = String(input.pattern ?? '');
+
+  // Replace the absolute worktree prefix with "./" for readability.
+  const shortenPath = (p: string): string => {
+    if (!worktreePath || !p) return p;
+    const prefix = worktreePath.endsWith(path.sep) ? worktreePath : worktreePath + path.sep;
+    if (p === worktreePath) return '.';
+    if (p.startsWith(prefix)) return './' + p.slice(prefix.length);
+    return p;
+  };
+
+  const filePath = shortenPath(rawFilePath);
+
   switch (name) {
     case 'Read':      return `Read \`${filePath}\``;
     case 'Write':     return `Write \`${filePath}\``;
@@ -271,7 +287,7 @@ export async function startLocalEvolve(
           if (block.type === 'text' && block.text.trim()) {
             appendProgress(session, block.text.trimEnd() + '\n\n');
           } else if (block.type === 'tool_use') {
-            const summary = summarizeToolUse(block.name, block.input as Record<string, unknown>);
+            const summary = summarizeToolUse(block.name, block.input as Record<string, unknown>, session.worktreePath);
             appendProgress(session, `- 🔧 ${summary}\n`);
           }
         }
@@ -416,7 +432,7 @@ export async function resolveConflictsWithClaude(
           if (block.type === 'text' && block.text.trim()) {
             log += block.text.trimEnd() + '\n\n';
           } else if (block.type === 'tool_use') {
-            const summary = summarizeToolUse(block.name, block.input as Record<string, unknown>);
+            const summary = summarizeToolUse(block.name, block.input as Record<string, unknown>, mergeRoot);
             log += `- 🔧 ${summary}\n`;
           }
         }
