@@ -15,6 +15,7 @@ import { useState, useRef, useEffect, useCallback, FormEvent } from "react";
 import Link from "next/link";
 import { SimpleMarkdown } from "./SimpleMarkdown";
 import { GitSyncDialog } from "./GitSyncDialog";
+import { NavHeader } from "./NavHeader";
 
 // ─── Auth types ──────────────────────────────────────────────────────────────
 
@@ -276,35 +277,7 @@ export default function ChatInterface({ branch, commitMessage }: GitContext) {
     <main className="flex flex-col w-full max-w-3xl h-dvh mx-auto px-4 py-6">
       {/* Header */}
       <header className="flex items-center justify-between mb-6 flex-shrink-0">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight text-white flex flex-wrap items-baseline gap-x-2">
-            <Link href="/" className="text-white no-underline hover:text-gray-300">
-              Primordia
-            </Link>
-            {process.env.VERCEL_ENV === "preview" &&
-              process.env.VERCEL_GIT_PULL_REQUEST_ID && (
-                <a
-                  href={`https://github.com/${process.env.VERCEL_GIT_REPO_OWNER}/${process.env.VERCEL_GIT_REPO_SLUG}/pull/${process.env.VERCEL_GIT_PULL_REQUEST_ID}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm font-normal text-blue-400 hover:text-blue-300"
-                >
-                  #{process.env.VERCEL_GIT_PULL_REQUEST_ID}
-                </a>
-              )}
-            {branch && (
-              <span className="text-sm font-normal text-gray-400 w-full sm:w-auto">
-                ({branch})
-              </span>
-            )}
-          </h1>
-          <p className="text-xs text-gray-400 mt-0.5">
-            A self-evolving application ·{" "}
-            <Link href="/changelog" className="text-blue-400 hover:text-blue-300">
-              Changelog
-            </Link>
-          </p>
-        </div>
+        <NavHeader branch={branch} subtitle="A self-evolving application" />
         {/* Hamburger menu */}
         <div className="relative" ref={menuRef}>
           <button
