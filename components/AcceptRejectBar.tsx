@@ -24,13 +24,20 @@ export default function AcceptRejectBar({ isPreviewInstance, previewParentBranch
 
   // Listen for a postMessage from a child preview window and trigger bun
   // install + dev server restart once the preview is accepted.
-  // Runs in any instance (including nested previewInstances acting as parents)
-  // and accepts messages from any origin so it works on all domains.
+  // Runs in any instance (including nested previewInstances acting as parents).
+  //
+  // Security: we only act on messages whose sender's opener is this window.
+  // The child always sends via `window.opener?.postMessage(...)`, so
+  // `event.source.opener === window` is true only for a direct child preview.
+  // `window.opener` is accessible cross-origin per the WindowProxy spec, so
+  // this works on any domain (e.g. primordia.exe.xyz) without origin allow-lists.
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
-      if (event.data?.type === "primordia:preview-accepted") {
-        fetch("/api/evolve/local/restart", { method: "POST" }).catch(() => {});
-      }
+      if (event.data?.type !== "primordia:preview-accepted") return;
+      // Verify the message came from a window that this window opened.
+      const source = event.source as Window | null;
+      if (!source || source.opener !== window) return;
+      fetch("/api/evolve/local/restart", { method: "POST" }).catch(() => {});
     }
 
     window.addEventListener("message", handleMessage);
