@@ -22,6 +22,28 @@ export default function AcceptRejectBar({ isPreviewInstance, previewParentBranch
   const [previewActionState, setPreviewActionState] = useState<"idle" | "loading" | "accepted" | "rejected">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // In the parent tab: listen for a postMessage from the preview window and
+  // trigger bun install + dev server restart once the preview is accepted.
+  useEffect(() => {
+    if (isPreviewInstance) return; // Only run in the parent tab
+
+    function handleMessage(event: MessageEvent) {
+      // Only trust messages from localhost (preview runs on a dynamic port).
+      try {
+        const { hostname } = new URL(event.origin);
+        if (hostname !== "localhost" && hostname !== "127.0.0.1") return;
+      } catch {
+        return; // Ignore messages from unknown/null origins
+      }
+      if (event.data?.type === "primordia:preview-accepted") {
+        fetch("/api/evolve/local/restart", { method: "POST" }).catch(() => {});
+      }
+    }
+
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, [isPreviewInstance]);
+
   // On Vercel preview deployments, fetch PR context for accept/reject.
   useEffect(() => {
     if (process.env.VERCEL_ENV !== "preview") return;
@@ -54,6 +76,8 @@ export default function AcceptRejectBar({ isPreviewInstance, previewParentBranch
       const data = (await res.json()) as { outcome?: string; error?: string };
       if (!res.ok) throw new Error(data.error ?? `API error: ${res.statusText}`);
       setPreviewActionState("accepted");
+      // Signal the parent tab to run bun install + restart its dev server.
+      try { window.opener?.postMessage({ type: "primordia:preview-accepted" }, "*"); } catch { /* ignore */ }
       // Focus the parent tab (opened this preview via target="_blank"), then
       // close this window so the user isn't left on a dead "port unbound" page.
       try { window.opener?.focus(); } catch { /* ignore cross-origin guard */ }
