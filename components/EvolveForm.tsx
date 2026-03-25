@@ -115,7 +115,7 @@ export default function EvolveForm({ branch }: EvolveFormProps = {}) {
   const [relatedIssues, setRelatedIssues] = useState<RelatedIssue[] | null>(null);
   const [pendingRequest, setPendingRequest] = useState<string | null>(null);
   const [evolveLoadingMsg, setEvolveLoadingMsg] = useState<string>("Checking for related issues…");
-  const [localEvolveSession, setLocalEvolveSession] = useState<LocalEvolveSession | null>(null);
+  const [, setLocalEvolveSession] = useState<LocalEvolveSession | null>(null);
   // deployPrBranch is only set on Vercel preview deployments (fetched from /api/deploy-context)
   const [deployPrBranch, setDeployPrBranch] = useState<string | null>(null);
 

@@ -10,7 +10,7 @@
 //   3. If signed in: shows an "Approve sign-in?" card with Approve / Reject.
 //   4. If not signed in: prompts the user to sign in first.
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -22,22 +22,26 @@ type Phase =
   | "done"          // approval confirmed
   | "error";        // something went wrong
 
-export default function ApprovePage() {
+function ApprovePageInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const tokenId = searchParams.get("token");
 
-  const [phase, setPhase] = useState<Phase>("loading");
+  // Initialise phase from tokenId synchronously so we never call setState
+  // inside an effect body (which triggers the react-hooks/set-state-in-effect rule).
+  const [phase, setPhase] = useState<Phase>(() =>
+    tokenId ? "loading" : "error"
+  );
   const [username, setUsername] = useState<string | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(() =>
+    tokenId
+      ? null
+      : "No token found in URL. This QR code may be invalid."
+  );
 
-  // On mount: check session status.
+  // On mount: check session status (only if we have a token).
   useEffect(() => {
-    if (!tokenId) {
-      setPhase("error");
-      setErrorMsg("No token found in URL. This QR code may be invalid.");
-      return;
-    }
+    if (!tokenId) return;
 
     fetch("/api/auth/session")
       .then((r) => r.json())
@@ -174,6 +178,14 @@ export default function ApprovePage() {
         </p>
       </div>
     </main>
+  );
+}
+
+export default function ApprovePage() {
+  return (
+    <Suspense>
+      <ApprovePageInner />
+    </Suspense>
   );
 }
 

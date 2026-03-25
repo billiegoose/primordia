@@ -112,10 +112,16 @@ export default function ChatInterface({ branch, commitMessage }: GitContext) {
     textarea.style.height = `${textarea.scrollHeight}px`;
   }, [input]);
 
-  // Cancel any in-flight polling when the component unmounts
+  // Cancel any in-flight polling when the component unmounts.
+  // We intentionally read pollingIntervalRef.current inside the cleanup so we
+  // cancel whatever interval is running at unmount time (not the value at
+  // mount time, which would always be null).
   useEffect(() => {
     return () => {
       if (pollingIntervalRef.current !== null) {
+        // We intentionally read the ref at cleanup time to cancel the active
+        // interval; the lint rule would have us capture at mount time instead.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
         clearInterval(pollingIntervalRef.current);
       }
     };
