@@ -73,8 +73,6 @@ export PATH="\$HOME/.bun/bin:\$PATH"
 
 REPO_URL="${REPO_URL}"
 REMOTE_DIR="${REMOTE_DIR}"
-LOG_FILE="\$HOME/primordia.log"
-PID_FILE="\$HOME/primordia.pid"
 
 echo "=== Remote setup on \$(hostname) ==="
 echo ""
@@ -127,35 +125,16 @@ cd "\${REMOTE_DIR}"
 bun install --frozen-lockfile
 echo ""
 
-# ── Stop any existing server ──────────────────────────────────────────────────
-if [[ -f "\$PID_FILE" ]]; then
-  OLD_PID=\$(cat "\$PID_FILE" 2>/dev/null || true)
-  if [[ -n "\$OLD_PID" ]] && kill -0 "\$OLD_PID" 2>/dev/null; then
-    echo "Stopping existing server (PID \$OLD_PID)..."
-    kill "\$OLD_PID" 2>/dev/null || true
-    sleep 2
-  fi
-  rm -f "\$PID_FILE"
-fi
-
-# ── Start the dev server ──────────────────────────────────────────────────────
-# Run with HOSTNAME=0.0.0.0 so the server binds to all interfaces and is
-# reachable at the server's public hostname, not just localhost.
-# NODE_ENV=development is set automatically by \`next dev\`, which enables the
-# fast local evolve flow (Claude Agent SDK + git worktrees).
-echo "Starting Primordia dev server..."
-cd "\${REMOTE_DIR}"
-: > "\$LOG_FILE"  # truncate old log
-nohup env HOSTNAME=0.0.0.0 bun run dev >> "\$LOG_FILE" 2>&1 &
-echo \$! > "\$PID_FILE"
-echo "  Server PID: \$(cat \$PID_FILE)"
-echo ""
+# ── Install / restart the systemd service ──────────────────────────────────────
+echo "Installing systemd service..."
+bash "\${REMOTE_DIR}/scripts/install-service.sh"
 
 # ── Wait for Next.js "Ready" signal ──────────────────────────────────────────
+echo ""
 echo "Waiting for server to be ready (up to 60s)..."
 for i in \$(seq 1 30); do
   sleep 2
-  if grep -q "Ready" "\$LOG_FILE" 2>/dev/null; then
+  if journalctl -u primordia -n 50 --no-pager 2>/dev/null | grep -q "Ready"; then
     echo "  Server is ready!"
     break
   fi
@@ -163,15 +142,15 @@ for i in \$(seq 1 30); do
 done
 
 echo ""
-echo "=== Recent server logs ==="
-tail -20 "\$LOG_FILE" || true
-echo "=========================="
+echo "=== Recent service logs ==="
+journalctl -u primordia -n 20 --no-pager || true
+echo "==========================="
 ENDSSH
 
 echo ""
 echo "Primordia is running on ${HOST}."
 echo ""
 echo "  Open:      http://${HOST}:3000"
-echo "  Logs:      ssh ${HOST} 'tail -f ~/primordia.log'"
-echo "  Stop:      ssh ${HOST} 'kill \$(cat ~/primordia.pid)'"
+echo "  Logs:      ssh ${HOST} 'journalctl -u primordia -f'"
+echo "  Stop:      ssh ${HOST} 'sudo systemctl stop primordia'"
 echo "  Redeploy:  bun run deploy-to-exe.dev ${SERVER_NAME}"
