@@ -11,7 +11,7 @@ import {
   startAuthentication,
 } from "@simplewebauthn/browser";
 
-type Tab = "passkey" | "qr";
+type Tab = "passkey" | "qr" | "exe-dev";
 
 // --- QR flow state ---
 type QrPhase =
@@ -24,17 +24,19 @@ type QrPhase =
 
 interface LoginClientProps {
   initialUser: { id: string; username: string } | null;
+  /** Email injected by the exe.dev proxy (X-ExeDev-Email header), or null. */
+  exeDevEmail?: string | null;
 }
 
-export default function LoginClient({ initialUser }: LoginClientProps) {
+export default function LoginClient({ initialUser, exeDevEmail }: LoginClientProps) {
   return (
     <Suspense>
-      <LoginPageInner initialUser={initialUser} />
+      <LoginPageInner initialUser={initialUser} exeDevEmail={exeDevEmail} />
     </Suspense>
   );
 }
 
-function LoginPageInner({ initialUser }: LoginClientProps) {
+function LoginPageInner({ initialUser, exeDevEmail }: LoginClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   // After login, redirect to ?next= if present, otherwise "/".
@@ -287,7 +289,7 @@ function LoginPageInner({ initialUser }: LoginClientProps) {
               Sign in to Primordia
             </h1>
             <p className="text-sm text-gray-400 mt-1">
-              Use a passkey or scan a QR code from another device.
+              Use a passkey, QR code, or your exe.dev account.
             </p>
           </div>
         )}
@@ -316,6 +318,17 @@ function LoginPageInner({ initialUser }: LoginClientProps) {
             }`}
           >
             QR Code
+          </button>
+          <button
+            type="button"
+            onClick={() => { stopPolling(); setTab("exe-dev"); }}
+            className={`flex-1 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              tab === "exe-dev"
+                ? "bg-gray-700 text-white"
+                : "text-gray-400 hover:text-gray-200"
+            }`}
+          >
+            exe.dev
           </button>
         </div>
 
@@ -490,6 +503,52 @@ function LoginPageInner({ initialUser }: LoginClientProps) {
               )}
             </div>
           )}
+
+          {/* ── exe.dev tab ── */}
+          {tab === "exe-dev" && (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-300 text-center">
+                Sign in using your{" "}
+                <a
+                  href="https://exe.dev"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-400 hover:text-blue-300 underline"
+                >
+                  exe.dev
+                </a>{" "}
+                account. Your username will be your exe.dev email address.
+              </p>
+
+              {exeDevEmail ? (
+                /* exe.dev proxy already injected the email — one-click sign-in */
+                <div className="space-y-3">
+                  <p className="text-xs text-gray-500 text-center">
+                    Signed in to exe.dev as
+                  </p>
+                  <p className="text-sm font-medium text-white text-center break-all">
+                    {exeDevEmail}
+                  </p>
+                  <a
+                    href={`/api/auth/exe-dev?next=${encodeURIComponent(nextUrl)}`}
+                    className="block w-full px-4 py-2.5 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white transition-colors text-center"
+                  >
+                    <ExeDevIcon />
+                    Sign in as {exeDevEmail}
+                  </a>
+                </div>
+              ) : (
+                /* Not yet authenticated with exe.dev — redirect through login */
+                <a
+                  href={`/api/auth/exe-dev?next=${encodeURIComponent(nextUrl)}`}
+                  className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+                >
+                  <ExeDevIcon />
+                  Sign in with exe.dev
+                </a>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Back link */}
@@ -519,6 +578,28 @@ function KeyIcon() {
       aria-hidden="true"
     >
       <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
+    </svg>
+  );
+}
+
+/** Tiny inline icon for the exe.dev button. */
+function ExeDevIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={{ display: "inline", verticalAlign: "middle", marginRight: 6 }}
+    >
+      {/* Terminal prompt ">" symbol */}
+      <polyline points="9 18 15 12 9 6" />
     </svg>
   );
 }
