@@ -37,6 +37,23 @@ function LoginPageInner() {
   // After login, redirect to ?next= if present, otherwise "/".
   const nextUrl = searchParams.get("next") ?? "/";
 
+  // --- Already-logged-in state ---
+  // null = not yet checked, { username } = logged in, false = not logged in
+  const [currentUser, setCurrentUser] = useState<{ id: string; username: string } | null | false>(null);
+  // If user dismisses the "already logged in" banner, show the normal form.
+  const [ignoringSession, setIgnoringSession] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/auth/session")
+      .then((r) => r.json())
+      .then((data: { user: { id: string; username: string } | null }) => {
+        setCurrentUser(data.user ?? false);
+      })
+      .catch(() => {
+        setCurrentUser(false);
+      });
+  }, []);
+
   const [tab, setTab] = useState<Tab>("passkey");
 
   // --- Passkey state ---
@@ -238,20 +255,57 @@ function LoginPageInner() {
 
   const isLoading = !!loading;
 
+  // Show "already logged in" banner when session is confirmed and user hasn't
+  // dismissed it.
+  const showLoggedInBanner =
+    currentUser !== null && currentUser !== false && !ignoringSession;
+
   return (
     <main className="flex flex-col items-center justify-center min-h-dvh px-4 py-12 bg-gray-950">
       <div className="w-full max-w-sm space-y-6">
-        {/* Header */}
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-white tracking-tight">
-            Sign in to Primordia
-          </h1>
-          <p className="text-sm text-gray-400 mt-1">
-            Use a passkey or scan a QR code from another device.
-          </p>
-        </div>
 
-        {/* Tab switcher */}
+        {/* ── Already-logged-in banner ── */}
+        {showLoggedInBanner && (
+          <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 space-y-4 text-center">
+            <div className="space-y-1">
+              <p className="text-sm text-gray-400">You&apos;re currently signed in as</p>
+              <p className="text-lg font-semibold text-white">
+                {(currentUser as { id: string; username: string }).username}
+              </p>
+            </div>
+            <div className="space-y-2 pt-1">
+              <button
+                type="button"
+                onClick={() => router.push(nextUrl)}
+                className="w-full px-4 py-2.5 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+              >
+                Proceed to Primordia &rarr;
+              </button>
+              <button
+                type="button"
+                onClick={() => setIgnoringSession(true)}
+                className="w-full px-4 py-2.5 rounded-lg text-sm font-medium bg-gray-800 hover:bg-gray-700 text-gray-300 transition-colors"
+              >
+                Log in as a different user
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Header (hidden when showing the already-logged-in banner) */}
+        {!showLoggedInBanner && (
+          <div className="text-center">
+            <h1 className="text-2xl font-bold text-white tracking-tight">
+              Sign in to Primordia
+            </h1>
+            <p className="text-sm text-gray-400 mt-1">
+              Use a passkey or scan a QR code from another device.
+            </p>
+          </div>
+        )}
+
+        {/* Tab switcher + form (hidden when showing the already-logged-in banner) */}
+        {!showLoggedInBanner && (<>
         <div className="flex rounded-lg bg-gray-800 p-1 gap-1">
           <button
             type="button"
@@ -456,6 +510,7 @@ function LoginPageInner() {
             &larr; Back to Primordia
           </Link>
         </p>
+        </>)}
       </div>
     </main>
   );
