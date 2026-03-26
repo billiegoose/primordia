@@ -335,6 +335,7 @@ export async function startLocalEvolve(
 
   await new Promise<void>((resolve, reject) => {
     // omit the PORT env var so Next.js can pick an available port
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { PORT, ...envWithoutPort } = process.env;
     const proc = spawn('bun', ['run', 'dev'], {
       cwd: session.worktreePath,

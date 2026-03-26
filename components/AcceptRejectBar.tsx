@@ -22,6 +22,28 @@ export default function AcceptRejectBar({ isPreviewInstance, previewParentBranch
   const [previewActionState, setPreviewActionState] = useState<"idle" | "loading" | "accepted" | "rejected">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Listen for a postMessage from a child preview window and trigger bun
+  // install + dev server restart once the preview is accepted.
+  // Runs in any instance (including nested previewInstances acting as parents).
+  //
+  // Security: we only act on messages whose sender's opener is this window.
+  // The child always sends via `window.opener?.postMessage(...)`, so
+  // `event.source.opener === window` is true only for a direct child preview.
+  // `window.opener` is accessible cross-origin per the WindowProxy spec, so
+  // this works on any domain (e.g. primordia.exe.xyz) without origin allow-lists.
+  useEffect(() => {
+    function handleMessage(event: MessageEvent) {
+      if (event.data?.type !== "primordia:preview-accepted") return;
+      // Verify the message came from a window that this window opened.
+      const source = event.source as Window | null;
+      if (!source || source.opener !== window) return;
+      fetch("/api/evolve/local/restart", { method: "POST" }).catch(() => {});
+    }
+
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, []);
+
   // On Vercel preview deployments, fetch PR context for accept/reject.
   useEffect(() => {
     if (process.env.VERCEL_ENV !== "preview") return;
@@ -54,6 +76,8 @@ export default function AcceptRejectBar({ isPreviewInstance, previewParentBranch
       const data = (await res.json()) as { outcome?: string; error?: string };
       if (!res.ok) throw new Error(data.error ?? `API error: ${res.statusText}`);
       setPreviewActionState("accepted");
+      // Signal the parent tab to run bun install + restart its dev server.
+      try { window.opener?.postMessage({ type: "primordia:preview-accepted" }, "*"); } catch { /* ignore */ }
       // Focus the parent tab (opened this preview via target="_blank"), then
       // close this window so the user isn't left on a dead "port unbound" page.
       try { window.opener?.focus(); } catch { /* ignore cross-origin guard */ }

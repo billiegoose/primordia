@@ -23,6 +23,7 @@ import { useState, useRef, useEffect, useCallback, FormEvent } from "react";
 import Link from "next/link";
 import { MarkdownContent } from "./SimpleMarkdown";
 import { GitSyncDialog } from "./GitSyncDialog";
+import { NavHeader } from "./NavHeader";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -67,7 +68,11 @@ interface LocalEvolveSession {
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-export default function EvolveForm() {
+interface EvolveFormProps {
+  branch?: string | null;
+}
+
+export default function EvolveForm({ branch }: EvolveFormProps = {}) {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -110,7 +115,7 @@ export default function EvolveForm() {
   const [relatedIssues, setRelatedIssues] = useState<RelatedIssue[] | null>(null);
   const [pendingRequest, setPendingRequest] = useState<string | null>(null);
   const [evolveLoadingMsg, setEvolveLoadingMsg] = useState<string>("Checking for related issues…");
-  const [localEvolveSession, setLocalEvolveSession] = useState<LocalEvolveSession | null>(null);
+  const [, setLocalEvolveSession] = useState<LocalEvolveSession | null>(null);
   // deployPrBranch is only set on Vercel preview deployments (fetched from /api/deploy-context)
   const [deployPrBranch, setDeployPrBranch] = useState<string | null>(null);
 
@@ -508,10 +513,7 @@ export default function EvolveForm() {
     <main className="flex flex-col w-full max-w-3xl mx-auto px-4 py-6 min-h-dvh">
       {/* Header */}
       <header className="flex items-center justify-between mb-8 flex-shrink-0">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight text-white">Primordia</h1>
-          <p className="text-xs text-gray-400 mt-0.5">Propose a change</p>
-        </div>
+        <NavHeader branch={branch} subtitle="Propose a change" />
         {/* Hamburger menu */}
         <div className="relative" ref={menuRef}>
           <button

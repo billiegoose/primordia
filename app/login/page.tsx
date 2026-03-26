@@ -4,7 +4,7 @@
 // Also supports cross-device sign-in via QR code.
 // Uses @simplewebauthn/browser for the browser-side WebAuthn ceremony.
 
-import { useState, useEffect, useRef } from "react";
+import { Suspense, useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -24,6 +24,14 @@ type QrPhase =
   | "error";
 
 export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginPageInner />
+    </Suspense>
+  );
+}
+
+function LoginPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   // After login, redirect to ?next= if present, otherwise "/".
