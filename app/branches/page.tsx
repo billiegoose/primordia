@@ -1,48 +1,157 @@
-"use client";
-
 // app/branches/page.tsx
 // Shows all local git branches as a tree rooted at `main`, with links to
 // active preview servers. Auto-refreshes every 3 seconds.
-// Only meaningful in development mode — the API returns 403 in production.
+// Only meaningful in development mode.
+//
+// Implemented as a React Server Component — data is fetched directly on the
+// server, no separate API route needed. This also makes diagnostics trivial
+// since all git output and process state are available inline.
 
-import { useState, useEffect } from "react";
+import { spawnSync } from "child_process";
 import Link from "next/link";
-import type { BranchData, BranchesResponse } from "@/app/api/branches/route";
+import { sessions } from "@/lib/local-evolve-sessions";
 
-// ─── Tree builder ─────────────────────────────────────────────────────────────
+export const dynamic = "force-dynamic";
+
+// ─── Types ─────────────────────────────────────────────────────────────────────
+
+interface BranchData {
+  name: string;
+  /** True if this branch is currently checked out in the main repo. */
+  isCurrent: boolean;
+  /** Value of git config branch.<name>.parent — set by the local evolve flow. */
+  parent: string | null;
+  /** Preview server URL if a session is active, null otherwise. */
+  previewUrl: string | null;
+  /** Session status, or null if no session is active for this branch. */
+  sessionStatus: string | null;
+}
 
 interface BranchNode extends BranchData {
   children: BranchNode[];
 }
 
+interface GitResult {
+  stdout: string;
+  stderr: string;
+  code: number;
+  spawnError: string | null;
+}
+
+interface DiagnosticInfo {
+  cwd: string;
+  nodeEnv: string;
+  gitVersion: GitResult;
+  branchList: GitResult;
+  currentBranch: GitResult;
+  activeSessions: number;
+}
+
+// ─── Git helpers ───────────────────────────────────────────────────────────────
+
+function runGit(args: string[], cwd: string): GitResult {
+  try {
+    const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+    return {
+      stdout: (result.stdout ?? "").trim(),
+      stderr: (result.stderr ?? "").trim(),
+      code: result.status ?? 1,
+      spawnError: result.error ? result.error.message : null,
+    };
+  } catch (err) {
+    return {
+      stdout: "",
+      stderr: "",
+      code: 1,
+      spawnError: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+function gitConfigValue(key: string, cwd: string): string | null {
+  const r = runGit(["config", key], cwd);
+  return r.code === 0 && r.stdout ? r.stdout : null;
+}
+
+// ─── Data fetching ──────────────────────────────────────────────────────────────
+
+function getBranchData(): {
+  branches: BranchData[];
+  diag: DiagnosticInfo;
+  mainServerUrl: string;
+} {
+  const cwd = process.cwd();
+  const port = process.env.PORT ?? "3000";
+
+  const gitVersion = runGit(["--version"], cwd);
+  const branchList = runGit(["branch", "--format=%(refname:short)"], cwd);
+  const currentBranchResult = runGit(["branch", "--show-current"], cwd);
+
+  const diag: DiagnosticInfo = {
+    cwd,
+    nodeEnv: process.env.NODE_ENV ?? "unknown",
+    gitVersion,
+    branchList,
+    currentBranch: currentBranchResult,
+    activeSessions: sessions.size,
+  };
+
+  const allBranchNames = branchList.stdout
+    ? branchList.stdout.split("\n").filter(Boolean)
+    : [];
+  const current = currentBranchResult.stdout || "main";
+
+  const branches: BranchData[] = allBranchNames.map((name) => {
+    const parent = gitConfigValue(`branch.${name}.parent`, cwd);
+    // Sessions are keyed by sessionId = branch name with 'evolve/' prefix stripped.
+    const sessionId = name.replace(/^evolve\//, "");
+    const session = sessions.get(sessionId);
+    return {
+      name,
+      isCurrent: name === current,
+      parent,
+      previewUrl: session?.previewUrl ?? null,
+      sessionStatus: session?.status ?? null,
+    };
+  });
+
+  // Sort: main first, evolve/* alphabetically, then any other branches
+  branches.sort((a, b) => {
+    if (a.name === "main") return -1;
+    if (b.name === "main") return 1;
+    const aE = a.name.startsWith("evolve/");
+    const bE = b.name.startsWith("evolve/");
+    if (aE && !bE) return -1;
+    if (!aE && bE) return 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  const mainServerUrl = `http://localhost:${port}`;
+  return { branches, diag, mainServerUrl };
+}
+
+// ─── Tree builder ───────────────────────────────────────────────────────────────
+
 function buildTree(branches: BranchData[]): BranchNode[] {
   const byName = new Map<string, BranchNode>(
     branches.map((b) => [b.name, { ...b, children: [] }]),
   );
-
   const roots: BranchNode[] = [];
 
   for (const node of byName.values()) {
     if (node.name === "main") {
-      // Always the first root
       roots.unshift(node);
     } else if (node.parent && byName.has(node.parent)) {
       byName.get(node.parent)!.children.push(node);
     } else if (node.parent && !byName.has(node.parent)) {
-      // Parent branch no longer exists locally — attach to main
       const main = byName.get("main");
-      if (main) {
-        main.children.push(node);
-      } else {
-        roots.push(node);
-      }
+      if (main) main.children.push(node);
+      else roots.push(node);
     } else {
-      // No parent config — top-level branch
       roots.push(node);
     }
   }
 
-  // Sort children alphabetically at every level
   for (const node of byName.values()) {
     node.children.sort((a, b) => a.name.localeCompare(b.name));
   }
@@ -50,7 +159,7 @@ function buildTree(branches: BranchData[]): BranchNode[] {
   return roots;
 }
 
-// ─── Status display helpers ───────────────────────────────────────────────────
+// ─── Status display helpers ──────────────────────────────────────────────────────
 
 const STATUS_COLOR: Record<string, string> = {
   ready: "text-green-400",
@@ -68,7 +177,7 @@ const STATUS_LABEL: Record<string, string> = {
   error: "error",
 };
 
-// ─── Recursive branch row ─────────────────────────────────────────────────────
+// ─── Recursive branch row ───────────────────────────────────────────────────────
 
 function BranchRow({
   node,
@@ -79,16 +188,15 @@ function BranchRow({
 }: {
   node: BranchNode;
   depth: number;
-  /** The tree-drawing characters accumulated from ancestor levels. */
   linePrefix: string;
   isLast: boolean;
   mainServerUrl: string;
 }) {
   const isRoot = depth === 0;
-  // Tree connector for this row
   const connector = isRoot ? "" : isLast ? "└── " : "├── ";
-  // Prefix passed to each child row
-  const childLinePrefix = isRoot ? "" : linePrefix + (isLast ? "    " : "│   ");
+  const childLinePrefix = isRoot
+    ? ""
+    : linePrefix + (isLast ? "    " : "│   ");
 
   const isMain = node.name === "main";
   const url = isMain ? mainServerUrl : node.previewUrl;
@@ -102,38 +210,25 @@ function BranchRow({
   return (
     <>
       <div className="flex items-baseline gap-1.5 font-mono text-sm leading-7 flex-wrap">
-        {/* Tree-drawing prefix */}
         {!isRoot && (
           <span className="text-gray-600 whitespace-pre select-none shrink-0">
             {linePrefix + connector}
           </span>
         )}
-
-        {/* Dot — green when a preview URL is known, dim otherwise */}
         <span className={url ? "text-green-400 shrink-0" : "text-gray-600 shrink-0"}>
           ●
         </span>
-
-        {/* Branch name */}
-        <span
-          className={
-            node.isCurrent ? "text-white font-bold" : "text-gray-300"
-          }
-        >
+        <span className={node.isCurrent ? "text-white font-bold" : "text-gray-300"}>
           {node.name}
           {node.isCurrent && (
             <span className="text-gray-500 font-normal ml-1">(current)</span>
           )}
         </span>
-
-        {/* Session status badge (not shown for main) */}
         {statusLabel && !isMain && (
           <span className={`text-xs shrink-0 ${statusColor}`}>
             [{statusLabel}]
           </span>
         )}
-
-        {/* Preview server link */}
         {url && (
           <a
             href={url}
@@ -145,8 +240,6 @@ function BranchRow({
           </a>
         )}
       </div>
-
-      {/* Render children recursively */}
       {node.children.map((child, i) => (
         <BranchRow
           key={child.name}
@@ -161,38 +254,73 @@ function BranchRow({
   );
 }
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
+// ─── Diagnostic result row helper ────────────────────────────────────────────────
+
+function GitResultRow({
+  label,
+  result,
+}: {
+  label: string;
+  result: GitResult;
+}) {
+  return (
+    <div>
+      <p className="text-gray-400">
+        {label}{" "}
+        <span
+          className={
+            result.code === 0 ? "text-green-600" : "text-red-400"
+          }
+        >
+          (exit {result.code})
+        </span>
+        {result.spawnError && (
+          <span className="text-red-400"> — spawn error: {result.spawnError}</span>
+        )}
+      </p>
+      {result.stdout && (
+        <pre className="text-green-600 whitespace-pre-wrap pl-2">
+          {result.stdout}
+        </pre>
+      )}
+      {result.stderr && (
+        <pre className="text-red-400 whitespace-pre-wrap pl-2">
+          stderr: {result.stderr}
+        </pre>
+      )}
+      {!result.stdout && !result.stderr && !result.spawnError && (
+        <pre className="text-gray-700 pl-2">(no output)</pre>
+      )}
+    </div>
+  );
+}
+
+// ─── Page ───────────────────────────────────────────────────────────────────────
 
 export default function BranchesPage() {
-  const [data, setData] = useState<BranchesResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  if (process.env.NODE_ENV !== "development") {
+    return (
+      <main className="flex flex-col w-full max-w-3xl mx-auto px-4 py-6 min-h-screen">
+        <p className="text-red-400 text-sm">
+          Branches page is only available in development mode.
+        </p>
+      </main>
+    );
+  }
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const res = await fetch("/api/branches");
-        if (!res.ok) {
-          const body = (await res.json()) as { error?: string };
-          setError(body.error ?? `HTTP ${res.status}`);
-          return;
-        }
-        const json = (await res.json()) as BranchesResponse;
-        setData(json);
-        setError(null);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load branches");
-      }
-    }
-
-    load();
-    const interval = setInterval(load, 3_000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const tree = data ? buildTree(data.branches) : [];
+  const { branches, diag, mainServerUrl } = getBranchData();
+  const tree = buildTree(branches);
 
   return (
     <main className="flex flex-col w-full max-w-3xl mx-auto px-4 py-6 min-h-screen">
+      {/* Auto-refresh every 3 seconds (dev tool, no client component needed) */}
+      {/* eslint-disable-next-line @next/next/no-sync-scripts */}
+      <script
+        dangerouslySetInnerHTML={{
+          __html: "setTimeout(()=>location.reload(),3000)",
+        }}
+      />
+
       {/* Header */}
       <header className="flex items-center justify-between mb-8 flex-shrink-0">
         <div>
@@ -214,24 +342,12 @@ export default function BranchesPage() {
         </Link>
       </header>
 
-      {/* Error state */}
-      {error && (
-        <div className="text-red-400 text-sm mb-4 bg-red-950/30 border border-red-800 rounded px-3 py-2">
-          {error}
-        </div>
-      )}
-
-      {/* Loading state */}
-      {!data && !error && (
-        <p className="text-gray-500 text-sm font-mono">Loading branches…</p>
-      )}
-
-      {/* Branch tree */}
-      {data && tree.length === 0 && (
-        <p className="text-gray-500 text-sm font-mono">No local branches found.</p>
-      )}
-
-      {data && tree.length > 0 && (
+      {/* Branch tree or empty state */}
+      {tree.length === 0 ? (
+        <p className="text-gray-500 text-sm font-mono">
+          No local branches found.
+        </p>
+      ) : (
         <div className="space-y-0">
           {tree.map((node, i) => (
             <BranchRow
@@ -240,19 +356,47 @@ export default function BranchesPage() {
               depth={0}
               linePrefix=""
               isLast={i === tree.length - 1}
-              mainServerUrl={data.mainServerUrl}
+              mainServerUrl={mainServerUrl}
             />
           ))}
         </div>
       )}
 
       {/* Legend */}
-      {data && (
-        <div className="mt-8 border-t border-gray-800 pt-4 text-xs text-gray-600 font-mono space-y-1">
-          <p>● green = preview server active · ● dim = no active session</p>
-          <p>Refreshes every 3 s · Development mode only</p>
+      <div className="mt-8 border-t border-gray-800 pt-4 text-xs text-gray-600 font-mono space-y-1">
+        <p>● green = preview server active · ● dim = no active session</p>
+        <p>Refreshes every 3 s · Development mode only</p>
+      </div>
+
+      {/* Diagnostics — always visible to help debug empty/unexpected output */}
+      <details className="mt-6 text-xs font-mono open:ring-1 open:ring-gray-800 open:rounded open:p-3">
+        <summary className="text-gray-600 cursor-pointer hover:text-gray-400 select-none py-1">
+          ▶ Diagnostics ({branches.length} branch
+          {branches.length === 1 ? "" : "es"} found,{" "}
+          {diag.activeSessions} active session
+          {diag.activeSessions === 1 ? "" : "s"})
+        </summary>
+        <div className="mt-3 space-y-3 text-gray-500">
+          <p>
+            <span className="text-gray-400">cwd:</span> {diag.cwd}
+          </p>
+          <p>
+            <span className="text-gray-400">NODE_ENV:</span> {diag.nodeEnv}
+          </p>
+          <GitResultRow
+            label="git --version"
+            result={diag.gitVersion}
+          />
+          <GitResultRow
+            label="git branch --format=%(refname:short)"
+            result={diag.branchList}
+          />
+          <GitResultRow
+            label="git branch --show-current"
+            result={diag.currentBranch}
+          />
         </div>
-      )}
+      </details>
     </main>
   );
 }
