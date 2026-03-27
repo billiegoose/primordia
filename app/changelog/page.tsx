@@ -7,10 +7,11 @@
 
 import fs from "fs";
 import path from "path";
-import Link from "next/link";
 import type { Metadata } from "next";
 import { MarkdownContent } from "@/components/SimpleMarkdown";
+import { PageNavBar } from "@/components/PageNavBar";
 import { buildPageTitle } from "@/lib/page-title";
+import { getSessionUser } from "@/lib/auth";
 
 export function generateMetadata(): Metadata {
   return {
@@ -36,26 +37,16 @@ function loadEntries(): ChangelogEntry[] {
   }
 }
 
-export default function ChangelogPage() {
-  const entries = loadEntries();
+export default async function ChangelogPage() {
+  const [entries, sessionUser] = await Promise.all([
+    Promise.resolve(loadEntries()),
+    getSessionUser(),
+  ]);
 
   return (
     <main className="flex flex-col w-full max-w-3xl mx-auto px-4 py-6 min-h-screen">
-      {/* Header */}
-      <header className="flex items-center justify-between mb-8 flex-shrink-0">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight text-white">
-            Primordia
-          </h1>
-          <p className="text-xs text-gray-400 mt-0.5">Changelog</p>
-        </div>
-        <Link
-          href="/"
-          className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
-        >
-          ← Back to app
-        </Link>
-      </header>
+      {/* Header — session resolved server-side so the hamburger is instant */}
+      <PageNavBar subtitle="Changelog" currentPage="changelog" initialSession={sessionUser} />
 
       {/* Entry list */}
       {entries.length === 0 ? (

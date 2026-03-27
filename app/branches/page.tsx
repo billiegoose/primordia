@@ -11,7 +11,9 @@ import { headers } from "next/headers";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { sessions } from "@/lib/local-evolve-sessions";
+import { PageNavBar } from "@/components/PageNavBar";
 import { buildPageTitle } from "@/lib/page-title";
+import { getSessionUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -319,7 +321,10 @@ export default async function BranchesPage() {
   // matching the pattern used in app/api/auth/exe-dev/route.ts (getPublicOrigin).
   // When running behind exe.dev's proxy, x-forwarded-proto/host give the real URL.
   // Falls back to http://localhost:PORT for plain local dev.
-  const headerStore = await headers();
+  const [headerStore, sessionUser] = await Promise.all([
+    headers(),
+    getSessionUser(),
+  ]);
   const proto = headerStore.get("x-forwarded-proto") ?? "http";
   const host =
     headerStore.get("x-forwarded-host") ??
@@ -330,26 +335,8 @@ export default async function BranchesPage() {
   return (
     <main className="flex flex-col w-full max-w-3xl mx-auto px-4 py-6 min-h-screen">
 
-      {/* Header */}
-      <header className="flex items-center justify-between mb-8 flex-shrink-0">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight text-white">
-            Primordia
-          </h1>
-          <p className="text-xs text-gray-400 mt-0.5">
-            Local Branches ·{" "}
-            <Link href="/changelog" className="text-blue-400 hover:text-blue-300">
-              Changelog
-            </Link>
-          </p>
-        </div>
-        <Link
-          href="/"
-          className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
-        >
-          ← Back to app
-        </Link>
-      </header>
+      {/* Header — session resolved server-side so the hamburger is instant */}
+      <PageNavBar subtitle="Local Branches" currentPage="branches" initialSession={sessionUser} />
 
       {/* Branch tree or empty state */}
       {tree.length === 0 ? (
