@@ -13,6 +13,7 @@ export type LocalSessionStatus =
   | 'running-claude'
   | 'starting-server'
   | 'ready'
+  | 'disconnected'
   | 'error';
 
 export interface LocalSession {
@@ -164,6 +165,10 @@ export async function startLocalEvolve(
   session: LocalSession,
   taskRequest: string,
   repoRoot: string,
+  /** Public hostname (no port) to use when constructing preview URLs.
+   *  Comes from the x-forwarded-host request header so the URL is correct
+   *  when running behind a reverse proxy (e.g. exe.dev). Defaults to "localhost". */
+  publicHostname: string = "localhost",
 ): Promise<void> {
   // Step 1 — Create a new git worktree on a fresh branch
   appendProgress(session, `- [ ] Creating worktree \`${session.branch}\`…\n`);
@@ -364,7 +369,7 @@ export async function startLocalEvolve(
 
       // Next.js 15 prints "Ready" when the dev server is up
       if (!session.previewUrl && session.port !== null && text.includes('Ready')) {
-        session.previewUrl = `http://localhost:${session.port}`;
+        session.previewUrl = `http://${publicHostname}:${session.port}`;
         session.status = 'ready';
         resolve();
       }
@@ -376,7 +381,37 @@ export async function startLocalEvolve(
     proc.on('close', (code) => {
       if (session.status !== 'ready') {
         reject(new Error(`Dev server exited (code ${code ?? 'unknown'}) before becoming ready`));
+        return;
       }
+
+      // The dev server has terminated after having been ready. This happens when
+      // the preview was accepted or rejected (manage/route.ts calls process.exit),
+      // when the server was killed manually, or when it crashed.
+      //
+      // Wait a few seconds for any in-flight git cleanup (worktree remove, branch
+      // delete) to complete, then check whether the branch still exists:
+      //   - Branch gone  → normal accept/reject flow; remove session from map.
+      //   - Branch exists → unexpected termination (crashed / killed manually);
+      //                     mark session as disconnected so the UI can inform the user.
+      setTimeout(() => {
+        void (async () => {
+          try {
+            session.devServerProcess = null;
+            const branchCheck = await runGit(['branch', '--list', session.branch], repoRoot);
+            if (branchCheck.stdout.trim() === '') {
+              // Branch was cleaned up → accept/reject completed normally.
+              sessions.delete(session.id);
+            } else {
+              // Branch still exists → server died unexpectedly.
+              session.status = 'disconnected';
+            }
+          } catch {
+            // If git fails for any reason, fall back to marking disconnected.
+            session.status = 'disconnected';
+            session.devServerProcess = null;
+          }
+        })();
+      }, 3_000);
     });
 
     // Safety timeout: 2 minutes
