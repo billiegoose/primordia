@@ -69,6 +69,8 @@ primordia/
 │   ├── layout.tsx                 ← Root layout (font, metadata, body styling)
 │   ├── page.tsx                   ← Entry point — renders <ChatInterface>
 │   ├── globals.css                ← Tailwind base imports only
+│   ├── branches/
+│   │   └── page.tsx               ← Server component: git branch tree with diagnostics (dev only)
 │   ├── changelog/
 │   │   └── page.tsx               ← Server component: renders auto-generated changelog
 │   ├── evolve/
