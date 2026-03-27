@@ -11,6 +11,10 @@
 //
 // This keeps the navbar consistent with ChatInterface and EvolveForm while
 // ensuring visitors without an account see a clean, uncluttered header.
+//
+// Performance: Server Component pages can pass `initialSession` (resolved
+// server-side via getSessionUser()) so the hamburger is visible on first
+// render with no client-side fetch needed.
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
@@ -34,24 +38,34 @@ interface PageNavBarProps {
    * NavHeader's subtitle and the corresponding dropdown item.
    */
   currentPage?: "changelog" | "branches";
+  /**
+   * Session user resolved server-side and passed as a prop, so the
+   * hamburger menu appears immediately without a client-side fetch.
+   * When provided (even as null), skips the /api/auth/session fetch.
+   */
+  initialSession?: SessionUser | null;
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export function PageNavBar({ subtitle, branch, currentPage }: PageNavBarProps) {
+export function PageNavBar({ subtitle, branch, currentPage, initialSession }: PageNavBarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
   // undefined = still loading; null = not logged in; object = logged in
-  const [sessionUser, setSessionUser] = useState<SessionUser | null | undefined>(undefined);
+  // If initialSession was passed by the server, use it directly — no fetch needed.
+  const [sessionUser, setSessionUser] = useState<SessionUser | null | undefined>(
+    initialSession !== undefined ? initialSession : undefined,
+  );
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Fetch session once on mount
+  // Only fetch session client-side when no server-provided value was given.
   useEffect(() => {
+    if (initialSession !== undefined) return;
     fetch("/api/auth/session")
       .then((res) => res.json())
       .then((data: { user: SessionUser | null }) => setSessionUser(data.user))
       .catch(() => setSessionUser(null));
-  }, []);
+  }, [initialSession]);
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });

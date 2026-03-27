@@ -11,6 +11,7 @@ import type { Metadata } from "next";
 import { MarkdownContent } from "@/components/SimpleMarkdown";
 import { PageNavBar } from "@/components/PageNavBar";
 import { buildPageTitle } from "@/lib/page-title";
+import { getSessionUser } from "@/lib/auth";
 
 export function generateMetadata(): Metadata {
   return {
@@ -36,13 +37,16 @@ function loadEntries(): ChangelogEntry[] {
   }
 }
 
-export default function ChangelogPage() {
-  const entries = loadEntries();
+export default async function ChangelogPage() {
+  const [entries, sessionUser] = await Promise.all([
+    Promise.resolve(loadEntries()),
+    getSessionUser(),
+  ]);
 
   return (
     <main className="flex flex-col w-full max-w-3xl mx-auto px-4 py-6 min-h-screen">
-      {/* Header — uses the shared navbar (hamburger menu shown only when logged in) */}
-      <PageNavBar subtitle="Changelog" currentPage="changelog" />
+      {/* Header — session resolved server-side so the hamburger is instant */}
+      <PageNavBar subtitle="Changelog" currentPage="changelog" initialSession={sessionUser} />
 
       {/* Entry list */}
       {entries.length === 0 ? (
