@@ -172,6 +172,8 @@ These must be set in:
 | Variable | Required | Description |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Yes | Powers the chat interface and Claude Code in the evolve pipeline |
+| `GITHUB_TOKEN` | No | Personal access token (repo scope) — enables authenticated git pull/push in GitSyncDialog; falls back to `origin` remote if unset |
+| `GITHUB_REPO` | No | `owner/repo` slug (e.g. `primordia-org/primordia`) — used alongside `GITHUB_TOKEN` to build the authenticated remote URL |
 
 ---
 
