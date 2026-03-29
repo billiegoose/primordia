@@ -13,9 +13,7 @@
 import * as path from 'path';
 import Anthropic from '@anthropic-ai/sdk';
 import {
-  sessions,
   startLocalEvolve,
-  appendProgress,
   runGit,
   type LocalSession,
 } from '../../../../lib/local-evolve-sessions';
@@ -112,31 +110,23 @@ export async function POST(request: Request) {
     progressText: '',
     port: null,
     previewUrl: null,
-    devServerProcess: null,
     request: body.request,
     createdAt: Date.now(),
   };
 
-  sessions.set(sessionId, session);
-
-  // Persist to DB so the session survives server restarts and is accessible
-  // from the dedicated session page immediately after redirect.
-  try {
-    const db = await getDb();
-    await db.createEvolveSession({
-      id: session.id,
-      branch: session.branch,
-      worktreePath: session.worktreePath,
-      status: session.status,
-      progressText: session.progressText,
-      port: session.port,
-      previewUrl: session.previewUrl,
-      request: session.request,
-      createdAt: session.createdAt,
-    });
-  } catch {
-    // Non-fatal: in-memory session is still active.
-  }
+  // Persist to DB so the session page is reachable immediately after redirect.
+  const db = await getDb();
+  await db.createEvolveSession({
+    id: session.id,
+    branch: session.branch,
+    worktreePath: session.worktreePath,
+    status: session.status,
+    progressText: session.progressText,
+    port: session.port,
+    previewUrl: session.previewUrl,
+    request: session.request,
+    createdAt: session.createdAt,
+  });
 
   // Determine the public hostname for preview URLs. When running behind exe.dev's
   // reverse proxy, x-forwarded-host contains the real hostname (e.g. myserver.exe.xyz).
@@ -145,20 +135,8 @@ export async function POST(request: Request) {
   const publicHostname = fwdHost ? fwdHost.split(":")[0] : "localhost";
 
   // Fire-and-forget — run async so POST returns immediately with the session ID.
-  startLocalEvolve(session, body.request, repoRoot, publicHostname).catch((err) => {
-    session.status = 'error';
-    const msg = err instanceof Error ? err.message : String(err);
-    // Include the cause chain if present (e.g. the original SDK process-exit error
-    // when we've wrapped it with additional stderr context).
-    const causeMsg =
-      err instanceof Error && err.cause instanceof Error
-        ? `\n\n*Caused by*: ${err.cause.message}`
-        : '';
-    appendProgress(
-      session,
-      `\n\n❌ **Error**: ${msg}${causeMsg}\n`,
-    );
-  });
+  // startLocalEvolve handles all error states internally and writes them to SQLite.
+  void startLocalEvolve(session, body.request, repoRoot, publicHostname);
 
   return Response.json({ sessionId });
 }
@@ -181,33 +159,19 @@ export async function GET(request: Request) {
     return Response.json({ error: 'sessionId query param required' }, { status: 400 });
   }
 
-  // Check the in-memory map first (active sessions with a live ChildProcess).
-  const liveSession = sessions.get(sessionId);
-  if (liveSession) {
-    return Response.json({
-      status: liveSession.status,
-      progressText: liveSession.progressText,
-      port: liveSession.port,
-      previewUrl: liveSession.previewUrl,
-      branch: liveSession.branch,
-      request: liveSession.request,
-    });
-  }
-
-  // Fall back to DB for sessions that finished or survived a server restart.
   try {
     const db = await getDb();
-    const dbSession = await db.getEvolveSession(sessionId);
-    if (!dbSession) {
+    const session = await db.getEvolveSession(sessionId);
+    if (!session) {
       return Response.json({ error: 'Session not found' }, { status: 404 });
     }
     return Response.json({
-      status: dbSession.status,
-      progressText: dbSession.progressText,
-      port: dbSession.port,
-      previewUrl: dbSession.previewUrl,
-      branch: dbSession.branch,
-      request: dbSession.request,
+      status: session.status,
+      progressText: session.progressText,
+      port: session.port,
+      previewUrl: session.previewUrl,
+      branch: session.branch,
+      request: session.request,
     });
   } catch {
     return Response.json({ error: 'Session not found' }, { status: 404 });

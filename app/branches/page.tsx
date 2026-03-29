@@ -10,7 +10,7 @@ import { spawnSync } from "child_process";
 import { headers } from "next/headers";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { sessions } from "@/lib/local-evolve-sessions";
+import { getDb } from "@/lib/db";
 import { PageNavBar } from "@/components/PageNavBar";
 import { PruneBranchesButton } from "@/components/PruneBranchesButton";
 import { buildPageTitle } from "@/lib/page-title";
@@ -84,15 +84,25 @@ function gitConfigValue(key: string, cwd: string): string | null {
 
 // ─── Data fetching ──────────────────────────────────────────────────────────────
 
-function getBranchData(): {
+async function getBranchData(): Promise<{
   branches: BranchData[];
   diag: DiagnosticInfo;
-} {
+}> {
   const cwd = process.cwd();
 
   const gitVersion = runGit(["--version"], cwd);
   const branchList = runGit(["branch", "--format=%(refname:short)"], cwd);
   const currentBranchResult = runGit(["branch", "--show-current"], cwd);
+
+  const allBranchNames = branchList.stdout
+    ? branchList.stdout.split("\n").filter(Boolean)
+    : [];
+  const current = currentBranchResult.stdout || "main";
+
+  // Load all evolve sessions from SQLite and build a lookup by branch name.
+  const db = await getDb();
+  const dbSessions = await db.listEvolveSessions();
+  const sessionByBranch = new Map(dbSessions.map((s) => [s.branch, s]));
 
   const diag: DiagnosticInfo = {
     cwd,
@@ -100,19 +110,12 @@ function getBranchData(): {
     gitVersion,
     branchList,
     currentBranch: currentBranchResult,
-    activeSessions: sessions.size,
+    activeSessions: dbSessions.length,
   };
-
-  const allBranchNames = branchList.stdout
-    ? branchList.stdout.split("\n").filter(Boolean)
-    : [];
-  const current = currentBranchResult.stdout || "main";
 
   const branches: BranchData[] = allBranchNames.map((name) => {
     const parent = gitConfigValue(`branch.${name}.parent`, cwd);
-    // Sessions are keyed by sessionId = branch name with 'evolve/' prefix stripped.
-    const sessionId = name.replace(/^evolve\//, "");
-    const session = sessions.get(sessionId);
+    const session = sessionByBranch.get(name);
     return {
       name,
       isCurrent: name === current,
@@ -315,7 +318,7 @@ export default async function BranchesPage() {
     );
   }
 
-  const { branches, diag } = getBranchData();
+  const { branches, diag } = await getBranchData();
   const tree = buildTree(branches);
 
   // Compute the public-facing URL for this server instance using forwarded headers,
