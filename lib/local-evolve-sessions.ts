@@ -250,6 +250,20 @@ export async function startLocalEvolve(
           fs.copyFileSync(srcExtra, dstDb + ext);
         }
       }
+
+      // Delete this session from the copied DB so the child worktree doesn't
+      // start with an incomplete in-progress session visible in its history.
+      // The copy was taken mid-session (after "creating worktree" and "bun install"
+      // were already logged), so the row is confusing noise in the child instance.
+      try {
+        const { Database } = await import('bun:sqlite');
+        const childDb = new Database(dstDb);
+        childDb.prepare('DELETE FROM evolve_sessions WHERE id = ?').run(session.id);
+        childDb.close();
+      } catch {
+        // Non-fatal — the child worktree will just have a stale partial session.
+      }
+
       appendProgress(session, `- [x] Copied \`${dbName}\` (isolated data branch)\n`);
     }
 
