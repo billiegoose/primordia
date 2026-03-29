@@ -34,6 +34,8 @@ interface BranchData {
   previewUrl: string | null;
   /** Session status, or null if no session is active for this branch. */
   sessionStatus: string | null;
+  /** Evolve session ID, or null if no session exists for this branch. */
+  sessionId: string | null;
 }
 
 interface BranchNode extends BranchData {
@@ -122,6 +124,7 @@ async function getBranchData(): Promise<{
       parent,
       previewUrl: session?.previewUrl ?? null,
       sessionStatus: session?.status ?? null,
+      sessionId: session?.id ?? null,
     };
   });
 
@@ -238,6 +241,14 @@ function BranchRow({
           <span className={`text-xs shrink-0 ${statusColor}`}>
             [{statusLabel}]
           </span>
+        )}
+        {node.sessionId && (
+          <Link
+            href={`/evolve/session/${node.sessionId}`}
+            className="text-purple-400 hover:text-purple-300 text-xs ml-1 shrink-0"
+          >
+            session ↗
+          </Link>
         )}
         {url && (
           <a
@@ -369,7 +380,7 @@ export default async function BranchesPage() {
 
       {/* Legend */}
       <div className="mt-8 border-t border-gray-800 pt-4 text-xs text-gray-600 font-mono space-y-1">
-        <p>● green = preview server active · ● dim = no active session</p>
+        <p>● green = preview server active · ● dim = no active session · <span className="text-purple-400">session ↗</span> = view evolve session</p>
         <p>Development mode only</p>
       </div>
 
