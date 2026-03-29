@@ -20,6 +20,7 @@ import {
   type LocalSession,
 } from '../../../../lib/local-evolve-sessions';
 import { getSessionUser } from '../../../../lib/auth';
+import { getDb } from '../../../../lib/db';
 
 /** Ask Claude to choose a short, descriptive kebab-case slug for the request.
  *  Falls back to the first-4-words approach if the API call fails. */
@@ -112,9 +113,30 @@ export async function POST(request: Request) {
     port: null,
     previewUrl: null,
     devServerProcess: null,
+    request: body.request,
+    createdAt: Date.now(),
   };
 
   sessions.set(sessionId, session);
+
+  // Persist to DB so the session survives server restarts and is accessible
+  // from the dedicated session page immediately after redirect.
+  try {
+    const db = await getDb();
+    await db.createEvolveSession({
+      id: session.id,
+      branch: session.branch,
+      worktreePath: session.worktreePath,
+      status: session.status,
+      progressText: session.progressText,
+      port: session.port,
+      previewUrl: session.previewUrl,
+      request: session.request,
+      createdAt: session.createdAt,
+    });
+  } catch {
+    // Non-fatal: in-memory session is still active.
+  }
 
   // Determine the public hostname for preview URLs. When running behind exe.dev's
   // reverse proxy, x-forwarded-host contains the real hostname (e.g. myserver.exe.xyz).
@@ -159,16 +181,35 @@ export async function GET(request: Request) {
     return Response.json({ error: 'sessionId query param required' }, { status: 400 });
   }
 
-  const session = sessions.get(sessionId);
-  if (!session) {
-    return Response.json({ error: 'Session not found' }, { status: 404 });
+  // Check the in-memory map first (active sessions with a live ChildProcess).
+  const liveSession = sessions.get(sessionId);
+  if (liveSession) {
+    return Response.json({
+      status: liveSession.status,
+      progressText: liveSession.progressText,
+      port: liveSession.port,
+      previewUrl: liveSession.previewUrl,
+      branch: liveSession.branch,
+      request: liveSession.request,
+    });
   }
 
-  return Response.json({
-    status: session.status,
-    progressText: session.progressText,
-    port: session.port,
-    previewUrl: session.previewUrl,
-    branch: session.branch,
-  });
+  // Fall back to DB for sessions that finished or survived a server restart.
+  try {
+    const db = await getDb();
+    const dbSession = await db.getEvolveSession(sessionId);
+    if (!dbSession) {
+      return Response.json({ error: 'Session not found' }, { status: 404 });
+    }
+    return Response.json({
+      status: dbSession.status,
+      progressText: dbSession.progressText,
+      port: dbSession.port,
+      previewUrl: dbSession.previewUrl,
+      branch: dbSession.branch,
+      request: dbSession.request,
+    });
+  } catch {
+    return Response.json({ error: 'Session not found' }, { status: 404 });
+  }
 }

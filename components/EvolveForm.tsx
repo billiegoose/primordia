@@ -4,64 +4,46 @@
 // The "submit a request" form for Primordia's evolve pipeline.
 // Rendered at /evolve — a dedicated page, separate from the main chat interface.
 //
-// Evolve flow (local dev and exe.dev — NODE_ENV=development):
-//   1. User submits a request.
-//   2. POST /api/evolve/local — creates a git worktree on a fresh branch, runs
-//      Claude Code via @anthropic-ai/claude-agent-sdk, then starts a Next.js
-//      dev server with PREVIEW_BRANCH set.
-//   3. UI polls /api/evolve/local?sessionId=... for status updates.
-//   4. When ready, shows a preview link.
+// On submit: POSTs to /api/evolve/local, then redirects to /evolve/session/{id}
+// where live Claude Code progress is tracked.
 
 import { useState, useRef, useEffect, useCallback, FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { MarkdownContent } from "./SimpleMarkdown";
 import { GitSyncDialog } from "./GitSyncDialog";
 import { NavHeader } from "./NavHeader";
 
-// ─── Types ──────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface SessionUser {
   id: string;
   username: string;
 }
 
-interface Message {
-  role: "assistant" | "system";
-  content: string;
-  id?: string;
-}
-
-interface LocalEvolveSession {
-  id: string;
-  status: "starting" | "running-claude" | "starting-server" | "ready" | "error";
-  progressText: string;
-  port: number | null;
-  previewUrl: string | null;
-  branch: string;
-}
-
-// ─── Component ──────────────────────────────────────────────────────────────
+// ─── Props ────────────────────────────────────────────────────────────────────
 
 interface EvolveFormProps {
   branch?: string | null;
 }
 
+// ─── Component ────────────────────────────────────────────────────────────────
+
 export default function EvolveForm({ branch }: EvolveFormProps = {}) {
+  const router = useRouter();
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Fetch session on mount
   useEffect(() => {
     fetch("/api/auth/session")
       .then((res) => res.json())
-      .then((data: { user: SessionUser | null }) => {
-        setSessionUser(data.user);
-      })
+      .then((data: { user: SessionUser | null }) => setSessionUser(data.user))
       .catch(() => {});
   }, []);
 
@@ -83,20 +65,7 @@ export default function EvolveForm({ branch }: EvolveFormProps = {}) {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [menuOpen, handleClickOutside]);
 
-  const [submittedRequest, setSubmittedRequest] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [, setLocalEvolveSession] = useState<LocalEvolveSession | null>(null);
-
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const localPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // Auto-scroll to the latest message
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  // Auto-resize the textarea as the user types
+  // Auto-resize textarea as the user types
   useEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
@@ -104,44 +73,21 @@ export default function EvolveForm({ branch }: EvolveFormProps = {}) {
     textarea.style.height = `${textarea.scrollHeight}px`;
   }, [input]);
 
-  // Cancel any in-flight polling when the component unmounts
-  useEffect(() => {
-    return () => {
-      if (localPollingRef.current !== null) clearInterval(localPollingRef.current);
-    };
-  }, []);
-
-  // ── Handlers ──────────────────────────────────────────────────────────────
+  // ── Submit ───────────────────────────────────────────────────────────────────
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     const trimmed = input.trim();
     if (!trimmed || isLoading) return;
 
-    setInput("");
     setIsLoading(true);
-    setSubmitted(true);
-    setSubmittedRequest(trimmed);
-
-    await handleLocalEvolveSubmit(trimmed);
-
-    setIsLoading(false);
-  }
-
-  // ── Local evolve ───────────────────────────────────────────────────────────
-
-  async function handleLocalEvolveSubmit(request: string) {
-    const statusMsgId = `local-evolve-status-${Date.now()}`;
-    setMessages((prev) => [
-      ...prev,
-      { role: "assistant", id: statusMsgId, content: "⏳ Setting up local preview…" },
-    ]);
+    setError(null);
 
     try {
       const res = await fetch("/api/evolve/local", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ request }),
+        body: JSON.stringify({ request: trimmed }),
       });
 
       const data = (await res.json()) as { sessionId?: string; error?: string };
@@ -150,56 +96,12 @@ export default function EvolveForm({ branch }: EvolveFormProps = {}) {
         throw new Error(data.error ?? `API error: ${res.statusText}`);
       }
 
-      startLocalEvolvePolling(data.sessionId!, statusMsgId);
+      // Redirect to the dedicated session page for live progress tracking.
+      router.push(`/evolve/session/${data.sessionId}`);
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Something went wrong.";
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === statusMsgId
-            ? { ...m, content: `Failed to start local evolve: ${errorMsg}` }
-            : m,
-        ),
-      );
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+      setIsLoading(false);
     }
-  }
-
-  function startLocalEvolvePolling(sessionId: string, statusMsgId: string) {
-    if (localPollingRef.current !== null) clearInterval(localPollingRef.current);
-
-    localPollingRef.current = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/evolve/local?sessionId=${sessionId}`);
-        if (!res.ok) return;
-
-        const data = (await res.json()) as LocalEvolveSession;
-        setLocalEvolveSession({ ...data, id: sessionId });
-
-        const progressContent = `**Local Evolve Progress**:\n\n${data.progressText || "⏳ Starting…"}`;
-        setMessages((prev) =>
-          prev.map((m) => (m.id === statusMsgId ? { ...m, content: progressContent } : m)),
-        );
-
-        if (data.status === "ready" || data.status === "error") {
-          clearInterval(localPollingRef.current!);
-          localPollingRef.current = null;
-
-          if (data.status === "ready" && data.previewUrl !== null) {
-            const previewUrl = data.previewUrl;
-            setMessages((prev) => [
-              ...prev,
-              {
-                role: "assistant",
-                content:
-                  `🚀 Preview ready: [${previewUrl}](${previewUrl})\n\n` +
-                  `Open the preview link and use the **Accept** or **Reject** bar there to apply or discard the changes.`,
-              },
-            ]);
-          }
-        }
-      } catch {
-        // Silently ignore transient network errors between polls
-      }
-    }, 5_000);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -207,15 +109,6 @@ export default function EvolveForm({ branch }: EvolveFormProps = {}) {
       e.preventDefault();
       handleSubmit(e as unknown as FormEvent);
     }
-  }
-
-  function handleReset() {
-    setSubmitted(false);
-    setInput("");
-    setMessages([]);
-    setSubmittedRequest(null);
-    setLocalEvolveSession(null);
-    if (localPollingRef.current !== null) clearInterval(localPollingRef.current);
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -321,75 +214,43 @@ export default function EvolveForm({ branch }: EvolveFormProps = {}) {
       </header>
 
       {/* Description banner */}
-      {!submitted && (
-        <div className="mb-6 px-4 py-3 rounded-lg bg-amber-900/40 border border-amber-700/50 text-amber-300 text-sm">
-          <strong className="font-semibold">Evolve Primordia</strong> —{" "}
-          Describe a change you want to make to this app.
-        </div>
-      )}
+      <div className="mb-6 px-4 py-3 rounded-lg bg-amber-900/40 border border-amber-700/50 text-amber-300 text-sm">
+        <strong className="font-semibold">Evolve Primordia</strong> —{" "}
+        Describe a change you want to make to this app.
+      </div>
 
-      {/* Submitted request — shown after form is submitted so user can see their request */}
-      {submitted && submittedRequest && (
-        <div className="mb-6 px-4 py-3 rounded-lg bg-gray-900 border border-gray-700 text-sm">
-          <p className="text-gray-400 text-xs mb-1 font-medium uppercase tracking-wide">Your request</p>
-          <p className="text-gray-100 leading-relaxed whitespace-pre-wrap">{submittedRequest}</p>
-        </div>
-      )}
-
-      {/* Progress messages (shown after submission) */}
-      {submitted && messages.length > 0 && (
-        <div className="flex-1 space-y-4 mb-6">
-          {messages.map((msg, i) => (
-            <div key={msg.id ?? i} className="px-4 py-3 rounded-lg bg-gray-800 text-gray-100 text-sm leading-relaxed">
-              <MarkdownContent text={msg.content} />
-            </div>
-          ))}
-          {isLoading && (
-            <div className="text-sm text-gray-500 animate-pulse">Starting…</div>
-          )}
-          <div ref={messagesEndRef} />
+      {/* Error message */}
+      {error && (
+        <div className="mb-4 px-4 py-3 rounded-lg bg-red-900/40 border border-red-700/50 text-red-300 text-sm">
+          ❌ {error}
         </div>
       )}
 
       {/* Input form */}
-      {!submitted ? (
-        <form
-          onSubmit={handleSubmit}
-          className="flex flex-col gap-3 border border-gray-800 rounded-xl bg-gray-900 p-4"
-        >
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Describe the change you want to make to this app…"
-            rows={4}
-            disabled={isLoading}
-            className="resize-none bg-transparent text-sm text-gray-100 placeholder-gray-600 outline-none max-h-64 leading-relaxed"
-          />
-          <div className="flex justify-end">
-            <button
-              type="submit"
-              disabled={isLoading || !input.trim()}
-              className="px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-amber-600 hover:bg-amber-500 disabled:bg-amber-900 text-white disabled:cursor-not-allowed"
-            >
-              {isLoading ? "…" : "Submit Request"}
-            </button>
-          </div>
-        </form>
-      ) : (
-        /* After submission, offer to submit another request */
-        !isLoading && (
-          <div className="mt-4">
-            <button
-              onClick={handleReset}
-              className="text-sm text-gray-400 hover:text-gray-200 transition-colors"
-            >
-              ← Submit another request
-            </button>
-          </div>
-        )
-      )}
+      <form
+        onSubmit={handleSubmit}
+        className="flex flex-col gap-3 border border-gray-800 rounded-xl bg-gray-900 p-4"
+      >
+        <textarea
+          ref={textareaRef}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Describe the change you want to make to this app…"
+          rows={4}
+          disabled={isLoading}
+          className="resize-none bg-transparent text-sm text-gray-100 placeholder-gray-600 outline-none max-h-64 leading-relaxed"
+        />
+        <div className="flex justify-end">
+          <button
+            type="submit"
+            disabled={isLoading || !input.trim()}
+            className="px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-amber-600 hover:bg-amber-500 disabled:bg-amber-900 text-white disabled:cursor-not-allowed"
+          >
+            {isLoading ? "Submitting…" : "Submit Request"}
+          </button>
+        </div>
+      </form>
     </main>
   );
 }

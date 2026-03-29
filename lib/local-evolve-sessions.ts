@@ -7,6 +7,7 @@ import { query, type HookCallback, type PreToolUseHookInput } from '@anthropic-a
 import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
+import { getDb } from './db';
 
 export type LocalSessionStatus =
   | 'starting'
@@ -27,6 +28,10 @@ export interface LocalSession {
   previewUrl: string | null;
   /** Spawned dev server process. Null when not running or after cleanup. */
   devServerProcess: ChildProcess | null;
+  /** The original change request text submitted by the user. */
+  request: string;
+  /** Unix timestamp (ms) when the session was created. */
+  createdAt: number;
 }
 
 /** All active local evolve sessions, keyed by session ID. */
@@ -40,6 +45,38 @@ export function appendProgress(session: LocalSession, text: string): void {
   if (session.progressText.length > 100_000) {
     session.progressText = '[…earlier output truncated…]\n' + session.progressText.slice(-90_000);
   }
+}
+
+// ─── DB persistence ────────────────────────────────────────────────────────────
+
+/** Per-session timestamp of the last DB write — used for throttling. */
+const _lastDbFlush = new Map<string, number>();
+
+/**
+ * Fire-and-forget: write the current session state to SQLite.
+ *
+ * Throttled to at most one write every 2 seconds per session to avoid
+ * hammering the DB during the tight Claude Code message loop. Pass
+ * `force = true` to bypass the throttle for status changes and errors.
+ */
+export function persistSessionAsync(session: LocalSession, force = false): void {
+  const now = Date.now();
+  const last = _lastDbFlush.get(session.id) ?? 0;
+  if (!force && now - last < 2_000) return;
+  _lastDbFlush.set(session.id, now);
+
+  void getDb()
+    .then((db) =>
+      db.updateEvolveSession(session.id, {
+        status: session.status,
+        progressText: session.progressText,
+        port: session.port,
+        previewUrl: session.previewUrl,
+      }),
+    )
+    .catch(() => {
+      // Non-fatal: in-memory is the source of truth for active sessions.
+    });
 }
 
 // ─── Tool use summarizer ──────────────────────────────────────────────────────
@@ -193,6 +230,7 @@ export async function startLocalEvolve(
     `- [ ] Creating worktree \`${session.branch}\`…`,
     `- [x] Worktree created on branch \`${session.branch}\``,
   );
+  persistSessionAsync(session, true);
 
   // Step 2 — Run bun install in the worktree.
   // Bun is fast enough that a full install is preferable to a shared symlink,
@@ -209,6 +247,7 @@ export async function startLocalEvolve(
           '- [ ] Running `bun install`…',
           '- [x] `bun install` complete',
         );
+        persistSessionAsync(session, true);
         resolve();
       } else {
         reject(new Error(`bun install failed with exit code ${code}`));
@@ -247,6 +286,7 @@ export async function startLocalEvolve(
   // Step 5 — Run Claude Code via the Agent SDK
   session.status = 'running-claude';
   appendProgress(session, `\n### 🤖 Claude Code\n\n`);
+  persistSessionAsync(session, true);
 
   const prompt =
     `Read PRIMORDIA.md first for architecture context, then implement the following change:\n\n` +
@@ -301,6 +341,8 @@ export async function startLocalEvolve(
             appendProgress(session, `- 🔧 ${summary}\n`);
           }
         }
+        // Throttled persist so the session page receives live progress updates.
+        persistSessionAsync(session);
       } else if (message.type === 'result') {
         if (message.subtype !== 'success') {
           // `errors` is populated by the SDK when subtype is e.g. error_during_execution.
@@ -332,6 +374,7 @@ export async function startLocalEvolve(
   }
 
   appendProgress(session, `\n✅ **Claude Code finished.**\n`);
+  persistSessionAsync(session, true);
 
   // Step 5 — Start Next.js dev server and detect the port from its output.
   // We let Next.js pick its own port (defaulting to 3000, or the next available
@@ -342,6 +385,7 @@ export async function startLocalEvolve(
   //   "⚠ Port 3000 is in use by process 85352, using available port 3002 instead."
   session.status = 'starting-server';
   appendProgress(session, `\n### 🚀 Starting preview server…\n\n`);
+  persistSessionAsync(session, true);
 
   await new Promise<void>((resolve, reject) => {
     // omit the PORT env var so Next.js can pick an available port
@@ -376,6 +420,7 @@ export async function startLocalEvolve(
       if (!session.previewUrl && session.port !== null && text.includes('Ready')) {
         session.previewUrl = `http://${publicHostname}:${session.port}`;
         session.status = 'ready';
+        persistSessionAsync(session, true);
         resolve();
       }
     };
@@ -409,6 +454,7 @@ export async function startLocalEvolve(
             } else {
               // Branch still exists → server died unexpectedly.
               session.status = 'disconnected';
+              persistSessionAsync(session, true);
             }
           } catch {
             // If git fails for any reason, fall back to marking disconnected.
@@ -428,6 +474,7 @@ export async function startLocalEvolve(
   });
 
   appendProgress(session, `\n✅ **Ready on port ${session.port}**\n`);
+  persistSessionAsync(session, true);
 }
 
 // ─── Auto conflict resolution ─────────────────────────────────────────────────
