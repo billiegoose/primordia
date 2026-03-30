@@ -84,6 +84,7 @@ export default async function EvolveSessionPage({
       initialStatus={session.status}
       initialPreviewUrl={session.previewUrl}
       branch={branch}
+      sessionBranch={session.branch}
       canAcceptReject={canAcceptReject}
     />
   );

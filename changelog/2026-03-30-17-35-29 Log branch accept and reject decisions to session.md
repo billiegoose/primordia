@@ -40,18 +40,36 @@
 ### `components/EvolveSessionView.tsx`
 - Added `"accepted"` and `"rejected"` to the `EvolveSessionData` status union and all
   terminal-status arrays (polling stop condition, initial poll skip).
-- The **preview link** section now shows only the URL. **Accept Changes** and **Reject**
-  buttons live in their own separate section so the three choices (submit a follow-up
-  request, accept changes, reject changes) are visually distinct.
+- The **preview link** section now shows only the URL. The three decision actions
+  (Accept, Reject, Follow-up) live in a unified card beneath it.
 - After a successful accept, the component calls `POST /api/evolve/local/restart`
   directly (no more postMessage round-trip through the child window).
 - Added informational banners: green "✅ Changes accepted" and red "🗑️ Changes
   rejected", shown once a decision has been recorded.
-- The preview link, accept/reject section, and follow-up form are hidden once status
-  is `"accepted"` or `"rejected"`.
-- Accept and Reject buttons are hidden (replaced by an explanatory note) when
-  `canAcceptReject` is false — i.e. when the session branch is not a direct child of
-  the currently checked-out branch.
+- The preview link and three-action card are hidden once status is `"accepted"` or
+  `"rejected"`.
+- **Redesigned decision UX**: the three choices — **Accept Changes**, **Reject Changes**,
+  and **Follow-up Changes** — are presented as equal-weight buttons in a flex row
+  (each `flex-1`, no visual hierarchy favouring one over the others).
+- Each button behaves like a toggle: clicking it expands a confirmation/input panel
+  beneath the row; clicking the same button again collapses the panel. Only one
+  panel is open at a time.
+  - **Accept panel**: names the preview branch and target branch, asks "Do you wish
+    to do that?", and shows a **Confirm** button that calls `handleAccept`.
+  - **Reject panel**: names the preview branch, asks "Do you wish to do that?", and
+    shows a **Confirm** button that calls `handleReject`.
+  - **Follow-up panel**: shows the description text, a textarea that auto-focuses
+    when the panel opens, and a **Submit follow-up** button.
+- The active button is highlighted with a colour tint (green / red / amber) so users
+  can see which panel is open; all three buttons are otherwise visually identical.
+- Accept and Reject panels show an "unavailable" message (instead of a Confirm
+  button) when `canAcceptReject` is false — i.e. when the session branch is not a
+  direct child of the currently checked-out branch.
+- Added `sessionBranch` prop (the preview branch name) so the confirmation copy can
+  name the exact branch without waiting for the first poll response.
+- `handleFollowupSubmit` no longer takes a `React.FormEvent` parameter — the
+  follow-up is now triggered by a plain button `onClick` rather than a `<form>`
+  `onSubmit`.
 
 ### `app/evolve/session/[id]/page.tsx`
 - Replaced `isSessionBranchDescendantOfCurrent` (which used `git merge-base
@@ -61,6 +79,8 @@
 - Computes `canAcceptReject` from the parent-branch check and passes it to
   `EvolveSessionView`. The value is `false` when the config key is absent or
   does not match the current branch.
+- Passes `sessionBranch={session.branch}` to `EvolveSessionView` so the
+  confirmation copy can name the preview branch without waiting for polling.
 
 ### `components/AcceptRejectBar.tsx` / `app/layout.tsx`
 - `AcceptRejectBar` is no longer rendered in the root layout — child preview servers
@@ -90,9 +110,13 @@ the process is always bound to its port while it is running, regardless of wheth
 the parent server restarted or the in-memory Map was reset. One code path — no
 fallbacks that can silently bitrot.
 
-The accept/reject buttons live in their own section, visually separate from the preview
-URL and the follow-up form. The three choices a user can make — submit a follow-up,
-accept, or reject — are now clearly delineated rather than mixed into the preview box.
+The three choices a user can make — accept, reject, or submit a follow-up — are
+presented as equal-weight buttons. None of them is visually privileged over the others;
+all three are the same size, same weight, same position in the row. Each button opens a
+confirmation panel beneath the row (two-phase interaction): the user has to explicitly
+click Confirm or Submit follow-up, so accidental accept/reject clicks cannot fire
+immediately. The panel also names the exact branch being merged or deleted, giving
+users full context before they commit to the action.
 
 The accept/reject buttons are hidden unless the session branch is a direct child of the
 current branch. The check reads `git config branch.<name>.parent`, which is written at

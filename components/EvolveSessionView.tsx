@@ -4,7 +4,7 @@
 // Client component rendered by /evolve/session/[id].
 // Polls /api/evolve/local?sessionId=... and displays live Claude Code progress.
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { MarkdownContent } from "./SimpleMarkdown";
 import { NavHeader } from "./NavHeader";
 import { GitSyncDialog } from "./GitSyncDialog";
@@ -31,7 +31,10 @@ interface EvolveSessionViewProps {
   initialProgressText: string;
   initialStatus: string;
   initialPreviewUrl: string | null;
+  /** The currently checked-out branch (parent). Used in confirmation copy and NavHeader. */
   branch?: string | null;
+  /** The preview branch name created for this session. */
+  sessionBranch: string;
   /** True when the session branch is a direct child of the current branch, so Accept/Reject are safe to show. */
   canAcceptReject: boolean;
 }
@@ -45,6 +48,7 @@ export default function EvolveSessionView({
   initialStatus,
   initialPreviewUrl,
   branch,
+  sessionBranch,
   canAcceptReject,
 }: EvolveSessionViewProps) {
   const [progressText, setProgressText] = useState(initialProgressText);
@@ -57,8 +61,11 @@ export default function EvolveSessionView({
   const [followupError, setFollowupError] = useState<string | null>(null);
   const [acceptRejectLoading, setAcceptRejectLoading] = useState(false);
   const [acceptRejectError, setAcceptRejectError] = useState<string | null>(null);
+  /** Which of the three action panels is currently expanded, or null if all collapsed. */
+  const [activeAction, setActiveAction] = useState<"accept" | "reject" | "followup" | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const followupTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Auto-scroll to bottom as progress grows
   useEffect(() => {
@@ -114,8 +121,15 @@ export default function EvolveSessionView({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]); // intentionally omit initialStatus — run once on mount
 
-  async function handleFollowupSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  // Auto-focus the follow-up textarea whenever the follow-up panel opens.
+  useEffect(() => {
+    if (activeAction === "followup") {
+      // Small delay so the DOM is painted before we focus.
+      setTimeout(() => followupTextareaRef.current?.focus(), 0);
+    }
+  }, [activeAction]);
+
+  async function handleFollowupSubmit() {
     const trimmed = followupText.trim();
     if (!trimmed) return;
 
@@ -193,6 +207,13 @@ export default function EvolveSessionView({
       setAcceptRejectLoading(false);
     }
   }
+
+  // Toggle an action panel open/closed. Clicking the active button collapses the panel.
+  const toggleAction = useCallback((action: "accept" | "reject" | "followup") => {
+    setActiveAction(prev => (prev === action ? null : action));
+    setAcceptRejectError(null);
+    setFollowupError(null);
+  }, []);
 
   const isTerminal =
     status === "ready" ||
@@ -306,66 +327,134 @@ export default function EvolveSessionView({
         </div>
       )}
 
-      {/* Accept / Reject — separate section so the three choices are visually distinct */}
+      {/* Three-action panel — shown when the preview is ready */}
       {status === "ready" && (
-        <div className="mb-6 px-4 py-4 rounded-lg bg-gray-900 border border-gray-700 text-sm">
-          <p className="text-gray-200 font-semibold mb-3">Accept or reject changes</p>
-          {canAcceptReject ? (
-            <>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleAccept}
-                  disabled={acceptRejectLoading}
-                  className="px-3 py-1.5 text-xs bg-green-700 hover:bg-green-600 rounded text-white disabled:opacity-50"
-                >
-                  {acceptRejectLoading ? "…" : "Accept Changes"}
-                </button>
-                <button
-                  onClick={handleReject}
-                  disabled={acceptRejectLoading}
-                  className="px-3 py-1.5 text-xs bg-red-800 hover:bg-red-700 rounded text-white disabled:opacity-50"
-                >
-                  {acceptRejectLoading ? "…" : "Reject"}
-                </button>
-              </div>
-              {acceptRejectError && (
-                <p className="text-red-400 text-xs mt-2 whitespace-pre-wrap">{acceptRejectError}</p>
-              )}
-            </>
-          ) : (
-            <p className="text-gray-500 text-xs">
-              Accept and Reject are unavailable — this session&apos;s branch is not based on the
-              currently checked-out branch.
-            </p>
-          )}
-        </div>
-      )}
+        <div className="mb-6 rounded-lg bg-gray-900 border border-gray-700 text-sm overflow-hidden">
 
-      {/* Follow-up request form — only when ready and no decision has been made yet */}
-      {status === "ready" && previewUrl !== null && (
-        <form onSubmit={handleFollowupSubmit} className="mb-6 px-4 py-4 rounded-lg bg-gray-900 border border-gray-700 text-sm">
-          <p className="text-gray-200 font-semibold mb-1">Submit a follow-up request</p>
-          <p className="text-gray-400 text-xs mb-3">
-            Address feedback on the changes, e.g. &quot;I got this error when using it:&quot; or &quot;please change the design of the button&quot;.
-          </p>
-          <textarea
-            rows={4}
-            value={followupText}
-            onChange={(e) => setFollowupText(e.target.value)}
-            placeholder="Describe what to fix or improve…"
-            className="w-full bg-gray-800 text-gray-100 placeholder-gray-500 border border-gray-700 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50 mb-3"
-          />
-          {followupError && (
-            <p className="text-red-400 text-xs mb-2">{followupError}</p>
+          {/* ── Button row ── */}
+          <div className="flex">
+            <button
+              onClick={() => toggleAction("accept")}
+              className={`flex-1 px-4 py-3 text-sm font-medium border-r border-gray-700 transition-colors ${
+                activeAction === "accept"
+                  ? "bg-green-900/40 text-green-200"
+                  : "text-gray-300 hover:bg-gray-800 hover:text-white"
+              }`}
+            >
+              Accept Changes
+            </button>
+            <button
+              onClick={() => toggleAction("reject")}
+              className={`flex-1 px-4 py-3 text-sm font-medium border-r border-gray-700 transition-colors ${
+                activeAction === "reject"
+                  ? "bg-red-900/40 text-red-200"
+                  : "text-gray-300 hover:bg-gray-800 hover:text-white"
+              }`}
+            >
+              Reject Changes
+            </button>
+            <button
+              onClick={() => toggleAction("followup")}
+              className={`flex-1 px-4 py-3 text-sm font-medium transition-colors ${
+                activeAction === "followup"
+                  ? "bg-amber-900/40 text-amber-200"
+                  : "text-gray-300 hover:bg-gray-800 hover:text-white"
+              }`}
+            >
+              Follow-up Changes
+            </button>
+          </div>
+
+          {/* ── Accept panel ── */}
+          {activeAction === "accept" && (
+            <div className="px-4 py-4 border-t border-gray-700">
+              {canAcceptReject ? (
+                <>
+                  <p className="text-gray-300 text-sm mb-1">
+                    Accepting will merge the preview branch{" "}
+                    <code className="bg-gray-800 px-1 rounded">{sessionBranch}</code> into{" "}
+                    <code className="bg-gray-800 px-1 rounded">{branch ?? "main"}</code>.
+                  </p>
+                  <p className="text-gray-400 text-xs mb-4">Do you wish to do that?</p>
+                  <button
+                    onClick={handleAccept}
+                    disabled={acceptRejectLoading}
+                    className="px-4 py-2 rounded-lg bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                  >
+                    {acceptRejectLoading ? "Accepting…" : "Confirm"}
+                  </button>
+                  {acceptRejectError && (
+                    <p className="text-red-400 text-xs mt-2 whitespace-pre-wrap">{acceptRejectError}</p>
+                  )}
+                </>
+              ) : (
+                <p className="text-gray-500 text-xs">
+                  Accept is unavailable — this session&apos;s branch is not based on the currently
+                  checked-out branch.
+                </p>
+              )}
+            </div>
           )}
-          <button
-            type="submit"
-            disabled={isSubmittingFollowup || !followupText.trim()}
-            className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium transition-colors"
-          >
-            {isSubmittingFollowup ? "Submitting…" : "Submit follow-up"}
-          </button>
-        </form>
+
+          {/* ── Reject panel ── */}
+          {activeAction === "reject" && (
+            <div className="px-4 py-4 border-t border-gray-700">
+              {canAcceptReject ? (
+                <>
+                  <p className="text-gray-300 text-sm mb-1">
+                    Rejecting will discard the worktree and delete the{" "}
+                    <code className="bg-gray-800 px-1 rounded">{sessionBranch}</code> branch.
+                  </p>
+                  <p className="text-gray-400 text-xs mb-4">Do you wish to do that?</p>
+                  <button
+                    onClick={handleReject}
+                    disabled={acceptRejectLoading}
+                    className="px-4 py-2 rounded-lg bg-red-800 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                  >
+                    {acceptRejectLoading ? "Rejecting…" : "Confirm"}
+                  </button>
+                  {acceptRejectError && (
+                    <p className="text-red-400 text-xs mt-2 whitespace-pre-wrap">{acceptRejectError}</p>
+                  )}
+                </>
+              ) : (
+                <p className="text-gray-500 text-xs">
+                  Reject is unavailable — this session&apos;s branch is not based on the currently
+                  checked-out branch.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* ── Follow-up panel ── */}
+          {activeAction === "followup" && (
+            <div className="px-4 py-4 border-t border-gray-700">
+              <p className="text-gray-400 text-xs mb-3">
+                Address feedback on the changes, e.g. &quot;I got this error when using it:&quot; or
+                &quot;please change the design of the button&quot;.
+              </p>
+              <textarea
+                ref={followupTextareaRef}
+                rows={4}
+                value={followupText}
+                onChange={(e) => setFollowupText(e.target.value)}
+                placeholder="Describe what to fix or improve…"
+                className="w-full bg-gray-800 text-gray-100 placeholder-gray-500 border border-gray-700 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50 mb-3"
+              />
+              {followupError && (
+                <p className="text-red-400 text-xs mb-2">{followupError}</p>
+              )}
+              <button
+                onClick={handleFollowupSubmit}
+                disabled={isSubmittingFollowup || !followupText.trim()}
+                className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium transition-colors"
+              >
+                {isSubmittingFollowup ? "Submitting…" : "Submit follow-up"}
+              </button>
+            </div>
+          )}
+
+        </div>
       )}
 
       {/* Disconnected notice */}
