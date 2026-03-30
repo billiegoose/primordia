@@ -89,13 +89,6 @@ export default function ChatInterface({ branch, commitMessage }: GitContext) {
     };
   }, []);
 
-  // Update the page title with the branch name (client-side only).
-  useEffect(() => {
-    if (branch) {
-      document.title = `Primordia (${branch})`;
-    }
-  }, [branch]);
-
   // On mount, check for missing API keys and warn the user if any are absent.
   useEffect(() => {
     fetch("/api/check-keys")
