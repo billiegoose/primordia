@@ -2,7 +2,13 @@
 // Server component — no client JS needed.
 // The actual chat lives at /chat.
 
+import type { Metadata } from "next";
 import Link from "next/link";
+import { buildPageTitle } from "@/lib/page-title";
+
+export function generateMetadata(): Metadata {
+  return { title: buildPageTitle() };
+}
 
 // ── Feature card data ────────────────────────────────────────────────────────
 
