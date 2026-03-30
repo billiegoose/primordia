@@ -8,6 +8,11 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { getDb } from './db';
 
+// Map from sessionId → spawned dev server process.
+// Populated by startLocalEvolve so that the manage route (running in the parent)
+// can kill the child dev server when the user accepts or rejects.
+export const devServerProcesses = new Map<string, ChildProcess>();
+
 export type LocalSessionStatus =
   | 'starting'
   | 'running-claude'
@@ -398,6 +403,7 @@ export async function startLocalEvolve(
       // unref so this child doesn't prevent the parent event loop from exiting
       proc.unref();
       devServerProcess = proc;
+      devServerProcesses.set(session.id, proc);
 
       const onData = (d: Buffer) => {
         const text = d.toString();
@@ -444,6 +450,7 @@ export async function startLocalEvolve(
           void (async () => {
             try {
               devServerProcess = null;
+              devServerProcesses.delete(session.id);
               const branchCheck = await runGit(['branch', '--list', session.branch], repoRoot);
               if (branchCheck.stdout.trim() !== '') {
                 // Branch still exists → server died unexpectedly.

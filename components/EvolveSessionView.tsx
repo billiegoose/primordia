@@ -52,6 +52,8 @@ export default function EvolveSessionView({
   const [followupText, setFollowupText] = useState('');
   const [isSubmittingFollowup, setIsSubmittingFollowup] = useState(false);
   const [followupError, setFollowupError] = useState<string | null>(null);
+  const [acceptRejectLoading, setAcceptRejectLoading] = useState(false);
+  const [acceptRejectError, setAcceptRejectError] = useState<string | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -136,6 +138,56 @@ export default function EvolveSessionView({
       setFollowupError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsSubmittingFollowup(false);
+    }
+  }
+
+  async function handleAccept() {
+    if (acceptRejectLoading) return;
+    setAcceptRejectLoading(true);
+    setAcceptRejectError(null);
+    try {
+      const res = await fetch('/api/evolve/local/manage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'accept', sessionId }),
+      });
+      const data = (await res.json()) as { outcome?: string; error?: string; stashWarning?: string };
+      if (!res.ok) throw new Error(data.error ?? `API error: ${res.statusText}`);
+      setStatus('accepted');
+      if (pollingRef.current !== null) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+      // Trigger bun install + dev server restart to pick up the merged changes.
+      fetch('/api/evolve/local/restart', { method: 'POST' }).catch(() => {});
+    } catch (err) {
+      setAcceptRejectError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAcceptRejectLoading(false);
+    }
+  }
+
+  async function handleReject() {
+    if (acceptRejectLoading) return;
+    setAcceptRejectLoading(true);
+    setAcceptRejectError(null);
+    try {
+      const res = await fetch('/api/evolve/local/manage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reject', sessionId }),
+      });
+      const data = (await res.json()) as { outcome?: string; error?: string };
+      if (!res.ok) throw new Error(data.error ?? `API error: ${res.statusText}`);
+      setStatus('rejected');
+      if (pollingRef.current !== null) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    } catch (err) {
+      setAcceptRejectError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAcceptRejectLoading(false);
     }
   }
 
@@ -234,22 +286,39 @@ export default function EvolveSessionView({
         </div>
       )}
 
-      {/* Preview link (ready state only — hidden once a decision has been made) */}
-      {status === "ready" && previewUrl && (
+      {/* Preview link + Accept/Reject — shown when ready, hidden once a decision is made */}
+      {status === "ready" && (
         <div className="mb-6 px-4 py-4 rounded-lg bg-amber-900/40 border border-amber-700/50 text-sm">
-          <p className="text-amber-300 font-semibold mb-1">🚀 Preview ready</p>
-          <a
-            href={previewUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-amber-400 hover:text-amber-200 underline break-all"
-          >
-            {previewUrl}
-          </a>
-          <p className="text-amber-400/70 text-xs mt-2">
-            Open the preview link and use the <strong>Accept</strong> or <strong>Reject</strong> bar
-            there to apply or discard the changes.
-          </p>
+          <p className="text-amber-300 font-semibold mb-2">🚀 Preview ready</p>
+          {previewUrl && (
+            <a
+              href={previewUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-amber-400 hover:text-amber-200 underline break-all"
+            >
+              {previewUrl}
+            </a>
+          )}
+          <div className="flex items-center gap-2 mt-3">
+            <button
+              onClick={handleAccept}
+              disabled={acceptRejectLoading}
+              className="px-3 py-1.5 text-xs bg-green-700 hover:bg-green-600 rounded text-white disabled:opacity-50"
+            >
+              {acceptRejectLoading ? "…" : "Accept Changes"}
+            </button>
+            <button
+              onClick={handleReject}
+              disabled={acceptRejectLoading}
+              className="px-3 py-1.5 text-xs bg-red-800 hover:bg-red-700 rounded text-white disabled:opacity-50"
+            >
+              {acceptRejectLoading ? "…" : "Reject"}
+            </button>
+          </div>
+          {acceptRejectError && (
+            <p className="text-red-400 text-xs mt-2 whitespace-pre-wrap">{acceptRejectError}</p>
+          )}
         </div>
       )}
 
