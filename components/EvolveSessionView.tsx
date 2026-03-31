@@ -494,6 +494,37 @@ export default function EvolveSessionView({
         </div>
       )}
 
+      {/* Error state — allow follow-up requests to retry or recover */}
+      {status === "error" && (
+        <div className="mb-6 rounded-lg bg-gray-900 border border-red-800/50 text-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-red-800/30">
+            <p className="text-red-400 text-xs font-medium uppercase tracking-wide">Claude encountered an error</p>
+          </div>
+          <div className="px-4 py-4">
+            <p className="text-gray-400 text-xs mb-3">
+              You can submit a follow-up request to retry or provide additional guidance.
+            </p>
+            <textarea
+              rows={4}
+              value={followupText}
+              onChange={(e) => setFollowupText(e.target.value)}
+              placeholder="Describe what to try instead, or provide additional context…"
+              className="w-full bg-gray-800 text-gray-100 placeholder-gray-500 border border-gray-700 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50 mb-3"
+            />
+            {followupError && (
+              <p className="text-red-400 text-xs mb-2">{followupError}</p>
+            )}
+            <button
+              onClick={handleFollowupSubmit}
+              disabled={isSubmittingFollowup || !followupText.trim()}
+              className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium transition-colors"
+            >
+              {isSubmittingFollowup ? "Submitting…" : "Submit follow-up"}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Disconnected notice */}
       {status === "disconnected" && (
         <div className="mb-6 px-4 py-4 rounded-lg bg-yellow-900/40 border border-yellow-700/50 text-sm">

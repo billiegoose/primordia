@@ -2,7 +2,7 @@
 // Accepts a follow-up request for an existing local evolve session.
 // Only available when NODE_ENV=development.
 //
-// POST — submit a follow-up request for a session that is in "ready" state.
+// POST — submit a follow-up request for a session that is in "ready" or "error" state.
 //   Body: { sessionId: string; request: string }
 //   Returns: { ok: true }
 
@@ -40,9 +40,9 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Session not found' }, { status: 404 });
   }
 
-  if (record.status !== 'ready') {
+  if (record.status !== 'ready' && record.status !== 'error') {
     return Response.json(
-      { error: `Session is not ready (current status: ${record.status})` },
+      { error: `Session is not in a state that accepts follow-up requests (current status: ${record.status})` },
       { status: 400 },
     );
   }
