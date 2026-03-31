@@ -1,4 +1,4 @@
-// app/api/evolve/local/kill-restart/route.ts
+// app/api/evolve/kill-restart/route.ts
 // Kills any process listening on a session's port, then re-spawns bun run dev
 // in that session's worktree on the same port.
 //
@@ -9,14 +9,14 @@
 //   Returns: { ok: true }
 //
 // The actual restart runs fire-and-forget; the caller should poll
-// GET /api/evolve/local?sessionId=... for live status updates.
+// GET /api/evolve?sessionId=... for live status updates.
 
-import { getSessionUser } from '../../../../../lib/auth';
-import { getDb } from '../../../../../lib/db';
+import { getSessionUser } from '../../../../lib/auth';
+import { getDb } from '../../../../lib/db';
 import {
   restartDevServerInWorktree,
   type LocalSession,
-} from '../../../../../lib/local-evolve-sessions';
+} from '../../../../lib/local-evolve-sessions';
 
 export async function POST(request: Request) {
   const user = await getSessionUser();
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
     createdAt: record.createdAt,
   };
 
-  // Determine the public hostname for preview URLs (same logic as POST /api/evolve/local).
+  // Determine the public hostname for preview URLs (same logic as POST /api/evolve).
   const fwdHost = request.headers.get('x-forwarded-host');
   const publicHostname = fwdHost ? fwdHost.split(':')[0] : 'localhost';
 

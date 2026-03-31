@@ -33,7 +33,7 @@ export default function AcceptRejectBar({ isPreviewInstance, previewParentBranch
       // Verify the message came from a window that this window opened.
       const source = event.source as Window | null;
       if (!source || source.opener !== window) return;
-      fetch("/api/evolve/local/restart", { method: "POST" }).catch(() => {});
+      fetch("/api/evolve/restart", { method: "POST" }).catch(() => {});
     }
 
     window.addEventListener("message", handleMessage);
@@ -50,7 +50,7 @@ export default function AcceptRejectBar({ isPreviewInstance, previewParentBranch
     setPreviewActionState("loading");
     setErrorMessage(null);
     try {
-      const res = await fetch("/api/evolve/local/manage", {
+      const res = await fetch("/api/evolve/manage", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "accept" }),
@@ -75,7 +75,7 @@ export default function AcceptRejectBar({ isPreviewInstance, previewParentBranch
     setPreviewActionState("loading");
     setErrorMessage(null);
     try {
-      const res = await fetch("/api/evolve/local/manage", {
+      const res = await fetch("/api/evolve/manage", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "reject" }),

@@ -1,4 +1,4 @@
-// app/api/evolve/local/manage/route.ts
+// app/api/evolve/manage/route.ts
 // Accept or reject a local evolve session — runs in the PARENT server only.
 // Only available in NODE_ENV=development.
 //
@@ -13,9 +13,9 @@
 //            without merging, updates the session status to "rejected".
 
 import { execSync } from 'child_process';
-import { runGit, resolveConflictsWithClaude } from '../../../../../lib/local-evolve-sessions';
-import { getSessionUser } from '../../../../../lib/auth';
-import { getDb } from '../../../../../lib/db';
+import { runGit, resolveConflictsWithClaude } from '../../../../lib/local-evolve-sessions';
+import { getSessionUser } from '../../../../lib/auth';
+import { getDb } from '../../../../lib/db';
 
 export async function POST(request: Request) {
   const user = await getSessionUser();

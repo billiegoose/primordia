@@ -1,4 +1,4 @@
-// app/api/evolve/local/restart/route.ts
+// app/api/evolve/restart/route.ts
 // Runs `bun install` then asks Next.js to restart the dev server.
 //
 // Called by the parent tab's AcceptRejectBar after it receives a

@@ -1,4 +1,4 @@
-// app/api/evolve/local/followup/route.ts
+// app/api/evolve/followup/route.ts
 // Accepts a follow-up request for an existing local evolve session.
 // Only available when NODE_ENV=development.
 //
@@ -6,12 +6,12 @@
 //   Body: { sessionId: string; request: string }
 //   Returns: { ok: true }
 
-import { getSessionUser } from '../../../../../lib/auth';
-import { getDb } from '../../../../../lib/db';
+import { getSessionUser } from '../../../../lib/auth';
+import { getDb } from '../../../../lib/db';
 import {
   runFollowupInWorktree,
   type LocalSession,
-} from '../../../../../lib/local-evolve-sessions';
+} from '../../../../lib/local-evolve-sessions';
 
 export async function POST(request: Request) {
   const user = await getSessionUser();
