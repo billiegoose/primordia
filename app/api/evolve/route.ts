@@ -1,4 +1,4 @@
-// app/api/evolve/local/route.ts
+// app/api/evolve/route.ts
 // Local development evolve flow — bypasses GitHub entirely.
 // Only available when NODE_ENV=development.
 //
@@ -17,9 +17,9 @@ import {
   runGit,
   inferDevServerStatus,
   type LocalSession,
-} from '../../../../lib/local-evolve-sessions';
-import { getSessionUser } from '../../../../lib/auth';
-import { getDb } from '../../../../lib/db';
+} from '../../../lib/local-evolve-sessions';
+import { getSessionUser } from '../../../lib/auth';
+import { getDb } from '../../../lib/db';
 
 /** Ask Claude to choose a short, descriptive kebab-case slug for the request.
  *  Falls back to the first-4-words approach if the API call fails. */

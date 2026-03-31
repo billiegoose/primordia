@@ -4,7 +4,7 @@
 // The "submit a request" form for Primordia's evolve pipeline.
 // Rendered at /evolve — a dedicated page, separate from the main chat interface.
 //
-// On submit: POSTs to /api/evolve/local, then redirects to /evolve/session/{id}
+// On submit: POSTs to /api/evolve, then redirects to /evolve/session/{id}
 // where live Claude Code progress is tracked.
 
 import { useState, useRef, useEffect, FormEvent } from "react";
@@ -50,7 +50,7 @@ export default function EvolveForm({ branch }: EvolveFormProps = {}) {
     setError(null);
 
     try {
-      const res = await fetch("/api/evolve/local", {
+      const res = await fetch("/api/evolve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ request: trimmed }),

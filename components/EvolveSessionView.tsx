@@ -2,7 +2,7 @@
 
 // components/EvolveSessionView.tsx
 // Client component rendered by /evolve/session/[id].
-// Polls /api/evolve/local?sessionId=... and displays live Claude Code progress.
+// Polls /api/evolve?sessionId=... and displays live Claude Code progress.
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { MarkdownContent } from "./SimpleMarkdown";
@@ -95,7 +95,7 @@ export default function EvolveSessionView({
     }
     pollingRef.current = setInterval(async () => {
       try {
-        const res = await fetch(`/api/evolve/local?sessionId=${sessionId}`);
+        const res = await fetch(`/api/evolve?sessionId=${sessionId}`);
         if (!res.ok) return;
 
         const data = (await res.json()) as EvolveSessionData;
@@ -145,7 +145,7 @@ export default function EvolveSessionView({
     setRestartError(null);
 
     try {
-      const res = await fetch('/api/evolve/local/kill-restart', {
+      const res = await fetch('/api/evolve/kill-restart', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId }),
@@ -173,7 +173,7 @@ export default function EvolveSessionView({
     setFollowupError(null);
 
     try {
-      const res = await fetch('/api/evolve/local/followup', {
+      const res = await fetch('/api/evolve/followup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId, request: trimmed }),
@@ -199,7 +199,7 @@ export default function EvolveSessionView({
     setAcceptRejectLoading(true);
     setAcceptRejectError(null);
     try {
-      const res = await fetch('/api/evolve/local/manage', {
+      const res = await fetch('/api/evolve/manage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'accept', sessionId }),
@@ -212,7 +212,7 @@ export default function EvolveSessionView({
         pollingRef.current = null;
       }
       // Trigger bun install + dev server restart to pick up the merged changes.
-      fetch('/api/evolve/local/restart', { method: 'POST' }).catch(() => {});
+      fetch('/api/evolve/restart', { method: 'POST' }).catch(() => {});
     } catch (err) {
       setAcceptRejectError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -225,7 +225,7 @@ export default function EvolveSessionView({
     setAcceptRejectLoading(true);
     setAcceptRejectError(null);
     try {
-      const res = await fetch('/api/evolve/local/manage', {
+      const res = await fetch('/api/evolve/manage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'reject', sessionId }),

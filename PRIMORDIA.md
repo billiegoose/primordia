@@ -105,14 +105,13 @@ primordia/
 │       │       ├── approve/route.ts    ← POST approve a token (requires auth on approver device)
 │       │       └── qr/route.ts         ← GET SVG QR code encoding the approval URL for a tokenId
 │       └── evolve/
-│           └── local/
 │               ├── route.ts       ← POST start session, GET status
 │               ├── manage/
 │               │   └── route.ts   ← POST accept/reject a local session
 │               ├── followup/
 │               │   └── route.ts   ← POST submit a follow-up request on an existing ready session
-│               └── restart/
-│                   └── route.ts   ← POST bun install + restart dev server (called after accept)
+│               └── kill-restart/
+│                   └── route.ts   ← POST kill dev server process + restart it in the worktree
 │
 ├── components/
 │   ├── AcceptRejectBar.tsx        ← Accept/reject bar for local preview worktrees
@@ -137,7 +136,7 @@ User types message
 #### Evolve Request (local dev and exe.dev — NODE_ENV=development)
 ```
 User types change request on /evolve page
-  → POST /api/evolve/local
+  → POST /api/evolve
       → generates slug via Claude Haiku; finds unique branch name
       → creates LocalSession in memory (id, branch, worktreePath, request, createdAt, …)
       → persists EvolveSession record to SQLite (evolve_sessions table)
@@ -151,13 +150,13 @@ User types change request on /evolve page
       → streams SDKMessage events → formatted progressText appended in memory
       → progressText flushed to SQLite (throttled, ≤1 write/2s per session)
   → spawn: bun run dev in worktree; Next.js picks its own port
-  → EvolveSessionView polls /api/evolve/local?sessionId=... every 5s
+  → EvolveSessionView polls /api/evolve?sessionId=... every 5s
       → GET returns from in-memory map (active) or SQLite (completed/restarted)
   → Preview link shown when status becomes "ready"
-  → User clicks Accept → POST /api/evolve/local/manage { action: "accept" }
+  → User clicks Accept → POST /api/evolve/manage { action: "accept" }
       → git merge {branch} --no-ff
       → kill dev server, git worktree remove, git branch -D
-  → User clicks Reject → POST /api/evolve/local/manage { action: "reject" }
+  → User clicks Reject → POST /api/evolve/manage { action: "reject" }
       → kill dev server, git worktree remove, git branch -D
 ```
 
@@ -192,15 +191,15 @@ Each evolve session tracks two independent dimensions persisted to SQLite:
 
 | Transition | Triggered by |
 |---|---|
-| `[new]` → `starting` | `POST /api/evolve/local` |
+| `[new]` → `starting` | `POST /api/evolve` |
 | `starting` → `running-claude` | `startLocalEvolve()` after worktree setup |
 | `running-claude` → `ready` + devServer `none→starting` | `startLocalEvolve()` after `query()` completes |
 | devServer `starting` → `running` | Next.js "Ready" string detected in dev server output |
-| `ready` → `running-claude` (devServer stays `running`) | `POST /api/evolve/local/followup` |
+| `ready` → `running-claude` (devServer stays `running`) | `POST /api/evolve/followup` |
 | `running-claude` → `ready` (devServer stays `running`) | `runFollowupInWorktree()` on success |
-| `ready` → `accepted` / `rejected` | `POST /api/evolve/local/manage` |
+| `ready` → `accepted` / `rejected` | `POST /api/evolve/manage` |
 | devServer `running` → `disconnected` | Dev server `close` event + branch still present (3 s later) |
-| devServer `disconnected` → `starting` | `POST /api/evolve/local/kill-restart` |
+| devServer `disconnected` → `starting` | `POST /api/evolve/kill-restart` |
 | any → `error` | Uncaught exception inside the respective async helper |
 
 ---
