@@ -49,6 +49,37 @@ The `'starting-server'`, `'ready'`, and `'disconnected'` states all encoded dev 
 - **`app/evolve/session/[id]/page.tsx`**: `initialDevServerStatus` prop passed to `EvolveSessionView`.
 - **`PRIMORDIA.md`**: State machine diagram and reference tables updated to reflect the two-dimensional model.
 
+---
+
+## Follow-up: Infer dev server status instead of persisting it
+
+### What changed
+
+`DevServerStatus` is no longer saved to SQLite. Instead it is computed on every read using the following strategy:
+
+- **Port not yet known (`port === null`) and a dev server process is registered in the in-process map** → `'starting'`
+- **Port not yet known and no process registered** → `'none'`
+- **Port known, `lsof -ti :<port>` exits 0** → `'running'`
+- **Port known, `lsof -ti :<port>` exits non-zero** → `'disconnected'`
+
+An in-memory `Map<sessionId, ChildProcess>` (`activeDevServerProcesses`) is maintained in `lib/local-evolve-sessions.ts`. Processes are registered when spawned and deleted when the process emits a `close` event.
+
+During a dev server restart (`kill-restart` route), `port` is reset to `null` in SQLite before the old process is killed. This ensures the inferred status transitions `disconnected → starting → running` rather than briefly getting stuck on `disconnected` (which would stop the UI's polling loop).
+
+### Files changed (follow-up)
+
+- **`lib/local-evolve-sessions.ts`**: Added `activeDevServerProcesses` map and exported `inferDevServerStatus()`. Removed `devServerStatus` from all `persist()` payloads. Processes registered/deregistered around dev server lifecycle. `restartDevServerInWorktree` now resets `port` to `null` before killing the old process.
+- **`lib/db/types.ts`**: Removed `devServerStatus` from `EvolveSession` and from `updateEvolveSession` signature.
+- **`lib/db/sqlite.ts`**: Removed `dev_server_status` from `createEvolveSession` INSERT, `updateEvolveSession`, `getEvolveSession`, and `listEvolveSessions`. The column remains in the DB schema (harmless; existing rows retain their old value).
+- **`app/api/evolve/local/route.ts`**: GET handler now calls `inferDevServerStatus(sessionId, session.port)` instead of reading `session.devServerStatus` from SQLite.
+- **`app/api/evolve/local/kill-restart/route.ts`**: Removed explicit `devServerStatus: 'starting'` DB update; inference handles it.
+- **`app/api/evolve/local/followup/route.ts`**: Removed `devServerStatus` from DB-to-session reconstruction.
+- **`app/evolve/session/[id]/page.tsx`**: Uses `inferDevServerStatus()` for the `initialDevServerStatus` prop.
+
+### Why
+
+SQLite persisted `devServerStatus` was always slightly stale — it reflected what the server thought at the last write, not what was actually happening. The OS knows the ground truth: either `lsof` finds a process on the port, or it doesn't. Replacing persistence with live inference means the status is always accurate, survives server restarts, and removes an entire class of "stuck in disconnected" bugs caused by missed state transitions.
+
 ## Why
 
 The old `LocalSessionStatus` was a leaky abstraction — it mixed "what is the Claude pipeline doing?" with "what is the preview dev server doing?", making the state machine harder to reason about and diagram. For example, `'disconnected'` meant the server crashed but Claude was long done; `'starting-server'` meant Claude was done but the server wasn't up yet. These are orthogonal concerns.

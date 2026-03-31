@@ -11,7 +11,6 @@ import { getDb } from '../../../../../lib/db';
 import {
   runFollowupInWorktree,
   type LocalSession,
-  type DevServerStatus,
 } from '../../../../../lib/local-evolve-sessions';
 
 export async function POST(request: Request) {
@@ -54,7 +53,7 @@ export async function POST(request: Request) {
     branch: record.branch,
     worktreePath: record.worktreePath,
     status: record.status as LocalSession['status'],
-    devServerStatus: record.devServerStatus as DevServerStatus,
+    devServerStatus: 'running',
     progressText: record.progressText,
     port: record.port,
     previewUrl: record.previewUrl,
