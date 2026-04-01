@@ -70,12 +70,24 @@ function splitClaudeContent(content: string): {
 
   const toolCallCount = (stripped.match(/^- 🔧 /gm) ?? []).length;
 
-  const blocks = stripped.split(/\n\n+/).map((b) => b.trim()).filter((b) => b);
-  if (blocks.length === 0) return { detailsContent: "", finalItem: "", toolCallCount };
-  if (blocks.length === 1) return { detailsContent: "", finalItem: blocks[0], toolCallCount };
+  // Find the last tool call line and split there: everything after it is the
+  // final message Claude wrote, everything up to and including it is detail.
+  const lines = stripped.split("\n");
+  let lastToolIdx = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].startsWith("- 🔧 ")) {
+      lastToolIdx = i;
+      break;
+    }
+  }
 
-  const finalItem = blocks[blocks.length - 1];
-  const detailsContent = blocks.slice(0, -1).join("\n\n");
+  if (lastToolIdx === -1) {
+    // No tool calls — everything is the final message
+    return { detailsContent: "", finalItem: stripped, toolCallCount };
+  }
+
+  const detailsContent = lines.slice(0, lastToolIdx + 1).join("\n").trim();
+  const finalItem = lines.slice(lastToolIdx + 1).join("\n").trim();
   return { detailsContent, finalItem, toolCallCount };
 }
 
