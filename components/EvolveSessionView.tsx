@@ -12,6 +12,195 @@ import { HamburgerMenu } from "./HamburgerMenu";
 import { useSessionUser } from "../lib/hooks";
 import Link from "next/link";
 
+// ─── Section parsing ──────────────────────────────────────────────────────────
+
+interface ParsedSection {
+  heading: string;
+  content: string;
+}
+
+function parseProgressSections(text: string): ParsedSection[] {
+  if (!text.trim()) return [];
+
+  // Split on a newline immediately followed by "### " to locate section boundaries.
+  // The lookahead keeps "### " in the subsequent chunk.
+  const chunks = text.split(/\n(?=### )/);
+
+  return chunks
+    .map((chunk, i) => {
+      if (i === 0) {
+        // First chunk has no ### heading — it is the Setup section.
+        const content = chunk
+          .replace(/\n\n---\s*$/, "")
+          .replace(/\n---\s*$/, "")
+          .trim();
+        return { heading: "Setup", content };
+      }
+      // All subsequent chunks start with "### heading\n..."
+      const newlineIdx = chunk.indexOf("\n");
+      const heading =
+        newlineIdx === -1
+          ? chunk.replace(/^### /, "").trim()
+          : chunk.slice(0, newlineIdx).replace(/^### /, "").trim();
+      const rawContent = newlineIdx === -1 ? "" : chunk.slice(newlineIdx + 1);
+      const content = rawContent
+        .replace(/\n\n---\s*$/, "")
+        .replace(/\n---\s*$/, "")
+        .trim();
+      return { heading, content };
+    })
+    .filter((s) => s.heading || s.content);
+}
+
+function extractClaudeSummary(content: string): string {
+  // Work only up to the ✅ marker if present.
+  const checkmarkIdx = content.indexOf("✅");
+  const searchable = checkmarkIdx !== -1 ? content.slice(0, checkmarkIdx) : content;
+
+  // Split into paragraphs, drop empties.
+  const paragraphs = searchable
+    .split(/\n\n+/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+
+  // A paragraph is "tool-use only" if every non-blank line starts with "- " + non-word char (emoji).
+  const isToolUseParagraph = (p: string) =>
+    p
+      .split("\n")
+      .every((line) => line.trim() === "" || /^- [^\w\s]/.test(line.trim()));
+
+  // Find the last non-tool-use paragraph.
+  for (let i = paragraphs.length - 1; i >= 0; i--) {
+    if (!isToolUseParagraph(paragraphs[i])) {
+      const flat = paragraphs[i].replace(/\n/g, " ").trim();
+      return flat.length > 120 ? flat.slice(0, 117) + "…" : flat;
+    }
+  }
+
+  // Fallback: count tool uses.
+  const toolCount = (content.match(/^- [^\w\s]/gm) ?? []).length;
+  return toolCount > 0 ? `${toolCount} tool use${toolCount !== 1 ? "s" : ""}` : "";
+}
+
+function extractServerSummary(content: string): string {
+  const portMatch = content.match(/✅\s*\*?\*?Ready on port (\d+)\*?\*?/);
+  if (portMatch) return `Ready on port ${portMatch[1]}`;
+
+  const localMatch = content.match(/- Local:\s*(https?:\/\/\S+)/);
+  if (localMatch) return localMatch[1];
+
+  return "";
+}
+
+function getSectionSummary(section: ParsedSection): string {
+  const { heading, content } = section;
+
+  if (heading === "Setup") {
+    const count = (content.match(/^- \[x\]/gm) ?? []).length;
+    return count > 0 ? `✅ ${count} step${count !== 1 ? "s" : ""} completed` : "";
+  }
+
+  if (heading.includes("Claude Code")) {
+    return extractClaudeSummary(content);
+  }
+
+  if (
+    heading.includes("Starting preview server") ||
+    heading.includes("Restarting preview server")
+  ) {
+    return extractServerSummary(content);
+  }
+
+  if (heading.includes("Follow-up Request")) {
+    const text = content.replace(/^>\s*/m, "").trim();
+    return text.length > 120 ? text.slice(0, 117) + "…" : text;
+  }
+
+  return "";
+}
+
+function LogSection({
+  section,
+  isActive,
+}: {
+  section: ParsedSection;
+  isActive: boolean;
+}) {
+  const { heading, content } = section;
+  const isFollowup = heading.includes("Follow-up Request");
+
+  // ── Follow-up Request: always a compact non-collapsible callout ──
+  if (isFollowup) {
+    return (
+      <div className="px-4 py-3 rounded-lg bg-amber-900/20 border border-amber-700/40 text-sm">
+        <p className="text-amber-400 text-xs font-semibold uppercase tracking-wide mb-1">
+          {heading}
+        </p>
+        <MarkdownContent text={content} />
+      </div>
+    );
+  }
+
+  const isClaudeSection = heading.includes("Claude Code");
+  const isServerSection =
+    heading.includes("Starting preview server") ||
+    heading.includes("Restarting preview server");
+
+  const borderClass = isClaudeSection
+    ? "border-blue-700/50"
+    : isServerSection
+    ? "border-emerald-700/50"
+    : "border-gray-700";
+
+  const headingClass = isClaudeSection
+    ? "text-blue-300"
+    : isServerSection
+    ? "text-emerald-300"
+    : "text-gray-300";
+
+  // ── Active section: expanded card with inline spinner ──
+  if (isActive) {
+    return (
+      <div className={`rounded-lg border ${borderClass} bg-gray-900 text-sm overflow-hidden`}>
+        <div className="px-4 py-2.5 border-b border-gray-800 flex items-center gap-2">
+          <span className={`font-semibold text-xs ${headingClass}`}>{heading}</span>
+          <span className="ml-auto flex items-center gap-1.5 text-gray-500 text-xs animate-pulse">
+            <span className="w-1.5 h-1.5 rounded-full bg-current inline-block" />
+            Running…
+          </span>
+        </div>
+        <div className="px-4 py-3">
+          <MarkdownContent text={content || " "} />
+        </div>
+      </div>
+    );
+  }
+
+  // ── Done section: collapsible <details> ──
+  const summary = getSectionSummary(section);
+
+  return (
+    <details className="group rounded-lg border border-gray-800 overflow-hidden">
+      <summary className="flex items-center gap-2 px-4 py-2.5 cursor-pointer select-none hover:bg-gray-800/40 transition-colors list-none">
+        <span className="text-gray-600 group-open:rotate-90 transition-transform flex-shrink-0 text-xs">
+          ▶
+        </span>
+        <span className={`font-semibold text-xs flex-shrink-0 ${headingClass}`}>
+          {heading}
+        </span>
+        {summary && (
+          <span className="text-gray-500 text-xs truncate group-open:hidden ml-1">
+            — {summary}
+          </span>
+        )}
+      </summary>
+      <div className="px-4 py-3 border-t border-gray-800">
+        <MarkdownContent text={content} />
+      </div>
+    </details>
+  );
+}
+
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface EvolveSessionViewProps {
@@ -372,22 +561,19 @@ export default function EvolveSessionView({
         <code className="font-mono text-amber-200 text-sm">{sessionBranch}</code>
       </div>
 
-      {/* Progress */}
-      <div className="flex-1 mb-6">
-        <div className="px-4 py-3 rounded-lg bg-gray-800 text-gray-100 text-sm leading-relaxed">
-          <MarkdownContent text={`**Local Evolve Progress**:\n\n${progressText || "⏳ Starting…"}`} />
-        </div>
-
-        {/* Spinner when still running */}
-        {!isTerminal && (
-          <div className="mt-3 text-sm text-gray-500 animate-pulse">Running…</div>
-        )}
-
-        {/* Dev server starting indicator */}
-        {status === "ready" && devServerStatus === "starting" && (
-          <div className="mt-3 text-sm text-gray-500 animate-pulse">Starting preview server…</div>
-        )}
-
+      {/* Progress sections */}
+      <div className="flex-1 mb-6 flex flex-col gap-2">
+        {progressText
+          ? parseProgressSections(progressText).map((section, i, arr) => {
+              const isSectionActive = i === arr.length - 1 && !isTerminal;
+              return <LogSection key={i} section={section} isActive={isSectionActive} />;
+            })
+          : (
+            <div className="px-4 py-3 rounded-lg bg-gray-900 border border-gray-700 text-sm text-gray-500 animate-pulse">
+              ⏳ Starting…
+            </div>
+          )
+        }
         <div ref={messagesEndRef} />
       </div>
 
