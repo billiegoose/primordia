@@ -120,7 +120,9 @@ primordia/
 │       │       ├── approve/route.ts    ← POST approve a token (requires auth on approver device)
 │       │       └── qr/route.ts         ← GET SVG QR code encoding the approval URL for a tokenId
 │       └── evolve/
-│               ├── route.ts       ← POST start session, GET status
+│               ├── route.ts       ← POST start session, GET status (legacy poll)
+│               ├── stream/
+│               │   └── route.ts   ← GET SSE stream of live session progress
 │               ├── manage/
 │               │   └── route.ts   ← POST accept/reject a local session
 │               ├── followup/
@@ -134,7 +136,7 @@ primordia/
 │   ├── AcceptRejectBar.tsx        ← Accept/reject bar for local preview worktrees
 │   ├── ChatInterface.tsx          ← Main chat UI (chat only); Edit icon button links to /evolve
 │   ├── EvolveForm.tsx             ← "Submit a request" form; POSTs then redirects to /evolve/session/{id}
-│   ├── EvolveSessionView.tsx      ← Client component for session tracking page; polls for live progress
+│   ├── EvolveSessionView.tsx      ← Client component for session tracking page; streams live progress via SSE
 │   ├── GitSyncDialog.tsx          ← Modal: git pull + push via /api/git-sync (wraps StreamingDialog)
 │   ├── HamburgerMenu.tsx          ← Reusable hamburger button + dropdown; used by ChatInterface, EvolveForm, EvolveSessionView, PageNavBar
 │   ├── LandingNav.tsx             ← Landing page navbar with mobile hamburger collapse
@@ -176,8 +178,8 @@ User types change request on /evolve page
       → streams SDKMessage events → formatted progressText appended in memory
       → progressText flushed to SQLite (throttled, ≤1 write/2s per session)
   → spawn: bun run dev in worktree; Next.js picks its own port
-  → EvolveSessionView polls /api/evolve?sessionId=... every 5s
-      → GET returns from in-memory map (active) or SQLite (completed/restarted)
+  → EvolveSessionView opens SSE stream to /api/evolve/stream?sessionId=...
+      → GET streams delta progressText + state every 500 ms from SQLite until terminal
   → Preview link shown when status becomes "ready"
   → User clicks Accept → POST /api/evolve/manage { action: "accept" }
       → git merge {branch} --no-ff
