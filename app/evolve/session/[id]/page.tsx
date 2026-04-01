@@ -11,7 +11,7 @@ import { getSessionUser } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { buildPageTitle } from "@/lib/page-title";
 import EvolveSessionView from "@/components/EvolveSessionView";
-import { inferDevServerStatus } from "@/lib/local-evolve-sessions";
+import { inferDevServerStatus } from "@/lib/evolve-sessions";
 
 export function generateMetadata(): Metadata {
   return {

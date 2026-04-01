@@ -13,7 +13,7 @@
 //            without merging, updates the session status to "rejected".
 
 import { execSync } from 'child_process';
-import { runGit, resolveConflictsWithClaude } from '../../../../lib/local-evolve-sessions';
+import { runGit, resolveConflictsWithClaude } from '../../../../lib/evolve-sessions';
 import { getSessionUser } from '../../../../lib/auth';
 import { getDb } from '../../../../lib/db';
 

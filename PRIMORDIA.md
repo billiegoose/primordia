@@ -64,7 +64,7 @@ primordia/
 │   │   └── system-prompt.ts      ← Build artifact (gitignored); static chat system prompt with PRIMORDIA.md + last 30 changelog filenames baked in
 │   ├── auth.ts                    ← Session helpers: createSession, getSessionUser
 │   ├── hooks.ts                   ← Shared React hooks: useSessionUser (fetches session on mount, provides logout)
-│   ├── local-evolve-sessions.ts  ← Shared session state + business logic for local evolve; persists to SQLite
+│   ├── evolve-sessions.ts         ← Shared session state + business logic for local evolve; persists to SQLite
 │   ├── page-title.ts              ← Utility: buildPageTitle() — formats <title> with branch/port suffix on non-main branches
 │   └── db/
 │       ├── index.ts               ← Factory: getDb() → SQLite (always)

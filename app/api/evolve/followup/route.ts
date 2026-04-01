@@ -11,7 +11,7 @@ import { getDb } from '../../../../lib/db';
 import {
   runFollowupInWorktree,
   type LocalSession,
-} from '../../../../lib/local-evolve-sessions';
+} from '../../../../lib/evolve-sessions';
 
 export async function POST(request: Request) {
   const user = await getSessionUser();

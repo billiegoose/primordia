@@ -17,7 +17,7 @@ import {
   runGit,
   inferDevServerStatus,
   type LocalSession,
-} from '../../../lib/local-evolve-sessions';
+} from '../../../lib/evolve-sessions';
 import { getSessionUser } from '../../../lib/auth';
 import { getDb } from '../../../lib/db';
 

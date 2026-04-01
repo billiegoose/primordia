@@ -6,7 +6,7 @@
 //   Body: { sessionId: string; action: "merge" | "rebase" }
 //   Returns: { outcome: "merged" | "rebased"; log: string }
 
-import { runGit } from '../../../../lib/local-evolve-sessions';
+import { runGit } from '../../../../lib/evolve-sessions';
 import { getSessionUser } from '../../../../lib/auth';
 import { getDb } from '../../../../lib/db';
 
