@@ -339,18 +339,24 @@ export default function EvolveSessionView({
         )}
       </header>
 
-      {/* Session branch — prominent identifier */}
-      <div className="mb-6 flex items-center gap-2">
-        <span className="text-xs text-gray-500 uppercase tracking-wide font-medium flex-shrink-0">Branch:</span>
-        <code className="text-sm font-mono text-amber-300 bg-gray-900 border border-gray-700 px-2 py-0.5 rounded truncate">
-          {sessionBranch}
-        </code>
-      </div>
-
       {/* Original request */}
       <div className="mb-6 px-4 py-3 rounded-lg bg-gray-900 border border-gray-700 text-sm">
         <p className="text-gray-400 text-xs mb-1 font-medium uppercase tracking-wide">Your request</p>
         <p className="text-gray-100 leading-relaxed whitespace-pre-wrap">{initialRequest}</p>
+      </div>
+
+      {/* Created branch */}
+      <div className="mb-6 px-4 py-4 rounded-lg bg-amber-900/40 border border-amber-700/50 text-sm">
+        <p className="text-amber-300 font-semibold mb-1 flex items-center gap-1.5">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <line x1="6" y1="3" x2="6" y2="15"/>
+            <circle cx="18" cy="6" r="3"/>
+            <circle cx="6" cy="18" r="3"/>
+            <path d="M18 9a9 9 0 0 1-9 9"/>
+          </svg>
+          Created branch
+        </p>
+        <code className="font-mono text-amber-200 text-sm">{sessionBranch}</code>
       </div>
 
       {/* Progress */}
@@ -684,28 +690,27 @@ export default function EvolveSessionView({
 
       {/* Footer actions */}
       <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-2 mb-1">
-          <span className="text-xs text-gray-500 uppercase tracking-wide font-medium flex-shrink-0">Branch:</span>
-          <code className="text-xs font-mono text-amber-300/70 truncate">{sessionBranch}</code>
-        </div>
         <div className="flex gap-4">
           <Link href="/evolve" className="text-sm text-gray-400 hover:text-gray-200 transition-colors">
             ← Submit another request
           </Link>
         </div>
-        <p className="text-xs text-gray-500">
-          <Link href="/changelog" className="text-blue-400 hover:text-blue-300">
-            Changelog
-          </Link>
-          {process.env.NODE_ENV === "development" && (
-            <>
-              {" "}·{" "}
-              <Link href="/branches" className="text-blue-400 hover:text-blue-300">
-                Branches
-              </Link>
-            </>
-          )}
-        </p>
+        <div className="flex items-center justify-between text-xs text-gray-500">
+          <span>
+            <Link href="/changelog" className="text-blue-400 hover:text-blue-300">
+              Changelog
+            </Link>
+            {process.env.NODE_ENV === "development" && (
+              <>
+                {" "}·{" "}
+                <Link href="/branches" className="text-blue-400 hover:text-blue-300">
+                  Branches
+                </Link>
+              </>
+            )}
+          </span>
+          <code className="font-mono text-amber-300/60">{sessionBranch}</code>
+        </div>
       </div>
     </main>
   );
