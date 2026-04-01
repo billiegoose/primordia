@@ -52,118 +52,174 @@ function parseProgressSections(text: string): ParsedSection[] {
     .filter((s) => s.heading || s.content);
 }
 
-function extractClaudeSummary(content: string): string {
-  // Work only up to the ✅ marker if present.
-  const checkmarkIdx = content.indexOf("✅");
-  const searchable = checkmarkIdx !== -1 ? content.slice(0, checkmarkIdx) : content;
+/**
+ * For a finished Claude Code (or type-fix) section, split content into:
+ * - `detailsContent`: all blocks except the last → goes in <details>
+ * - `finalItem`: the last block (Claude's summary / final message) → shown outside
+ * - `toolCallCount`: total `- 🔧 ` lines in the content
+ */
+function splitClaudeContent(content: string): {
+  detailsContent: string;
+  finalItem: string;
+  toolCallCount: number;
+} {
+  const stripped = content
+    .replace(/\n?✅ \*\*Claude Code finished\.\*\*\s*$/, "")
+    .replace(/\n?✅ \*\*Follow-up complete\. Preview server will reload automatically\.\*\*\s*$/, "")
+    .trim();
 
-  // Split into paragraphs, drop empties.
-  const paragraphs = searchable
-    .split(/\n\n+/)
-    .map((p) => p.trim())
-    .filter((p) => p.length > 0);
+  const toolCallCount = (stripped.match(/^- 🔧 /gm) ?? []).length;
 
-  // A paragraph is "tool-use only" if every non-blank line starts with "- " + non-word char (emoji).
-  const isToolUseParagraph = (p: string) =>
-    p
-      .split("\n")
-      .every((line) => line.trim() === "" || /^- [^\w\s]/.test(line.trim()));
+  const blocks = stripped.split(/\n\n+/).map((b) => b.trim()).filter((b) => b);
+  if (blocks.length === 0) return { detailsContent: "", finalItem: "", toolCallCount };
+  if (blocks.length === 1) return { detailsContent: "", finalItem: blocks[0], toolCallCount };
 
-  // Find the last non-tool-use paragraph.
-  for (let i = paragraphs.length - 1; i >= 0; i--) {
-    if (!isToolUseParagraph(paragraphs[i])) {
-      const flat = paragraphs[i].replace(/\n/g, " ").trim();
-      return flat.length > 120 ? flat.slice(0, 117) + "…" : flat;
-    }
-  }
-
-  // Fallback: count tool uses.
-  const toolCount = (content.match(/^- [^\w\s]/gm) ?? []).length;
-  return toolCount > 0 ? `${toolCount} tool use${toolCount !== 1 ? "s" : ""}` : "";
+  const finalItem = blocks[blocks.length - 1];
+  const detailsContent = blocks.slice(0, -1).join("\n\n");
+  return { detailsContent, finalItem, toolCallCount };
 }
 
-function extractServerSummary(content: string): string {
-  const portMatch = content.match(/✅\s*\*?\*?Ready on port (\d+)\*?\*?/);
-  if (portMatch) return `Ready on port ${portMatch[1]}`;
-
-  const localMatch = content.match(/- Local:\s*(https?:\/\/\S+)/);
-  if (localMatch) return localMatch[1];
-
-  return "";
-}
-
-function getSectionSummary(section: ParsedSection): string {
-  const { heading, content } = section;
-
-  if (heading === "Setup") {
-    const count = (content.match(/^- \[x\]/gm) ?? []).length;
-    return count > 0 ? `✅ ${count} step${count !== 1 ? "s" : ""} completed` : "";
-  }
-
-  if (heading.includes("Claude Code")) {
-    return extractClaudeSummary(content);
-  }
-
-  if (
-    heading.includes("Starting preview server") ||
-    heading.includes("Restarting preview server")
-  ) {
-    return extractServerSummary(content);
-  }
-
-  if (heading.includes("Follow-up Request")) {
-    const text = content.replace(/^>\s*/m, "").trim();
-    return text.length > 120 ? text.slice(0, 117) + "…" : text;
-  }
-
-  return "";
-}
+// ─── LogSection ───────────────────────────────────────────────────────────────
 
 function LogSection({
   section,
   isActive,
+  previewUrl,
 }: {
   section: ParsedSection;
   isActive: boolean;
+  previewUrl?: string | null;
 }) {
   const { heading, content } = section;
-  const isFollowup = heading.includes("Follow-up Request");
 
-  // ── Follow-up Request: always a compact non-collapsible callout ──
-  if (isFollowup) {
-    return (
-      <div className="px-4 py-3 rounded-lg bg-amber-900/20 border border-amber-700/40 text-sm">
-        <p className="text-amber-400 text-xs font-semibold uppercase tracking-wide mb-1">
-          {heading}
-        </p>
-        <MarkdownContent text={content} />
-      </div>
-    );
-  }
-
+  const isFollowupSection = heading.includes("Follow-up Request");
   const isClaudeSection = heading.includes("Claude Code");
+  const isTypeFixSection = heading.includes("Fixing type errors");
   const isServerSection =
     heading.includes("Starting preview server") ||
     heading.includes("Restarting preview server");
 
-  const borderClass = isClaudeSection
-    ? "border-blue-700/50"
-    : isServerSection
-    ? "border-emerald-700/50"
-    : "border-gray-700";
+  // ── Follow-up Request: render like "Your request" ─────────────────────────
+  if (isFollowupSection) {
+    const requestText = content.replace(/^> /m, "").trim();
+    return (
+      <div className="px-4 py-3 rounded-lg bg-gray-900 border border-gray-700 text-sm">
+        <p className="text-gray-400 text-xs mb-1 font-medium uppercase tracking-wide">Follow-up request</p>
+        <p className="text-gray-100 leading-relaxed whitespace-pre-wrap">{requestText}</p>
+      </div>
+    );
+  }
 
-  const headingClass = isClaudeSection
-    ? "text-blue-300"
-    : isServerSection
-    ? "text-emerald-300"
-    : "text-gray-300";
+  // ── Claude Code / Fixing type errors ──────────────────────────────────────
+  if (isClaudeSection || isTypeFixSection) {
+    const borderClass = isTypeFixSection ? "border-orange-700/50" : "border-blue-700/50";
+    const headingClass = isTypeFixSection ? "text-orange-300" : "text-blue-300";
+    const doneTitle = isTypeFixSection ? "🔧 Type errors fixed" : "🤖 Claude Code finished";
 
-  // ── Active section: expanded card with inline spinner ──
-  if (isActive) {
+    if (isActive) {
+      return (
+        <div className={`rounded-lg border ${borderClass} bg-gray-900 text-sm overflow-hidden`}>
+          <div className="px-4 py-2.5 border-b border-gray-800 flex items-center gap-2">
+            <span className={`font-semibold text-xs ${headingClass}`}>{heading}</span>
+            <span className="ml-auto flex items-center gap-1.5 text-gray-500 text-xs animate-pulse">
+              <span className="w-1.5 h-1.5 rounded-full bg-current inline-block" />
+              Running…
+            </span>
+          </div>
+          <div className="px-4 py-3">
+            <MarkdownContent text={content || " "} />
+          </div>
+        </div>
+      );
+    }
+
+    // Done — collapse tool calls into <details>, show final message outside
+    const { detailsContent, finalItem, toolCallCount } = splitClaudeContent(content);
     return (
       <div className={`rounded-lg border ${borderClass} bg-gray-900 text-sm overflow-hidden`}>
+        <div className="px-4 py-2.5 border-b border-gray-800">
+          <span className={`font-semibold text-xs ${headingClass}`}>{doneTitle}</span>
+        </div>
+        {detailsContent && (
+          <details className="group border-b border-gray-800">
+            <summary className="flex items-center gap-2 px-4 py-2 cursor-pointer select-none hover:bg-gray-800/40 transition-colors list-none text-xs">
+              <span className="text-gray-600 group-open:rotate-90 transition-transform">▶</span>
+              <span className="text-gray-500">
+                🔧 {toolCallCount} tool call{toolCallCount !== 1 ? "s" : ""} made
+              </span>
+            </summary>
+            <div className="px-4 py-3 border-t border-gray-800">
+              <MarkdownContent text={detailsContent} />
+            </div>
+          </details>
+        )}
+        {finalItem && (
+          <div className="px-4 py-3">
+            <MarkdownContent text={finalItem} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Preview server ─────────────────────────────────────────────────────────
+  if (isServerSection) {
+    if (isActive) {
+      return (
+        <div className="rounded-lg border border-emerald-700/50 bg-gray-900 text-sm overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-gray-800 flex items-center gap-2">
+            <span className="font-semibold text-xs text-emerald-300">{heading}</span>
+            <span className="ml-auto flex items-center gap-1.5 text-gray-500 text-xs animate-pulse">
+              <span className="w-1.5 h-1.5 rounded-full bg-current inline-block" />
+              Starting…
+            </span>
+          </div>
+          <div className="px-4 py-3">
+            <MarkdownContent text={content || " "} />
+          </div>
+        </div>
+      );
+    }
+
+    // Done — collapse server logs, show preview URL
+    return (
+      <div className="rounded-lg border border-emerald-700/50 bg-gray-900 text-sm overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-gray-800">
+          <span className="font-semibold text-xs text-emerald-300">🚀 Preview ready</span>
+        </div>
+        {content && (
+          <details className="group border-b border-gray-800">
+            <summary className="flex items-center gap-2 px-4 py-2 cursor-pointer select-none hover:bg-gray-800/40 transition-colors list-none text-xs">
+              <span className="text-gray-600 group-open:rotate-90 transition-transform">▶</span>
+              <span className="text-gray-500">📋 Server logs</span>
+            </summary>
+            <div className="px-4 py-3 border-t border-gray-800">
+              <MarkdownContent text={content} />
+            </div>
+          </details>
+        )}
+        {previewUrl && (
+          <div className="px-4 py-3">
+            <a
+              href={previewUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-emerald-400 hover:text-emerald-200 underline break-all"
+            >
+              {previewUrl}
+            </a>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Default: fallback collapsible ──────────────────────────────────────────
+  if (isActive) {
+    return (
+      <div className="rounded-lg border border-gray-700 bg-gray-900 text-sm overflow-hidden">
         <div className="px-4 py-2.5 border-b border-gray-800 flex items-center gap-2">
-          <span className={`font-semibold text-xs ${headingClass}`}>{heading}</span>
+          <span className="font-semibold text-xs text-gray-300">{heading}</span>
           <span className="ml-auto flex items-center gap-1.5 text-gray-500 text-xs animate-pulse">
             <span className="w-1.5 h-1.5 rounded-full bg-current inline-block" />
             Running…
@@ -176,23 +232,13 @@ function LogSection({
     );
   }
 
-  // ── Done section: collapsible <details> ──
-  const summary = getSectionSummary(section);
-
   return (
     <details className="group rounded-lg border border-gray-800 overflow-hidden">
       <summary className="flex items-center gap-2 px-4 py-2.5 cursor-pointer select-none hover:bg-gray-800/40 transition-colors list-none">
         <span className="text-gray-600 group-open:rotate-90 transition-transform flex-shrink-0 text-xs">
           ▶
         </span>
-        <span className={`font-semibold text-xs flex-shrink-0 ${headingClass}`}>
-          {heading}
-        </span>
-        {summary && (
-          <span className="text-gray-500 text-xs truncate group-open:hidden ml-1">
-            — {summary}
-          </span>
-        )}
+        <span className="font-semibold text-xs flex-shrink-0 text-gray-300">{heading}</span>
       </summary>
       <div className="px-4 py-3 border-t border-gray-800">
         <MarkdownContent text={content} />
@@ -492,6 +538,16 @@ export default function EvolveSessionView({
   /** True while the session pipeline is actively running (not yet ready for action). */
   const isClaudeRunning = status === "starting" || status === "running-claude";
 
+  // Parse progress into sections; integrate setup into the "Created branch" card.
+  const sections = progressText ? parseProgressSections(progressText) : [];
+  const setupSection = sections.length > 0 && sections[0].heading === "Setup" ? sections[0] : null;
+  const contentSections = sections.filter((s) => s.heading !== "Setup");
+  // Setup is "active" while it's the only section (no ### headings yet) and we're not terminal.
+  const isSetupActive = !isTerminal && (sections.length === 0 || (sections.length === 1 && sections[0].heading === "Setup"));
+  const setupStepCount = setupSection
+    ? (setupSection.content.match(/^- \[x\]/gm) ?? []).length
+    : 0;
+
   return (
     <main className="flex flex-col w-full max-w-3xl mx-auto px-4 py-6 min-h-dvh">
       {/* Header */}
@@ -547,7 +603,7 @@ export default function EvolveSessionView({
         <p className="text-gray-100 leading-relaxed whitespace-pre-wrap">{initialRequest}</p>
       </div>
 
-      {/* Created branch */}
+      {/* Created branch — setup steps fold into this card */}
       <div className="mb-6 px-4 py-4 rounded-lg bg-amber-900/40 border border-amber-700/50 text-sm">
         <p className="text-amber-300 font-semibold mb-1 flex items-center gap-1.5">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -556,24 +612,47 @@ export default function EvolveSessionView({
             <circle cx="6" cy="18" r="3"/>
             <path d="M18 9a9 9 0 0 1-9 9"/>
           </svg>
-          Created branch
+          {isSetupActive ? (
+            <>
+              Creating branch…
+              <span className="ml-1 flex items-center gap-1 text-amber-600/70 text-xs animate-pulse">
+                <span className="w-1.5 h-1.5 rounded-full bg-current inline-block" />
+              </span>
+            </>
+          ) : (
+            "Created branch"
+          )}
         </p>
         <code className="font-mono text-amber-200 text-sm">{sessionBranch}</code>
+        {!isSetupActive && setupSection && (
+          <details className="group mt-2">
+            <summary className="flex items-center gap-1.5 cursor-pointer select-none text-xs text-amber-600/80 hover:text-amber-400 transition-colors list-none">
+              <span className="group-open:rotate-90 transition-transform inline-block">▶</span>
+              ✅ {setupStepCount} step{setupStepCount !== 1 ? "s" : ""} completed
+            </summary>
+            <div className="mt-2 pl-2 border-l border-amber-700/30">
+              <MarkdownContent text={setupSection.content} />
+            </div>
+          </details>
+        )}
       </div>
 
       {/* Progress sections */}
       <div className="flex-1 mb-6 flex flex-col gap-2">
-        {progressText
-          ? parseProgressSections(progressText).map((section, i, arr) => {
-              const isSectionActive = i === arr.length - 1 && !isTerminal;
-              return <LogSection key={i} section={section} isActive={isSectionActive} />;
-            })
-          : (
-            <div className="px-4 py-3 rounded-lg bg-gray-900 border border-gray-700 text-sm text-gray-500 animate-pulse">
-              ⏳ Starting…
-            </div>
-          )
-        }
+        {contentSections.map((section, i) => {
+          const isSectionActive = i === contentSections.length - 1 && !isTerminal;
+          const isServer =
+            section.heading.includes("Starting preview server") ||
+            section.heading.includes("Restarting preview server");
+          return (
+            <LogSection
+              key={i}
+              section={section}
+              isActive={isSectionActive}
+              previewUrl={isServer ? previewUrl : undefined}
+            />
+          );
+        })}
         <div ref={messagesEndRef} />
       </div>
 
@@ -582,7 +661,9 @@ export default function EvolveSessionView({
         <div className="mb-6 px-4 py-4 rounded-lg bg-green-900/40 border border-green-700/50 text-sm">
           <p className="text-green-200 font-semibold">✅ Changes accepted</p>
           <p className="text-green-300/80 text-xs mt-1">
-            The branch was merged and the worktree has been removed.
+            The branch was merged into{" "}
+            <code className="bg-green-900/60 px-1 rounded">{branch ?? "main"}</code> and the
+            worktree has been removed.
           </p>
         </div>
       )}
@@ -594,52 +675,6 @@ export default function EvolveSessionView({
           <p className="text-red-300/80 text-xs mt-1">
             The branch and worktree have been discarded.
           </p>
-        </div>
-      )}
-
-      {/* Preview URL + Restart Dev Server — side by side when both visible, stacked when not */}
-      {((devServerStatus === "running" && previewUrl) || status === "ready") && (
-        <div className="mb-6 flex flex-col sm:flex-row gap-3">
-          {/* Preview link — shown when dev server is running */}
-          {devServerStatus === "running" && previewUrl && (
-            <div className="flex-1 px-4 py-4 rounded-lg bg-amber-900/40 border border-amber-700/50 text-sm">
-              <p className="text-amber-300 font-semibold mb-2">🚀 Preview ready</p>
-              <a
-                href={previewUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-amber-400 hover:text-amber-200 underline break-all"
-              >
-                {previewUrl}
-              </a>
-            </div>
-          )}
-
-          {/* Dev server status + restart button — shown when session is ready */}
-          {status === "ready" && (
-            <div className="flex-1 px-4 py-3 rounded-lg bg-gray-900 border border-gray-700 text-sm">
-              <p className="text-gray-400 text-xs mb-2">
-                Dev server:{" "}
-                <span className="font-mono text-gray-300">{devServerStatus}</span>
-              </p>
-              {devServerStatus !== "starting" && (
-                <>
-                  <p className="text-gray-500 text-xs mb-2">Preview not loading or responding?</p>
-                  {restartError && (
-                    <p className="text-red-400 text-xs mb-2">{restartError}</p>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleRestartServer}
-                    disabled={isRestartingServer}
-                    className="px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 text-gray-300 text-xs font-medium transition-colors"
-                  >
-                    {isRestartingServer ? "Restarting…" : "↺ Restart dev server"}
-                  </button>
-                </>
-              )}
-            </div>
-          )}
         </div>
       )}
 
@@ -690,10 +725,23 @@ export default function EvolveSessionView({
           {/* ── Header ── */}
           <div className="px-4 py-2 border-b border-gray-700 flex items-center justify-between">
             <p className="text-gray-500 text-xs font-medium uppercase tracking-wide">Available Actions</p>
-            {isClaudeRunning && (
+            {isClaudeRunning ? (
               <p className="text-gray-500 text-xs">Accept &amp; Reject available once Claude finishes</p>
-            )}
+            ) : status === "ready" && devServerStatus !== "none" && devServerStatus !== "starting" ? (
+              <button
+                type="button"
+                onClick={handleRestartServer}
+                disabled={isRestartingServer}
+                className="text-xs text-gray-400 hover:text-gray-200 disabled:text-gray-600 transition-colors"
+              >
+                {isRestartingServer ? "Restarting…" : "↺ Restart preview"}
+              </button>
+            ) : null}
           </div>
+
+          {restartError && (
+            <p className="px-4 py-2 text-red-400 text-xs border-b border-gray-700">{restartError}</p>
+          )}
 
           {/* ── Button row (or fixing-types indicator) ── */}
           {status === "fixing-types" ? (

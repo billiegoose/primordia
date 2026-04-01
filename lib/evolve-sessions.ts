@@ -584,10 +584,15 @@ export async function runFollowupInWorktree(
     });
 
   try {
-    appendProgress(
-      session,
-      `\n\n---\n\n### 🔄 Follow-up Request\n\n> ${followupRequest}\n\n### 🤖 Claude Code\n\n`,
-    );
+    if (skipChangelog) {
+      // Type-fix passes get their own section heading instead of the user-facing follow-up format.
+      appendProgress(session, `\n\n---\n\n### 🔧 Fixing type errors…\n\n`);
+    } else {
+      appendProgress(
+        session,
+        `\n\n---\n\n### 🔄 Follow-up Request\n\n> ${followupRequest}\n\n### 🤖 Claude Code\n\n`,
+      );
+    }
     session.status = inProgressStatus;
     await persist();
 
