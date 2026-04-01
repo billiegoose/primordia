@@ -339,6 +339,14 @@ export default function EvolveSessionView({
         )}
       </header>
 
+      {/* Session branch — prominent identifier */}
+      <div className="mb-6 flex items-center gap-2">
+        <span className="text-xs text-gray-500 uppercase tracking-wide font-medium flex-shrink-0">Branch:</span>
+        <code className="text-sm font-mono text-amber-300 bg-gray-900 border border-gray-700 px-2 py-0.5 rounded truncate">
+          {sessionBranch}
+        </code>
+      </div>
+
       {/* Original request */}
       <div className="mb-6 px-4 py-3 rounded-lg bg-gray-900 border border-gray-700 text-sm">
         <p className="text-gray-400 text-xs mb-1 font-medium uppercase tracking-wide">Your request</p>
@@ -676,6 +684,10 @@ export default function EvolveSessionView({
 
       {/* Footer actions */}
       <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-xs text-gray-500 uppercase tracking-wide font-medium flex-shrink-0">Branch:</span>
+          <code className="text-xs font-mono text-amber-300/70 truncate">{sessionBranch}</code>
+        </div>
         <div className="flex gap-4">
           <Link href="/evolve" className="text-sm text-gray-400 hover:text-gray-200 transition-colors">
             ← Submit another request
