@@ -22,9 +22,11 @@ interface ParsedSection {
 function parseProgressSections(text: string): ParsedSection[] {
   if (!text.trim()) return [];
 
-  // Split on a newline immediately followed by "### " to locate section boundaries.
-  // The lookahead keeps "### " in the subsequent chunk.
-  const chunks = text.split(/\n(?=### )/);
+  // Split on a newline immediately followed by "### " + an emoji to locate section
+  // boundaries. All real section headings start with an emoji (e.g. "### 🤖 Claude Code");
+  // markdown headings inside Claude's summary text (e.g. "### Changes made") begin with
+  // an ASCII letter and must NOT be treated as section delimiters.
+  const chunks = text.split(/\n(?=### [^\u0000-\u007F])/u);
 
   return chunks
     .map((chunk, i) => {
