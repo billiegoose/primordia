@@ -31,6 +31,7 @@ function getCurrentBranch(): string | null {
  *   Main branch, landing page:      "Primordia"
  *   Other branch, landing page:     "Primordia — :{port} — {branch}"
  */
+
 export function buildPageTitle(pageName?: string): string {
   const branch = getCurrentBranch();
   const isMain = !branch || branch === "main";

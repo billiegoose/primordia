@@ -125,7 +125,9 @@ export default function EvolveSessionView({
                 return next;
               });
             }
-            if (parsed.status != null) setStatus(parsed.status);
+            if (parsed.status != null) {
+              setStatus(parsed.status);
+            }
             if (parsed.devServerStatus != null) setDevServerStatus(parsed.devServerStatus);
             if ("previewUrl" in parsed) setPreviewUrl(parsed.previewUrl ?? null);
           } catch {
@@ -245,6 +247,14 @@ export default function EvolveSessionView({
       });
       const data = (await res.json()) as { outcome?: string; error?: string; stashWarning?: string };
       if (!res.ok) throw new Error(data.error ?? `API error: ${res.statusText}`);
+      if (data.outcome === 'auto-fixing-types') {
+        // Type check failed — the server automatically started a fix run and will
+        // retry Accept when done. Stream the progress; the server handles the rest.
+        setStatus('fixing-types');
+        setActiveAction(null);
+        void startStreaming();
+        return;
+      }
       setStatus('accepted');
       abortControllerRef.current?.abort();
       // Trigger bun install + dev server restart to pick up the merged changes.
@@ -484,8 +494,8 @@ export default function EvolveSessionView({
         </div>
       )}
 
-      {/* Three-action panel — shown when the preview is ready */}
-      {status === "ready" && (
+      {/* Three-action panel — shown when the preview is ready or while fixing type errors */}
+      {(status === "ready" || status === "fixing-types") && (
         <div className="mb-6 rounded-lg bg-gray-900 border border-gray-700 text-sm overflow-hidden">
 
           {/* ── Header ── */}
@@ -493,45 +503,52 @@ export default function EvolveSessionView({
             <p className="text-gray-500 text-xs font-medium uppercase tracking-wide">Available Actions</p>
           </div>
 
-          {/* ── Button row ── */}
-          <div className="flex">
-            <button
-              onClick={() => toggleAction("followup")}
-              className={`flex-1 px-4 py-3 text-sm font-medium border-r border-gray-700 transition-colors ${
-                activeAction === "followup"
-                  ? "bg-amber-900/40 text-amber-200"
-                  : activeAction !== null
-                  ? "text-gray-500 hover:bg-gray-800 hover:text-gray-300"
-                  : "text-amber-300 bg-amber-900/10 hover:bg-amber-900/25"
-              }`}
-            >
-              Follow-up Changes
-            </button>
-            <button
-              onClick={() => toggleAction("accept")}
-              className={`flex-1 px-4 py-3 text-sm font-medium border-r border-gray-700 transition-colors ${
-                activeAction === "accept"
-                  ? "bg-green-900/40 text-green-200"
-                  : activeAction !== null
-                  ? "text-gray-500 hover:bg-gray-800 hover:text-gray-300"
-                  : "text-green-300 bg-green-900/10 hover:bg-green-900/25"
-              }`}
-            >
-              Accept Changes
-            </button>
-            <button
-              onClick={() => toggleAction("reject")}
-              className={`flex-1 px-4 py-3 text-sm font-medium transition-colors ${
-                activeAction === "reject"
-                  ? "bg-red-900/40 text-red-200"
-                  : activeAction !== null
-                  ? "text-gray-500 hover:bg-gray-800 hover:text-gray-300"
-                  : "text-red-300 bg-red-900/10 hover:bg-red-900/25"
-              }`}
-            >
-              Reject Changes
-            </button>
-          </div>
+          {/* ── Button row (or fixing-types indicator) ── */}
+          {status === "fixing-types" ? (
+            <div className="px-4 py-3 flex items-center gap-2 text-sm text-amber-300">
+              <span className="animate-spin inline-block">⟳</span>
+              Fixing type errors… will auto-accept when complete.
+            </div>
+          ) : (
+            <div className="flex">
+              <button
+                onClick={() => toggleAction("followup")}
+                className={`flex-1 px-4 py-3 text-sm font-medium border-r border-gray-700 transition-colors ${
+                  activeAction === "followup"
+                    ? "bg-amber-900/40 text-amber-200"
+                    : activeAction !== null
+                    ? "text-gray-500 hover:bg-gray-800 hover:text-gray-300"
+                    : "text-amber-300 bg-amber-900/10 hover:bg-amber-900/25"
+                }`}
+              >
+                Follow-up Changes
+              </button>
+              <button
+                onClick={() => toggleAction("accept")}
+                className={`flex-1 px-4 py-3 text-sm font-medium border-r border-gray-700 transition-colors ${
+                  activeAction === "accept"
+                    ? "bg-green-900/40 text-green-200"
+                    : activeAction !== null
+                    ? "text-gray-500 hover:bg-gray-800 hover:text-gray-300"
+                    : "text-green-300 bg-green-900/10 hover:bg-green-900/25"
+                }`}
+              >
+                Accept Changes
+              </button>
+              <button
+                onClick={() => toggleAction("reject")}
+                className={`flex-1 px-4 py-3 text-sm font-medium transition-colors ${
+                  activeAction === "reject"
+                    ? "bg-red-900/40 text-red-200"
+                    : activeAction !== null
+                    ? "text-gray-500 hover:bg-gray-800 hover:text-gray-300"
+                    : "text-red-300 bg-red-900/10 hover:bg-red-900/25"
+                }`}
+              >
+                Reject Changes
+              </button>
+            </div>
+          )}
 
           {/* ── Follow-up panel ── */}
           {activeAction === "followup" && (

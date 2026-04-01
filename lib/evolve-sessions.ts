@@ -11,6 +11,7 @@ import { getDb } from './db';
 export type LocalSessionStatus =
   | 'starting'
   | 'running-claude'
+  | 'fixing-types'
   | 'ready'
   | 'accepted'
   | 'rejected'
@@ -555,11 +556,22 @@ export async function startLocalEvolve(
  * Runs a follow-up Claude Code pass inside an existing worktree.
  * The dev server keeps running; this function only re-invokes Claude and
  * persists the result. Status transitions: ready → running-claude → ready | error.
+ *
+ * @param onSuccess - Optional callback invoked (instead of setting status to 'ready') when Claude
+ *   finishes successfully. The callback is responsible for persisting the final session status.
+ *   Used by the type-fix flow to retry Accept server-side without requiring the client tab to be open.
+ * @param skipChangelog - When true, instructs Claude NOT to create or update changelog files.
+ *   Use for automated fix passes (e.g. type-fix) that are part of the merge pipeline, not
+ *   user-visible changes.
  */
 export async function runFollowupInWorktree(
   session: LocalSession,
   followupRequest: string,
   repoRoot: string,
+  /** Status to persist while Claude is running. Defaults to 'running-claude'. */
+  inProgressStatus: LocalSessionStatus = 'running-claude',
+  onSuccess?: (session: LocalSession) => Promise<void>,
+  skipChangelog: boolean = false,
 ): Promise<void> {
   const db = await getDb();
 
@@ -576,13 +588,17 @@ export async function runFollowupInWorktree(
       session,
       `\n\n---\n\n### 🔄 Follow-up Request\n\n> ${followupRequest}\n\n### 🤖 Claude Code\n\n`,
     );
-    session.status = 'running-claude';
+    session.status = inProgressStatus;
     await persist();
+
+    const changelogInstruction = skipChangelog
+      ? `Do NOT create or update any changelog file — this fix is part of the automated merge pipeline, not a user-visible change.`
+      : `This is a follow-up to changes already made on branch \`${session.branch}\`. Do NOT create a new changelog file. Instead, find the most recent changelog file in \`changelog/\` and update it if your changes invalidate or extend the existing description.`;
 
     const prompt =
       `Read PRIMORDIA.md first for architecture context, then address the following follow-up request:\n\n` +
       `${followupRequest}\n\n` +
-      `This is a follow-up to changes already made on branch \`${session.branch}\`. Do NOT create a new changelog file. Instead, find the most recent changelog file in \`changelog/\` and update it if your changes invalidate or extend the existing description. Commit all changes with a descriptive message.`;
+      `${changelogInstruction} Commit all changes with a descriptive message.`;
 
     const stderrLines: string[] = [];
 
@@ -653,9 +669,13 @@ export async function runFollowupInWorktree(
       throw err;
     }
 
-    appendProgress(session, `\n✅ **Follow-up complete. Preview server will reload automatically.**\n`);
-    session.status = 'ready';
-    await persist();
+    if (onSuccess) {
+      await onSuccess(session);
+    } else {
+      appendProgress(session, `\n✅ **Follow-up complete. Preview server will reload automatically.**\n`);
+      session.status = 'ready';
+      await persist();
+    }
   } catch (err) {
     session.status = 'error';
     const msg = err instanceof Error ? err.message : String(err);
