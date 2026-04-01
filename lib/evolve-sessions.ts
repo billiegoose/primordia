@@ -1,4 +1,4 @@
-// lib/local-evolve-sessions.ts
+// lib/evolve-sessions.ts
 // Helpers for the local evolve flow.
 // Only used when NODE_ENV=development.
 
