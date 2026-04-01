@@ -245,6 +245,13 @@ export default function EvolveSessionView({
       });
       const data = (await res.json()) as { outcome?: string; error?: string; stashWarning?: string };
       if (!res.ok) throw new Error(data.error ?? `API error: ${res.statusText}`);
+      if (data.outcome === 'auto-fixing-types') {
+        // Type check failed — a follow-up was automatically started to fix the errors.
+        setStatus('running-claude');
+        setActiveAction(null);
+        void startStreaming();
+        return;
+      }
       setStatus('accepted');
       abortControllerRef.current?.abort();
       // Trigger bun install + dev server restart to pick up the merged changes.

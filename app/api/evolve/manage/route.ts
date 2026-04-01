@@ -13,7 +13,12 @@
 //            without merging, updates the session status to "rejected".
 
 import { execSync, spawn } from 'child_process';
-import { runGit, resolveConflictsWithClaude } from '../../../../lib/evolve-sessions';
+import {
+  runGit,
+  resolveConflictsWithClaude,
+  runFollowupInWorktree,
+  type LocalSession,
+} from '../../../../lib/evolve-sessions';
 import { getSessionUser } from '../../../../lib/auth';
 import { getDb } from '../../../../lib/db';
 
@@ -138,14 +143,27 @@ export async function POST(request: Request) {
       // Gate 3: TypeScript must compile without errors.
       const tscResult = await runCmd('bun', ['run', 'typecheck'], worktreePath);
       if (tscResult.code !== 0) {
-        return Response.json(
-          {
-            error:
-              `Cannot accept: TypeScript type check failed in the session worktree.\n\n` +
-              (tscResult.stdout + tscResult.stderr).trim(),
-          },
-          { status: 400 },
-        );
+        const typeErrors = (tscResult.stdout + tscResult.stderr).trim();
+        // Automatically start a follow-up pass to fix the type errors.
+        const fixPrompt =
+          `The TypeScript type check failed. Fix all type errors so the code compiles ` +
+          `without errors. Do not change any runtime behaviour — only fix the type issues.\n\n` +
+          `TypeScript compiler output:\n\`\`\`\n${typeErrors}\n\`\`\``;
+        const autoFixSession: LocalSession = {
+          id: session.id,
+          branch: session.branch,
+          worktreePath: session.worktreePath,
+          status: session.status as LocalSession['status'],
+          devServerStatus: 'running',
+          progressText: session.progressText,
+          port: session.port,
+          previewUrl: session.previewUrl,
+          request: session.request,
+          createdAt: session.createdAt,
+        };
+        await db.updateEvolveSession(session.id, { status: 'running-claude' });
+        void runFollowupInWorktree(autoFixSession, fixPrompt, repoRoot);
+        return Response.json({ outcome: 'auto-fixing-types' });
       }
 
       // ── End pre-accept gates ────────────────────────────────────────────────
