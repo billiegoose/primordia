@@ -2,7 +2,7 @@
 
 ## What changed
 
-- Added a custom Primordia logo (`public/primordia-logo.png`) — a glowing green/blue primordial ooze blob on a black background, generated with AI direction.
+- Added a custom Primordia logo (`public/primordia-logo.png`) — a glowing green/blue primordial ooze blob with a transparent background, generated with AI direction.
 - **Favicon**: Placed the logo as `app/icon.png` so Next.js App Router automatically serves it as the site favicon and web app icon.
 - **Landing page hero**: The logo now appears above the badge/headline in the hero section, with a soft green glow drop shadow that complements the logo's colors.
 - **Navbar brand**: The `LandingNav` brand link now shows a small (28×28) version of the logo alongside the "Primordia" wordmark.
