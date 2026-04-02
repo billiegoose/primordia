@@ -66,6 +66,12 @@ export interface EvolveSession {
   createdAt: number;
 }
 
+export interface Role {
+  name: string;
+  description: string;
+  createdAt: number;
+}
+
 export interface DbAdapter {
   // Users
   createUser(user: User): Promise<void>;
@@ -98,11 +104,12 @@ export interface DbAdapter {
   deleteCrossDeviceToken(id: string): Promise<void>;
   deleteExpiredCrossDeviceTokens(): Promise<void>;
 
-  // User permissions
-  grantPermission(userId: string, permission: string, grantedBy: string): Promise<void>;
-  revokePermission(userId: string, permission: string): Promise<void>;
-  getUserPermissions(userId: string): Promise<string[]>;
-  getUsersWithPermission(permission: string): Promise<string[]>;
+  // Roles (RBAC)
+  getAllRoles(): Promise<Role[]>;
+  grantRole(userId: string, roleName: string, grantedBy: string): Promise<void>;
+  revokeRole(userId: string, roleName: string): Promise<void>;
+  getUserRoles(userId: string): Promise<string[]>;
+  getUsersWithRole(roleName: string): Promise<string[]>;
 
   // Evolve sessions
   createEvolveSession(session: EvolveSession): Promise<void>;

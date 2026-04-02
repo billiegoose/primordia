@@ -1,21 +1,38 @@
-# Admin permission grants for evolve flow
+# Admin permission grants, RBAC roles, and 403 access-denied pages
 
 ## What changed
 
-- **Owner/admin concept**: The first user ever registered in the database is now the permanent owner with full admin privileges. This is determined at runtime by selecting the user with the earliest `created_at` timestamp — no extra column required.
+### RBAC (role-based access control)
 
-- **`can_evolve` permission**: Access to the evolve flow (proposing changes) is now restricted. A new `user_permissions` table in SQLite stores explicit grants. The admin always has evolve access; all other users need to be granted `can_evolve` by the admin.
+Replaced the flat `user_permissions` table with a proper (but simple) RBAC system:
 
-- **`/admin` page**: A new admin-only page at `/admin` lists all registered users, shows their role (owner vs. user) and current evolve access, and provides Grant / Revoke buttons. Non-admin users are redirected to `/chat`.
+- **`roles` table** — catalog of named roles with descriptions. Seeded at boot with two built-in roles:
+  - `admin` — full system access; automatically granted to the first user who registers
+  - `can_evolve` — allows a user to submit change requests via the evolve flow
 
-- **`POST /api/admin/permissions`**: New API route that accepts `{ userId, permission, action: "grant" | "revoke" }`. Requires the caller to be admin (403 otherwise).
+- **`user_roles` table** — maps users to roles (`user_id`, `role_name`, `granted_by`, `granted_at`). Replaces the old `user_permissions` table; existing `user_permissions` rows are automatically migrated on first boot.
 
-- **Evolve restrictions enforced**: `app/evolve/page.tsx` redirects users without evolve permission to `/chat`. `POST /api/evolve` returns HTTP 403 for users without evolve permission.
+- **Bootstrap** — the first user to register (passkey or exe.dev) is granted the `admin` role immediately. On DB startup, any pre-existing first user without the role is backfilled.
 
-- **DB layer additions**: `DbAdapter` gains `getAllUsers`, `getFirstUser`, `grantPermission`, `revokePermission`, `getUserPermissions`, `getUsersWithPermission`. SQLite adapter adds the `user_permissions` table (`CREATE TABLE IF NOT EXISTS`, so existing databases upgrade automatically on next boot).
+- **Auth helpers updated** — `isAdmin(userId)` now checks for the `admin` role (previously checked first-user by `created_at`). `hasEvolvePermission(userId)` checks for `admin` or `can_evolve` role.
 
-- **Auth helpers**: `lib/auth.ts` gains `isAdmin(userId)` and `hasEvolvePermission(userId)` for use in server components and API routes.
+- **Admin API updated** — `POST /api/admin/permissions` now accepts `{ userId, role, action }` instead of `{ userId, permission, action }`. Only grantable roles (`can_evolve`) are accepted; `admin` cannot be delegated via the API.
+
+### 403 access-denied pages (best practice)
+
+Protected routes no longer silently redirect to `/chat` when a logged-in user lacks permissions. Instead they render `<ForbiddenPage>`, which shows:
+
+1. A brief description of what the page does (so the user knows if they even want access)
+2. The full list of conditions required to access the page
+3. Which conditions the user currently meets (green ✓) and doesn't meet (red ✗)
+4. How to gain the missing access
+
+This pattern is documented in PRIMORDIA.md as a design principle: unauthenticated users (no session) are still redirected to `/login`; authenticated users lacking a role see the 403 page.
+
+- `components/ForbiddenPage.tsx` — new reusable server component
+- `app/evolve/page.tsx` — renders ForbiddenPage for users without `admin` or `can_evolve` role
+- `app/admin/page.tsx` — renders ForbiddenPage for users without `admin` role
 
 ## Why
 
-Previously, any logged-in user could access the evolve flow and trigger Claude Code to run. This opens the door to abuse when multiple users share the same Primordia instance. The owner (first user) now controls who may propose changes, keeping the self-modification flow restricted to trusted collaborators.
+The flat `user_permissions` approach worked for a single permission but didn't scale cleanly to multiple access levels. A roles table is the standard pattern and makes the system easier to extend (e.g., adding a `can_chat` role later). The silent redirect to `/chat` was also confusing — users had no idea why they were bounced or what they'd need to do to get access.

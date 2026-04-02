@@ -26,23 +26,21 @@ export async function createSession(userId: string): Promise<string> {
   return sessionId;
 }
 
-/** Returns true if the given userId is the first (admin/owner) user. */
+/** Returns true if the given userId has the "admin" role. */
 export async function isAdmin(userId: string): Promise<boolean> {
   const db = await getDb();
-  const first = await db.getFirstUser();
-  return first?.id === userId;
+  const roles = await db.getUserRoles(userId);
+  return roles.includes("admin");
 }
 
 /**
  * Returns true if the user may use the evolve flow.
- * The first user (owner/admin) always has access; other users need the
- * "can_evolve" permission explicitly granted by the admin.
+ * Users with the "admin" role always have access; others need the "can_evolve" role.
  */
 export async function hasEvolvePermission(userId: string): Promise<boolean> {
-  if (await isAdmin(userId)) return true;
   const db = await getDb();
-  const perms = await db.getUserPermissions(userId);
-  return perms.includes("can_evolve");
+  const roles = await db.getUserRoles(userId);
+  return roles.includes("admin") || roles.includes("can_evolve");
 }
 
 /**

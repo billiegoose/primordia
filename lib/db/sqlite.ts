@@ -2,7 +2,7 @@
 // Uses bun:sqlite which is built into Bun and requires no npm package.
 // Only imported when DATABASE_URL is not set (i.e., local dev without Neon).
 
-import type { DbAdapter, User, Passkey, Challenge, Session, CrossDeviceToken, EvolveSession } from "./types";
+import type { DbAdapter, Role, User, Passkey, Challenge, Session, CrossDeviceToken, EvolveSession } from "./types";
 
 let dbInstance: DbAdapter | null = null;
 
@@ -52,12 +52,17 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
       user_id TEXT,
       expires_at INTEGER NOT NULL
     );
-    CREATE TABLE IF NOT EXISTS user_permissions (
+    CREATE TABLE IF NOT EXISTS roles (
+      name TEXT PRIMARY KEY,
+      description TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS user_roles (
       user_id TEXT NOT NULL REFERENCES users(id),
-      permission TEXT NOT NULL,
+      role_name TEXT NOT NULL REFERENCES roles(name),
       granted_by TEXT NOT NULL,
       granted_at INTEGER NOT NULL,
-      PRIMARY KEY (user_id, permission)
+      PRIMARY KEY (user_id, role_name)
     );
     CREATE TABLE IF NOT EXISTS evolve_sessions (
       id TEXT PRIMARY KEY,
@@ -71,6 +76,38 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
       created_at INTEGER NOT NULL
     );
   `);
+
+  // Seed built-in roles
+  const now = Date.now();
+  db.prepare(
+    "INSERT OR IGNORE INTO roles (name, description, created_at) VALUES (?, ?, ?)"
+  ).run("admin", "Owner/admin role with full system access", now);
+  db.prepare(
+    "INSERT OR IGNORE INTO roles (name, description, created_at) VALUES (?, ?, ?)"
+  ).run("can_evolve", "Permission to propose changes to the app via the evolve flow", now);
+
+  // Migration: grant admin role to first user if they don't have it yet
+  try {
+    db.exec(`
+      INSERT OR IGNORE INTO user_roles (user_id, role_name, granted_by, granted_at)
+      SELECT u.id, 'admin', 'system', ${now}
+      FROM users u
+      ORDER BY u.created_at ASC
+      LIMIT 1
+    `);
+  } catch {
+    // First user doesn't exist yet — ignore
+  }
+
+  // Migration: port existing user_permissions rows to user_roles (one-time, idempotent)
+  try {
+    db.exec(`
+      INSERT OR IGNORE INTO user_roles (user_id, role_name, granted_by, granted_at)
+      SELECT user_id, permission, granted_by, granted_at FROM user_permissions
+    `);
+  } catch {
+    // user_permissions table may not exist on fresh installs — ignore
+  }
 
   // Migration: add dev_server_status column if it doesn't exist (added in refactor)
   try {
@@ -284,29 +321,35 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
       ).run(Date.now());
     },
 
-    // ── User permissions ─────────────────────────────────────────────────────
+    // ── Roles (RBAC) ─────────────────────────────────────────────────────────
 
-    async grantPermission(userId: string, permission: string, grantedBy: string) {
+    async getAllRoles() {
+      const rows = db
+        .prepare("SELECT name, description, created_at FROM roles ORDER BY created_at ASC")
+        .all() as Array<{ name: string; description: string; created_at: number }>;
+      return rows.map((r) => ({ name: r.name, description: r.description, createdAt: r.created_at }));
+    },
+    async grantRole(userId: string, roleName: string, grantedBy: string) {
       db.prepare(
-        `INSERT OR REPLACE INTO user_permissions (user_id, permission, granted_by, granted_at)
+        `INSERT OR REPLACE INTO user_roles (user_id, role_name, granted_by, granted_at)
          VALUES (?, ?, ?, ?)`
-      ).run(userId, permission, grantedBy, Date.now());
+      ).run(userId, roleName, grantedBy, Date.now());
     },
-    async revokePermission(userId: string, permission: string) {
+    async revokeRole(userId: string, roleName: string) {
       db.prepare(
-        "DELETE FROM user_permissions WHERE user_id = ? AND permission = ?"
-      ).run(userId, permission);
+        "DELETE FROM user_roles WHERE user_id = ? AND role_name = ?"
+      ).run(userId, roleName);
     },
-    async getUserPermissions(userId: string) {
+    async getUserRoles(userId: string) {
       const rows = db
-        .prepare("SELECT permission FROM user_permissions WHERE user_id = ?")
-        .all(userId) as Array<{ permission: string }>;
-      return rows.map((r) => r.permission);
+        .prepare("SELECT role_name FROM user_roles WHERE user_id = ?")
+        .all(userId) as Array<{ role_name: string }>;
+      return rows.map((r) => r.role_name);
     },
-    async getUsersWithPermission(permission: string) {
+    async getUsersWithRole(roleName: string) {
       const rows = db
-        .prepare("SELECT user_id FROM user_permissions WHERE permission = ?")
-        .all(permission) as Array<{ user_id: string }>;
+        .prepare("SELECT user_id FROM user_roles WHERE role_name = ?")
+        .all(roleName) as Array<{ user_id: string }>;
       return rows.map((r) => r.user_id);
     },
 

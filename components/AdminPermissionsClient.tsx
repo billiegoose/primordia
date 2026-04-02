@@ -30,7 +30,7 @@ export default function AdminPermissionsClient({ users: initial }: Props) {
       const res = await fetch("/api/admin/permissions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: user.id, permission: "can_evolve", action }),
+        body: JSON.stringify({ userId: user.id, role: "can_evolve", action }),
       });
       const data = (await res.json()) as { ok?: boolean; error?: string };
       if (!res.ok) throw new Error(data.error ?? "Request failed");

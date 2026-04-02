@@ -7,6 +7,7 @@ import { getSessionUser, isAdmin } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { buildPageTitle } from "@/lib/page-title";
 import AdminPermissionsClient, { type AdminUser } from "@/components/AdminPermissionsClient";
+import ForbiddenPage from "@/components/ForbiddenPage";
 
 export function generateMetadata(): Metadata {
   return {
@@ -19,21 +20,34 @@ export default async function AdminPage() {
   const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  if (!(await isAdmin(user.id))) redirect("/chat");
+  if (!(await isAdmin(user.id))) {
+    return (
+      <ForbiddenPage
+        pageDescription="This page lets you manage user roles and permissions. You can grant or revoke the 'can_evolve' role to control who can propose changes to the app."
+        requiredConditions={["Be logged in", "Have the 'admin' role"]}
+        metConditions={["You are logged in"]}
+        unmetConditions={["You don't have the 'admin' role"]}
+        howToFix={[
+          "The 'admin' role is automatically held by the first user who registered on this Primordia instance. It cannot be granted by other users.",
+        ]}
+      />
+    );
+  }
 
   const db = await getDb();
-  const [allUsers, firstUser, evolveUsers] = await Promise.all([
+  const [allUsers, adminUsers, evolveUsers] = await Promise.all([
     db.getAllUsers(),
-    db.getFirstUser(),
-    db.getUsersWithPermission("can_evolve"),
+    db.getUsersWithRole("admin"),
+    db.getUsersWithRole("can_evolve"),
   ]);
 
+  const adminSet = new Set(adminUsers);
   const evolveSet = new Set(evolveUsers);
 
   const users: AdminUser[] = allUsers.map((u) => ({
     id: u.id,
     username: u.username,
-    isAdmin: u.id === firstUser?.id,
+    isAdmin: adminSet.has(u.id),
     canEvolve: evolveSet.has(u.id),
   }));
 
