@@ -26,7 +26,7 @@ The core idea: **the app becomes whatever its users need it to be**, with no cod
 | Styling | Tailwind CSS | AI models write Tailwind well; no CSS files to manage |
 | Language | TypeScript | Catches mistakes; Claude Code understands it well |
 | AI API | Anthropic SDK (`@anthropic-ai/sdk`) | Streaming chat via `claude-sonnet-4-6`; prefers exe.dev LLM gateway, falls back to `ANTHROPIC_API_KEY` |
-| Hosting | exe.dev | Production builds via `bun run build && bun run start`; systemd service on the server |
+| Hosting | exe.dev | Production builds via `bun run build && bun run start`; systemd service; blue/green slot swap on accept |
 | AI code gen | `@anthropic-ai/claude-agent-sdk` | `query()` runs Claude Code in git worktrees for evolve requests |
 | Database | bun:sqlite | Local SQLite for passkey auth **and evolve session persistence**; same adapter on exe.dev and local dev |
 
@@ -51,8 +51,8 @@ primordia/
 │
 ├── scripts/
 │   ├── deploy-to-exe-dev.sh      ← `bun run deploy-to-exe.dev <server>`: SSH deploy to <server>.exe.xyz
-│   ├── install-service.sh        ← Installs/re-installs the Primordia systemd service via symlink
-│   └── primordia.service         ← systemd service unit file for running Primordia as a background service
+│   ├── install-service.sh        ← Installs/re-installs the systemd service; creates primordia-worktrees/current symlink (blue/green bootstrap)
+│   └── primordia.service         ← systemd service unit file; WorkingDirectory points at primordia-worktrees/current (the active blue/green slot)
 │
 ├── public/
 │   (no generated files)
@@ -194,8 +194,12 @@ User types change request on /evolve page
       → GET streams delta progressText + state every 500 ms from SQLite until terminal
   → Preview link shown when status becomes "ready"
   → User clicks Accept → POST /api/evolve/manage { action: "accept" }
-      → git merge {branch} --no-ff
-      → kill dev server, git worktree remove, git branch -D
+      → pre-accept gates: ancestor check, clean worktree, bun run typecheck, bun run build (all in session worktree)
+      → blue/green deploy (production): bun install in worktree → git commit-tree + update-ref (no production dir writes)
+          → atomic symlink swap: primordia-worktrees/current → session worktree
+          → sudo systemctl restart primordia (fire-and-forget)
+          → delete old production slot (if worktree), delete session branch
+      → legacy deploy (local dev, no systemd): git merge in production dir → bun install → worktree remove
   → User clicks Reject → POST /api/evolve/manage { action: "reject" }
       → kill dev server, git worktree remove, git branch -D
 ```
