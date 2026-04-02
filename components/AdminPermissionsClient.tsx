@@ -15,9 +15,11 @@ export interface AdminUser {
 
 interface Props {
   users: AdminUser[];
+  adminRoleName: string;
+  evolveRoleName: string;
 }
 
-export default function AdminPermissionsClient({ users: initial }: Props) {
+export default function AdminPermissionsClient({ users: initial, adminRoleName, evolveRoleName }: Props) {
   const [users, setUsers] = useState<AdminUser[]>(initial);
   const [busy, setBusy] = useState<string | null>(null); // userId being updated
   const [error, setError] = useState<string | null>(null);
@@ -72,7 +74,11 @@ export default function AdminPermissionsClient({ users: initial }: Props) {
                 <td className="px-4 py-3">
                   {user.isAdmin ? (
                     <span className="px-2 py-0.5 rounded text-xs font-medium bg-amber-800/50 text-amber-300 border border-amber-700/40">
-                      owner
+                      {adminRoleName}
+                    </span>
+                  ) : user.canEvolve ? (
+                    <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-900/50 text-blue-300 border border-blue-700/40">
+                      {evolveRoleName}
                     </span>
                   ) : (
                     <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-800 text-gray-400">
@@ -103,8 +109,8 @@ export default function AdminPermissionsClient({ users: initial }: Props) {
                       {busy === user.id
                         ? "…"
                         : user.canEvolve
-                        ? "Revoke evolve"
-                        : "Grant evolve"}
+                        ? `Revoke ${evolveRoleName}`
+                        : `Grant ${evolveRoleName}`}
                     </button>
                   )}
                 </td>

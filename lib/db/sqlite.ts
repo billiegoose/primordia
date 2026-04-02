@@ -54,6 +54,8 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
     );
     CREATE TABLE IF NOT EXISTS roles (
       name TEXT PRIMARY KEY,
+      id TEXT NOT NULL DEFAULT '',
+      display_name TEXT NOT NULL DEFAULT '',
       description TEXT NOT NULL DEFAULT '',
       created_at INTEGER NOT NULL
     );
@@ -80,11 +82,11 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
   // Seed built-in roles
   const now = Date.now();
   db.prepare(
-    "INSERT OR IGNORE INTO roles (name, description, created_at) VALUES (?, ?, ?)"
-  ).run("admin", "Owner/admin role with full system access", now);
+    "INSERT OR IGNORE INTO roles (name, id, display_name, description, created_at) VALUES (?, ?, ?, ?, ?)"
+  ).run("admin", crypto.randomUUID(), "Prime", "Owner/admin role with full system access", now);
   db.prepare(
-    "INSERT OR IGNORE INTO roles (name, description, created_at) VALUES (?, ?, ?)"
-  ).run("can_evolve", "Permission to propose changes to the app via the evolve flow", now);
+    "INSERT OR IGNORE INTO roles (name, id, display_name, description, created_at) VALUES (?, ?, ?, ?, ?)"
+  ).run("can_evolve", crypto.randomUUID(), "Evolver", "Permission to propose changes to the app via the evolve flow", now);
 
   // Migration: grant admin role to first user if they don't have it yet
   try {
@@ -114,6 +116,35 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
     db.exec("ALTER TABLE evolve_sessions ADD COLUMN dev_server_status TEXT NOT NULL DEFAULT 'none'");
   } catch {
     // Column already exists — ignore
+  }
+
+  // Migration: add id and display_name columns to roles (added when roles got UUIDs + customizable names)
+  try {
+    db.exec("ALTER TABLE roles ADD COLUMN id TEXT NOT NULL DEFAULT ''");
+  } catch {
+    // Column already exists — ignore
+  }
+  try {
+    db.exec("ALTER TABLE roles ADD COLUMN display_name TEXT NOT NULL DEFAULT ''");
+  } catch {
+    // Column already exists — ignore
+  }
+  // Backfill: assign UUIDs and display names to existing built-in roles that are missing them
+  const adminRole = db.prepare("SELECT id, display_name FROM roles WHERE name = 'admin'").get() as
+    | { id: string; display_name: string } | null;
+  if (adminRole && (!adminRole.id || adminRole.id === '')) {
+    db.prepare("UPDATE roles SET id = ? WHERE name = 'admin'").run(crypto.randomUUID());
+  }
+  if (adminRole && (!adminRole.display_name || adminRole.display_name === '')) {
+    db.prepare("UPDATE roles SET display_name = ? WHERE name = 'admin'").run("Prime");
+  }
+  const evolveRole = db.prepare("SELECT id, display_name FROM roles WHERE name = 'can_evolve'").get() as
+    | { id: string; display_name: string } | null;
+  if (evolveRole && (!evolveRole.id || evolveRole.id === '')) {
+    db.prepare("UPDATE roles SET id = ? WHERE name = 'can_evolve'").run(crypto.randomUUID());
+  }
+  if (evolveRole && (!evolveRole.display_name || evolveRole.display_name === '')) {
+    db.prepare("UPDATE roles SET display_name = ? WHERE name = 'can_evolve'").run("Evolver");
   }
 
   const adapter: DbAdapter = {
@@ -325,9 +356,15 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
 
     async getAllRoles() {
       const rows = db
-        .prepare("SELECT name, description, created_at FROM roles ORDER BY created_at ASC")
-        .all() as Array<{ name: string; description: string; created_at: number }>;
-      return rows.map((r) => ({ name: r.name, description: r.description, createdAt: r.created_at }));
+        .prepare("SELECT name, id, display_name, description, created_at FROM roles ORDER BY created_at ASC")
+        .all() as Array<{ name: string; id: string; display_name: string; description: string; created_at: number }>;
+      return rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        displayName: r.display_name,
+        description: r.description,
+        createdAt: r.created_at,
+      }));
     },
     async grantRole(userId: string, roleName: string, grantedBy: string) {
       db.prepare(

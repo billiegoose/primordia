@@ -7,8 +7,10 @@
 Replaced the flat `user_permissions` table with a proper (but simple) RBAC system:
 
 - **`roles` table** — catalog of named roles with descriptions. Seeded at boot with two built-in roles:
-  - `admin` — full system access; automatically granted to the first user who registers
-  - `can_evolve` — allows a user to submit change requests via the evolve flow
+  - `admin` (display name: **Prime**) — full system access; automatically granted to the first user who registers
+  - `can_evolve` (display name: **Evolver**) — allows a user to submit change requests via the evolve flow
+
+  Each role has a stable UUID (`id`) and a customizable `display_name`. The internal `name` slug is immutable and used in code/FK references; `display_name` is the human-readable label shown in the UI and can be renamed without breaking role assignments.
 
 - **`user_roles` table** — maps users to roles (`user_id`, `role_name`, `granted_by`, `granted_at`). Replaces the old `user_permissions` table; existing `user_permissions` rows are automatically migrated on first boot.
 

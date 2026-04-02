@@ -35,10 +35,11 @@ export default async function AdminPage() {
   }
 
   const db = await getDb();
-  const [allUsers, adminUsers, evolveUsers] = await Promise.all([
+  const [allUsers, adminUsers, evolveUsers, allRoles] = await Promise.all([
     db.getAllUsers(),
     db.getUsersWithRole("admin"),
     db.getUsersWithRole("can_evolve"),
+    db.getAllRoles(),
   ]);
 
   const adminSet = new Set(adminUsers);
@@ -50,6 +51,9 @@ export default async function AdminPage() {
     isAdmin: adminSet.has(u.id),
     canEvolve: evolveSet.has(u.id),
   }));
+
+  const adminRoleName = allRoles.find((r) => r.name === "admin")?.displayName ?? "owner";
+  const evolveRoleName = allRoles.find((r) => r.name === "can_evolve")?.displayName ?? "Evolver";
 
   return (
     <main className="flex flex-col w-full max-w-3xl mx-auto px-4 py-6 min-h-dvh">
@@ -64,7 +68,7 @@ export default async function AdminPage() {
           </a>
         </div>
         <p className="mt-1 text-sm text-gray-500">
-          Logged in as <span className="text-gray-300 font-mono">{user.username}</span> (owner)
+          Logged in as <span className="text-gray-300 font-mono">{user.username}</span> ({adminRoleName})
         </p>
       </header>
 
@@ -72,9 +76,9 @@ export default async function AdminPage() {
         <h2 className="text-base font-medium text-gray-200 mb-3">Evolve permissions</h2>
         <p className="text-sm text-gray-500 mb-4">
           Control which users can access the evolve flow to propose changes to this app.
-          The owner always has access.
+          The {adminRoleName} always has access.
         </p>
-        <AdminPermissionsClient users={users} />
+        <AdminPermissionsClient users={users} adminRoleName={adminRoleName} evolveRoleName={evolveRoleName} />
       </section>
     </main>
   );

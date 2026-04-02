@@ -249,13 +249,13 @@ Primordia uses a simple role-based access control system stored in SQLite.
 
 **Roles** (seeded at boot, stored in the `roles` table):
 
-| Role | Description |
-|---|---|
-| `admin` | Full system access. Automatically granted to the first user who registers. Cannot be granted via the API. |
-| `can_evolve` | Allows the user to access `/evolve` and submit change requests to Claude Code. Granted/revoked by admins via `/admin`. |
+| Role (internal name) | Default display name | Description |
+|---|---|---|
+| `admin` | Prime | Full system access. Automatically granted to the first user who registers. Cannot be granted via the API. |
+| `can_evolve` | Evolver | Allows the user to access `/evolve` and submit change requests to Claude Code. Granted/revoked by admins via `/admin`. |
 
 **Tables:**
-- `roles` — catalog of all roles (name, description, created_at)
+- `roles` — catalog of all roles (name, id UUID, display_name, description, created_at). `name` is the immutable internal slug used in code and FK references; `display_name` is a customizable human-readable label shown in the UI.
 - `user_roles` — maps users to roles (user_id, role_name, granted_by, granted_at)
 
 **Key auth helpers in `lib/auth.ts`:**
