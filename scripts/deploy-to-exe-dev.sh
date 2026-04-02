@@ -128,7 +128,7 @@ echo ""
 # ── Build the production bundle ───────────────────────────────────────────────
 echo "Building production bundle..."
 cd "\${REMOTE_DIR}"
-PRIMORDIA_EVOLVE=true bun run build
+bun run build
 echo ""
 
 # ── Install / restart the systemd service ──────────────────────────────────────

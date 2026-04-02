@@ -1,7 +1,5 @@
 // app/api/evolve/followup/route.ts
 // Accepts a follow-up request for an existing local evolve session.
-// Only available when PRIMORDIA_EVOLVE=true.
-//
 // POST — submit a follow-up request for a session that is in "ready" or "error" state.
 //   Body: multipart/form-data or JSON { sessionId: string; request: string; attachments?: File[] }
 //   Returns: { ok: true }
@@ -19,13 +17,6 @@ export async function POST(request: Request) {
   const user = await getSessionUser();
   if (!user) {
     return Response.json({ error: 'Authentication required' }, { status: 401 });
-  }
-
-  if (process.env.PRIMORDIA_EVOLVE !== 'true') {
-    return Response.json(
-      { error: 'Evolve is not enabled on this instance' },
-      { status: 403 },
-    );
   }
 
   // Parse request body — supports both JSON (legacy) and multipart/form-data (with file attachments).

@@ -32,13 +32,6 @@ export async function GET(request: Request) {
     return Response.json({ error: 'Authentication required' }, { status: 401 });
   }
 
-  if (process.env.PRIMORDIA_EVOLVE !== 'true') {
-    return Response.json(
-      { error: 'Evolve is not enabled on this instance' },
-      { status: 403 },
-    );
-  }
-
   const url = new URL(request.url);
   const sessionId = url.searchParams.get('sessionId');
   if (!sessionId) {

@@ -1,7 +1,5 @@
 // app/api/evolve/upstream-sync/route.ts
 // Merge or rebase the parent branch into the session branch's worktree.
-// Only available when PRIMORDIA_EVOLVE=true.
-//
 // POST
 //   Body: { sessionId: string; action: "merge" | "rebase" }
 //   Returns: { outcome: "merged" | "rebased"; log: string }
@@ -14,13 +12,6 @@ export async function POST(request: Request) {
   const user = await getSessionUser();
   if (!user) {
     return Response.json({ error: 'Authentication required' }, { status: 401 });
-  }
-
-  if (process.env.PRIMORDIA_EVOLVE !== 'true') {
-    return Response.json(
-      { error: 'Evolve is not enabled on this instance' },
-      { status: 403 },
-    );
   }
 
   const body = (await request.json()) as { sessionId?: string; action?: string };

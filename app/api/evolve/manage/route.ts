@@ -1,6 +1,5 @@
 // app/api/evolve/manage/route.ts
 // Accept or reject a local evolve session — runs in the PARENT server only.
-// Only available when PRIMORDIA_EVOLVE=true.
 //
 // POST
 //   Body: { action: "accept" | "reject", sessionId: string }
@@ -88,7 +87,20 @@ async function retryAcceptAfterFix(
     return;
   }
 
-  // Type check passed — kill the preview dev server.
+  // Also verify the production build succeeds.
+  console.log(`[retryAcceptAfterFix] re-running build in ${worktreePath}`);
+  const buildResult = await runCmd('bun', ['run', 'build'], worktreePath);
+  console.log(`[retryAcceptAfterFix] build exit code=${buildResult.code}`);
+  if (buildResult.code !== 0) {
+    const buildErrors = (buildResult.stdout + buildResult.stderr).trim();
+    console.log(`[retryAcceptAfterFix] build still failing:\n${buildErrors}`);
+    await failWithError(
+      `\n\n❌ **Auto-fix failed**: Production build still failing after the fix attempt.\n\n\`\`\`\n${buildErrors}\n\`\`\`\n`,
+    );
+    return;
+  }
+
+  // Both typecheck and build passed — kill the preview dev server.
   console.log(`[retryAcceptAfterFix] typecheck passed, killing dev server on port ${port}`);
   if (port !== null) {
     try {
@@ -193,13 +205,6 @@ export async function POST(request: Request) {
   const user = await getSessionUser();
   if (!user) {
     return Response.json({ error: 'Authentication required' }, { status: 401 });
-  }
-
-  if (process.env.PRIMORDIA_EVOLVE !== 'true') {
-    return Response.json(
-      { error: 'Evolve is not enabled on this instance' },
-      { status: 403 },
-    );
   }
 
   const body = (await request.json()) as { action?: string; sessionId?: string };
@@ -319,6 +324,37 @@ export async function POST(request: Request) {
           /* skipChangelog */ true,
         );
         return Response.json({ outcome: 'auto-fixing-types' });
+      }
+
+      // Gate 4: production build must succeed.
+      const buildResult = await runCmd('bun', ['run', 'build'], worktreePath);
+      if (buildResult.code !== 0) {
+        const buildErrors = (buildResult.stdout + buildResult.stderr).trim();
+        // Automatically start a follow-up pass to fix the build errors.
+        const buildFixPrompt =
+          `The production build failed (\`bun run build\`). Fix all build errors so the build ` +
+          `completes successfully. Do not change any runtime behaviour — only fix the build issues.\n\n` +
+          `Build output:\n\`\`\`\n${buildErrors}\n\`\`\``;
+        const autoFixSession: LocalSession = {
+          id: session.id,
+          branch: session.branch,
+          worktreePath: session.worktreePath,
+          status: session.status as LocalSession['status'],
+          devServerStatus: 'running',
+          progressText: session.progressText,
+          port: session.port,
+          previewUrl: session.previewUrl,
+          request: session.request,
+          createdAt: session.createdAt,
+        };
+        console.log(`[manage/accept] build errors detected for session ${session.id}, starting auto-fix`);
+        await db.updateEvolveSession(session.id, { status: 'fixing-types' });
+        void runFollowupInWorktree(
+          autoFixSession, buildFixPrompt, repoRoot, 'fixing-types',
+          (fixedSession) => retryAcceptAfterFix(fixedSession.id, repoRoot, parentBranch),
+          /* skipChangelog */ true,
+        );
+        return Response.json({ outcome: 'auto-fixing-build' });
       }
 
       // ── End pre-accept gates ────────────────────────────────────────────────

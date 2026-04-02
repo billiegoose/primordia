@@ -171,7 +171,7 @@ User types message
   → Message appended to chat
 ```
 
-#### Evolve Request (requires PRIMORDIA_EVOLVE=true)
+#### Evolve Request
 ```
 User types change request on /evolve page
   → POST /api/evolve
@@ -213,7 +213,7 @@ Each evolve session tracks two independent dimensions persisted to SQLite:
 |---|---|
 | `starting` | Session created; git worktree + `bun install` in progress |
 | `running-claude` | Claude Agent SDK `query()` is streaming tool calls into the worktree |
-| `fixing-types` | TypeScript gate failed on Accept; Claude is auto-fixing type errors; session page keeps Available Actions panel visible; server retries Accept when done (client tab does not need to be open) |
+| `fixing-types` | TypeScript or build gate failed on Accept; Claude is auto-fixing compilation errors; session page keeps Available Actions panel visible; server retries Accept when done (client tab does not need to be open) |
 | `ready` | Claude Code finished; worktree is live and interactive |
 | `accepted` | User clicked Accept; branch merged into parent, worktree deleted |
 | `rejected` | User clicked Reject; worktree and branch discarded without merging |
@@ -238,9 +238,9 @@ Each evolve session tracks two independent dimensions persisted to SQLite:
 | devServer `starting` → `running` | Next.js "Ready" string detected in dev server output |
 | `ready` → `running-claude` (devServer stays `running`) | `POST /api/evolve/followup` |
 | `running-claude` → `ready` (devServer stays `running`) | `runFollowupInWorktree()` on success |
-| `ready` → `fixing-types` (devServer stays `running`) | `POST /api/evolve/manage` when TypeScript gate fails |
-| `fixing-types` → `accepted` | `runFollowupInWorktree()` success + re-typecheck passes; server merges without client |
-| `fixing-types` → `error` | `runFollowupInWorktree()` success but type errors persist after fix, or merge fails |
+| `ready` → `fixing-types` (devServer stays `running`) | `POST /api/evolve/manage` when TypeScript or build gate fails |
+| `fixing-types` → `accepted` | `runFollowupInWorktree()` success + re-typecheck + re-build both pass; server merges without client |
+| `fixing-types` → `error` | `runFollowupInWorktree()` success but type/build errors persist after fix, or merge fails |
 | `ready` → `accepted` / `rejected` | `POST /api/evolve/manage` |
 | devServer `running` → `disconnected` | Dev server `close` event + branch still present (3 s later) |
 | devServer `disconnected` → `starting` | `POST /api/evolve/kill-restart` |
@@ -278,11 +278,10 @@ bun run deploy-to-exe.dev <server-name>
   → ssh: install git + bun if missing
   → ssh: git clone / git pull origin main
   → ssh: bun install
-  → ssh: bun run build  (with PRIMORDIA_EVOLVE=true in env)
+  → ssh: bun run build
   → ssh: systemd service starts `bun run start`
   → wait for "Ready" signal, tail logs
   → app is reachable at http://<server-name>.exe.xyz:3000
-     (evolve feature enabled via PRIMORDIA_EVOLVE=true — no GitHub/Vercel required)
 ```
 
 ---
@@ -296,7 +295,6 @@ These must be set in:
 | Variable | Required | Description |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Conditional | Powers the chat interface. **Not required on exe.dev** — the built-in LLM gateway is used instead (no key needed). Required when running outside exe.dev as a fallback. |
-| `PRIMORDIA_EVOLVE` | No | Set to `true` to enable the evolve feature (git worktree previews via Claude Agent SDK). Must be set on any instance that should allow users to propose and preview changes. |
 | `GITHUB_TOKEN` | No | Personal access token (repo scope) — enables authenticated git pull/push in GitSyncDialog; falls back to `origin` remote if unset |
 | `GITHUB_REPO` | No | `owner/repo` slug (e.g. `primordia-org/primordia`) — used alongside `GITHUB_TOKEN` to build the authenticated remote URL |
 

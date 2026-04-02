@@ -2,8 +2,6 @@
 // Kills any process listening on a session's port, then re-spawns bun run dev
 // in that session's worktree on the same port.
 //
-// Only available when PRIMORDIA_EVOLVE=true.
-//
 // POST
 //   Body: { sessionId: string }
 //   Returns: { ok: true }
@@ -22,13 +20,6 @@ export async function POST(request: Request) {
   const user = await getSessionUser();
   if (!user) {
     return Response.json({ error: 'Authentication required' }, { status: 401 });
-  }
-
-  if (process.env.PRIMORDIA_EVOLVE !== 'true') {
-    return Response.json(
-      { error: 'Evolve is not enabled on this instance' },
-      { status: 403 },
-    );
   }
 
   const body = (await request.json()) as { sessionId?: string };
