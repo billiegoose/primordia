@@ -329,9 +329,14 @@ export default function EvolveSessionView({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const followupTextareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-scroll to bottom as progress grows
+  // Auto-scroll to bottom as progress grows, but only if the user is already at the bottom.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const atBottom =
+      window.scrollY + window.innerHeight >=
+      document.documentElement.scrollHeight - 40;
+    if (atBottom) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "instant" });
+    }
   }, [progressText]);
 
   // Stop the SSE stream on unmount
