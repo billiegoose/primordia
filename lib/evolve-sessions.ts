@@ -7,6 +7,7 @@ import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import { getDb } from './db';
+import { isGatewayAvailable } from './llm-client';
 
 export type LocalSessionStatus =
   | 'starting'
@@ -232,6 +233,13 @@ export async function startLocalEvolve(
   let devServerProcess: ChildProcess | null = null;
 
   try {
+    // Log which LLM backend is active so the user can see it in the session log.
+    const usingGateway = await isGatewayAvailable();
+    appendProgress(
+      session,
+      `> LLM backend: ${usingGateway ? 'exe.dev gateway' : 'ANTHROPIC_API_KEY'}\n\n`,
+    );
+
     // Step 1 — Create a new git worktree on a fresh branch
     appendProgress(session, `- [ ] Creating worktree \`${session.branch}\`…\n`);
 
