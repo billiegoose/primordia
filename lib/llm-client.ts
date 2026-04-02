@@ -13,7 +13,6 @@ const PROBE_TIMEOUT_MS = 2000;
 
 // Cached per server process. null = not yet checked.
 let gatewayAvailable: boolean | null = null;
-let loggedSource = false;
 
 async function probeGateway(): Promise<boolean> {
   try {
@@ -29,7 +28,6 @@ async function probeGateway(): Promise<boolean> {
 
 /**
  * Returns an Anthropic client and the source that will be used.
- * Logs to the console on first call so the session log shows which backend is active.
  */
 export async function getLlmClient(): Promise<{
   client: Anthropic;
@@ -40,10 +38,6 @@ export async function getLlmClient(): Promise<{
   }
 
   if (gatewayAvailable) {
-    if (!loggedSource) {
-      console.log("[llm] Using exe.dev LLM gateway (no API key required)");
-      loggedSource = true;
-    }
     return {
       client: new Anthropic({
         baseURL: GATEWAY_BASE_URL,
@@ -53,10 +47,6 @@ export async function getLlmClient(): Promise<{
     };
   }
 
-  if (!loggedSource) {
-    console.log("[llm] exe.dev gateway not available — using ANTHROPIC_API_KEY");
-    loggedSource = true;
-  }
   return {
     client: new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }),
     source: "api-key",
