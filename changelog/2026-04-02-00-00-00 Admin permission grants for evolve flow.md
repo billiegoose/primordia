@@ -35,6 +35,12 @@ This pattern is documented in PRIMORDIA.md as a design principle: unauthenticate
 - `app/evolve/page.tsx` — renders ForbiddenPage for users without `admin` or `can_evolve` role; role names in the message are read from the DB so they reflect any customized `display_name`
 - `app/admin/page.tsx` — renders ForbiddenPage for users without `admin` role; role names in the message are read from the DB so they reflect any customized `display_name`
 
+### Admin link in hamburger menu
+
+The hamburger menu (☰) in the header now shows an **Admin** link for users who have the `admin` role. The link is hidden for non-admin users. It appears on all pages that use the hamburger menu: chat, evolve form, evolve session, changelog, and branches.
+
+To support this, `SessionUser` (the client-side session type returned by `/api/auth/session`) now includes an `isAdmin: boolean` field so client components can conditionally render admin-only UI without a separate API call.
+
 ### Fix: roles seed inserts failed on existing databases
 
 On databases created before the `id` and `display_name` columns were added to the `roles` table, startup crashed with `SQLiteError: table roles has no column named id`. The column migrations (`ALTER TABLE roles ADD COLUMN id/display_name`) were running **after** the seed `INSERT OR IGNORE` statements that reference those columns. Fixed by reordering: column migrations now run before the seed inserts.
