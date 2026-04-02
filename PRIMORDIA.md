@@ -26,7 +26,7 @@ The core idea: **the app becomes whatever its users need it to be**, with no cod
 | Styling | Tailwind CSS | AI models write Tailwind well; no CSS files to manage |
 | Language | TypeScript | Catches mistakes; Claude Code understands it well |
 | AI API | Anthropic SDK (`@anthropic-ai/sdk`) | Streaming chat via `claude-sonnet-4-6`; prefers exe.dev LLM gateway, falls back to `ANTHROPIC_API_KEY` |
-| Hosting | exe.dev | Remote dev servers via `bun run dev`; no build step required |
+| Hosting | exe.dev | Production builds via `bun run build && bun run start`; systemd service on the server |
 | AI code gen | `@anthropic-ai/claude-agent-sdk` | `query()` runs Claude Code in git worktrees for evolve requests |
 | Database | bun:sqlite | Local SQLite for passkey auth **and evolve session persistence**; same adapter on exe.dev and local dev |
 
@@ -171,7 +171,7 @@ User types message
   → Message appended to chat
 ```
 
-#### Evolve Request (local dev and exe.dev — NODE_ENV=development)
+#### Evolve Request (requires PRIMORDIA_EVOLVE=true)
 ```
 User types change request on /evolve page
   → POST /api/evolve
@@ -278,10 +278,11 @@ bun run deploy-to-exe.dev <server-name>
   → ssh: install git + bun if missing
   → ssh: git clone / git pull origin main
   → ssh: bun install
-  → ssh: nohup HOSTNAME=0.0.0.0 bun run dev  (NODE_ENV=development)
+  → ssh: bun run build  (with PRIMORDIA_EVOLVE=true in env)
+  → ssh: systemd service starts `bun run start`
   → wait for "Ready" signal, tail logs
   → app is reachable at http://<server-name>.exe.xyz:3000
-     (uses the same local evolve flow — no GitHub/Vercel required)
+     (evolve feature enabled via PRIMORDIA_EVOLVE=true — no GitHub/Vercel required)
 ```
 
 ---
@@ -295,6 +296,7 @@ These must be set in:
 | Variable | Required | Description |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Conditional | Powers the chat interface. **Not required on exe.dev** — the built-in LLM gateway is used instead (no key needed). Required when running outside exe.dev as a fallback. |
+| `PRIMORDIA_EVOLVE` | No | Set to `true` to enable the evolve feature (git worktree previews via Claude Agent SDK). Must be set on any instance that should allow users to propose and preview changes. |
 | `GITHUB_TOKEN` | No | Personal access token (repo scope) — enables authenticated git pull/push in GitSyncDialog; falls back to `origin` remote if unset |
 | `GITHUB_REPO` | No | `owner/repo` slug (e.g. `primordia-org/primordia`) — used alongside `GITHUB_TOKEN` to build the authenticated remote URL |
 

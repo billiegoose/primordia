@@ -1,6 +1,6 @@
 // app/api/evolve/manage/route.ts
 // Accept or reject a local evolve session — runs in the PARENT server only.
-// Only available in NODE_ENV=development.
+// Only available when PRIMORDIA_EVOLVE=true.
 //
 // POST
 //   Body: { action: "accept" | "reject", sessionId: string }
@@ -195,9 +195,9 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Authentication required' }, { status: 401 });
   }
 
-  if (process.env.NODE_ENV !== 'development') {
+  if (process.env.PRIMORDIA_EVOLVE !== 'true') {
     return Response.json(
-      { error: 'Local evolve is only available in development mode' },
+      { error: 'Evolve is not enabled on this instance' },
       { status: 403 },
     );
   }

@@ -125,6 +125,12 @@ cd "\${REMOTE_DIR}"
 bun install --frozen-lockfile
 echo ""
 
+# ── Build the production bundle ───────────────────────────────────────────────
+echo "Building production bundle..."
+cd "\${REMOTE_DIR}"
+PRIMORDIA_EVOLVE=true bun run build
+echo ""
+
 # ── Install / restart the systemd service ──────────────────────────────────────
 echo "Installing systemd service..."
 bash "\${REMOTE_DIR}/scripts/install-service.sh"

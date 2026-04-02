@@ -2,7 +2,7 @@
 // Kills any process listening on a session's port, then re-spawns bun run dev
 // in that session's worktree on the same port.
 //
-// Only available in development (NODE_ENV=development).
+// Only available when PRIMORDIA_EVOLVE=true.
 //
 // POST
 //   Body: { sessionId: string }
@@ -24,9 +24,9 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Authentication required' }, { status: 401 });
   }
 
-  if (process.env.NODE_ENV !== 'development') {
+  if (process.env.PRIMORDIA_EVOLVE !== 'true') {
     return Response.json(
-      { error: 'Local evolve is only available in development mode' },
+      { error: 'Evolve is not enabled on this instance' },
       { status: 403 },
     );
   }

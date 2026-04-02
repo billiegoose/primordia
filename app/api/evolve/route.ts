@@ -1,6 +1,6 @@
 // app/api/evolve/route.ts
 // Local development evolve flow — bypasses GitHub entirely.
-// Only available when NODE_ENV=development.
+// Only available when PRIMORDIA_EVOLVE=true.
 //
 // POST — start a new local evolve session.
 //   Body: { request: string }
@@ -90,9 +90,9 @@ export async function POST(request: Request) {
     return Response.json({ error: 'You do not have permission to use the evolve flow' }, { status: 403 });
   }
 
-  if (process.env.NODE_ENV !== 'development') {
+  if (process.env.PRIMORDIA_EVOLVE !== 'true') {
     return Response.json(
-      { error: 'Local evolve is only available in development mode' },
+      { error: 'Evolve is not enabled on this instance' },
       { status: 403 },
     );
   }
@@ -201,9 +201,9 @@ export async function GET(request: Request) {
     return Response.json({ error: 'Authentication required' }, { status: 401 });
   }
 
-  if (process.env.NODE_ENV !== 'development') {
+  if (process.env.PRIMORDIA_EVOLVE !== 'true') {
     return Response.json(
-      { error: 'Local evolve is only available in development mode' },
+      { error: 'Evolve is not enabled on this instance' },
       { status: 403 },
     );
   }

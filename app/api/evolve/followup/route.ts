@@ -1,6 +1,6 @@
 // app/api/evolve/followup/route.ts
 // Accepts a follow-up request for an existing local evolve session.
-// Only available when NODE_ENV=development.
+// Only available when PRIMORDIA_EVOLVE=true.
 //
 // POST — submit a follow-up request for a session that is in "ready" or "error" state.
 //   Body: multipart/form-data or JSON { sessionId: string; request: string; attachments?: File[] }
@@ -21,9 +21,9 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Authentication required' }, { status: 401 });
   }
 
-  if (process.env.NODE_ENV !== 'development') {
+  if (process.env.PRIMORDIA_EVOLVE !== 'true') {
     return Response.json(
-      { error: 'Local evolve is only available in development mode' },
+      { error: 'Evolve is not enabled on this instance' },
       { status: 403 },
     );
   }
