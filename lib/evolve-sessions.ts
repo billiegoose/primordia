@@ -216,6 +216,8 @@ export async function startLocalEvolve(
    *  Comes from the x-forwarded-host request header so the URL is correct
    *  when running behind a reverse proxy (e.g. exe.dev). Defaults to "localhost". */
   publicHostname: string = "localhost",
+  /** Temporary file paths for user-uploaded attachments. Copied into worktree/attachments/ and deleted from /tmp. */
+  attachmentPaths: string[] = [],
 ): Promise<void> {
   const db = await getDb();
 
@@ -333,14 +335,39 @@ export async function startLocalEvolve(
       appendProgress(session, `- [x] Symlinked \`.env.local\`\n`);
     }
 
-    // Step 5 — Run Claude Code via the Agent SDK
+    // Step 5 — Copy user-uploaded attachments into the worktree
+    const worktreeAttachmentPaths: string[] = [];
+    if (attachmentPaths.length > 0) {
+      const attachmentsDir = path.join(session.worktreePath, 'attachments');
+      fs.mkdirSync(attachmentsDir, { recursive: true });
+      for (const srcPath of attachmentPaths) {
+        const filename = path.basename(srcPath);
+        const dstPath = path.join(attachmentsDir, filename);
+        fs.copyFileSync(srcPath, dstPath);
+        worktreeAttachmentPaths.push(`attachments/${filename}`);
+      }
+      // Clean up temp files and their directory
+      for (const srcPath of attachmentPaths) {
+        try { fs.unlinkSync(srcPath); } catch { /* non-fatal */ }
+      }
+      try { fs.rmdirSync(path.dirname(attachmentPaths[0])); } catch { /* non-fatal */ }
+      appendProgress(session, `- [x] Copied ${worktreeAttachmentPaths.length} attachment(s) into worktree\n`);
+    }
+
+    // Step 6 — Run Claude Code via the Agent SDK
     session.status = 'running-claude';
     appendProgress(session, `\n### 🤖 Claude Code\n\n`);
     await persist();
 
+    const attachmentSection = worktreeAttachmentPaths.length > 0
+      ? `\n\nThe user has attached the following file(s) to this request (already saved in the worktree):\n` +
+        worktreeAttachmentPaths.map(p => `- \`${p}\``).join('\n') +
+        `\n\nRead and use these files as needed. If they are images or assets that should be added to the project, copy them to an appropriate location (e.g., \`public/\`) with a descriptive filename.`
+      : '';
+
     const prompt =
       `Read PRIMORDIA.md first for architecture context, then implement the following change:\n\n` +
-      `${taskRequest}\n\n` +
+      `${taskRequest}${attachmentSection}\n\n` +
       `After making changes:\n` +
       `1. Create a new changelog file in the \`changelog/\` directory named \`YYYY-MM-DD-HH-MM-SS Description of change.md\` (UTC time, e.g. \`2026-03-16-21-00-00 Fix login bug.md\`). The filename is the short description; the file body is the full "what changed + why" detail in markdown. Do NOT add changelog entries to PRIMORDIA.md itself.\n` +
       `2. Commit all changes with a descriptive message.`;
@@ -600,6 +627,8 @@ export async function runFollowupInWorktree(
   inProgressStatus: LocalSessionStatus = 'running-claude',
   onSuccess?: (session: LocalSession) => Promise<void>,
   skipChangelog: boolean = false,
+  /** Temporary file paths for user-uploaded attachments. Copied into worktree/attachments/ and deleted from /tmp. */
+  attachmentPaths: string[] = [],
 ): Promise<void> {
   const db = await getDb();
 
@@ -628,9 +657,33 @@ export async function runFollowupInWorktree(
       ? `Do NOT create or update any changelog file — this fix is part of the automated merge pipeline, not a user-visible change.`
       : `This is a follow-up to changes already made on branch \`${session.branch}\`. Do NOT create a new changelog file. Instead, find the most recent changelog file in \`changelog/\` and update it if your changes invalidate or extend the existing description.`;
 
+    // Copy user-uploaded attachments into the worktree
+    const worktreeAttachmentPaths: string[] = [];
+    if (attachmentPaths.length > 0) {
+      const attachmentsDir = path.join(session.worktreePath, 'attachments');
+      fs.mkdirSync(attachmentsDir, { recursive: true });
+      for (const srcPath of attachmentPaths) {
+        const filename = path.basename(srcPath);
+        const dstPath = path.join(attachmentsDir, filename);
+        fs.copyFileSync(srcPath, dstPath);
+        worktreeAttachmentPaths.push(`attachments/${filename}`);
+      }
+      // Clean up temp files and their directory
+      for (const srcPath of attachmentPaths) {
+        try { fs.unlinkSync(srcPath); } catch { /* non-fatal */ }
+      }
+      try { fs.rmdirSync(path.dirname(attachmentPaths[0])); } catch { /* non-fatal */ }
+    }
+
+    const attachmentSection = worktreeAttachmentPaths.length > 0
+      ? `\n\nThe user has attached the following file(s) to this request (already saved in the worktree):\n` +
+        worktreeAttachmentPaths.map(p => `- \`${p}\``).join('\n') +
+        `\n\nRead and use these files as needed. If they are images or assets that should be added to the project, copy them to an appropriate location (e.g., \`public/\`) with a descriptive filename.`
+      : '';
+
     const prompt =
       `Read PRIMORDIA.md first for architecture context, then address the following follow-up request:\n\n` +
-      `${followupRequest}\n\n` +
+      `${followupRequest}${attachmentSection}\n\n` +
       `${changelogInstruction} Commit all changes with a descriptive message.`;
 
     const stderrLines: string[] = [];

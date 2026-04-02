@@ -11,6 +11,7 @@
 //   Returns: { status, progressText, port, previewUrl, branch }
 
 import * as path from 'path';
+import * as fs from 'fs';
 import { getLlmClient } from '../../../lib/llm-client';
 import {
   startLocalEvolve,
@@ -96,13 +97,43 @@ export async function POST(request: Request) {
     );
   }
 
-  const body = (await request.json()) as { request?: string };
-  if (!body.request || typeof body.request !== 'string') {
-    return Response.json({ error: 'request string required' }, { status: 400 });
+  // Parse request body — supports both JSON (legacy) and multipart/form-data (with file attachments).
+  let requestText: string;
+  const savedAttachmentPaths: string[] = [];
+
+  const contentType = request.headers.get('content-type') ?? '';
+  if (contentType.includes('multipart/form-data')) {
+    const formData = await request.formData();
+    const reqField = formData.get('request');
+    if (!reqField || typeof reqField !== 'string') {
+      return Response.json({ error: 'request string required' }, { status: 400 });
+    }
+    requestText = reqField;
+
+    const files = formData.getAll('attachments');
+    if (files.length > 0) {
+      const uploadDir = path.join('/tmp', `primordia-upload-${crypto.randomUUID()}`);
+      fs.mkdirSync(uploadDir, { recursive: true });
+      for (const file of files) {
+        if (!(file instanceof File) || file.size === 0) continue;
+        const buffer = Buffer.from(await file.arrayBuffer());
+        // Sanitize filename to prevent path traversal
+        const safeName = path.basename(file.name).replace(/[^a-zA-Z0-9._-]/g, '_');
+        const filePath = path.join(uploadDir, safeName);
+        fs.writeFileSync(filePath, buffer);
+        savedAttachmentPaths.push(filePath);
+      }
+    }
+  } else {
+    const body = (await request.json()) as { request?: string };
+    if (!body.request || typeof body.request !== 'string') {
+      return Response.json({ error: 'request string required' }, { status: 400 });
+    }
+    requestText = body.request;
   }
 
   const repoRoot = process.cwd();
-  const slug = await generateSlug(body.request);
+  const slug = await generateSlug(requestText);
   const branch = await findUniqueBranch(slug, repoRoot);
   const sessionId = branch;
 
@@ -133,7 +164,7 @@ export async function POST(request: Request) {
     progressText: '',
     port: null,
     previewUrl: null,
-    request: body.request,
+    request: requestText,
     createdAt: Date.now(),
   };
 
@@ -159,7 +190,7 @@ export async function POST(request: Request) {
 
   // Fire-and-forget — run async so POST returns immediately with the session ID.
   // startLocalEvolve handles all error states internally and writes them to SQLite.
-  void startLocalEvolve(session, body.request, repoRoot, publicHostname);
+  void startLocalEvolve(session, requestText, repoRoot, publicHostname, savedAttachmentPaths);
 
   return Response.json({ sessionId });
 }

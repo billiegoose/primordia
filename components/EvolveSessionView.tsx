@@ -312,6 +312,7 @@ export default function EvolveSessionView({
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
   const { sessionUser, handleLogout } = useSessionUser();
   const [followupText, setFollowupText] = useState('');
+  const [followupFiles, setFollowupFiles] = useState<File[]>([]);
   const [isSubmittingFollowup, setIsSubmittingFollowup] = useState(false);
   const [followupError, setFollowupError] = useState<string | null>(null);
   const [acceptRejectLoading, setAcceptRejectLoading] = useState(false);
@@ -328,6 +329,7 @@ export default function EvolveSessionView({
   const progressLengthRef = useRef(initialProgressText.length);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const followupTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const followupFileInputRef = useRef<HTMLInputElement>(null);
   /**
    * True when the user is scrolled to (or near) the bottom.
    * Updated by a scroll listener so we capture position *before* new content
@@ -492,6 +494,18 @@ export default function EvolveSessionView({
     }
   }
 
+  function handleFollowupFilesAdded(newFiles: FileList | File[]) {
+    const arr = Array.from(newFiles);
+    setFollowupFiles(prev => {
+      const existing = new Set(prev.map(f => `${f.name}:${f.size}`));
+      return [...prev, ...arr.filter(f => !existing.has(`${f.name}:${f.size}`))];
+    });
+  }
+
+  function handleRemoveFollowupFile(index: number) {
+    setFollowupFiles(prev => prev.filter((_, i) => i !== index));
+  }
+
   async function handleFollowupSubmit() {
     const trimmed = followupText.trim();
     if (!trimmed) return;
@@ -500,10 +514,16 @@ export default function EvolveSessionView({
     setFollowupError(null);
 
     try {
+      const formData = new FormData();
+      formData.append('sessionId', sessionId);
+      formData.append('request', trimmed);
+      for (const file of followupFiles) {
+        formData.append('attachments', file);
+      }
+
       const res = await fetch('/api/evolve/followup', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, request: trimmed }),
+        body: formData,
       });
 
       if (!res.ok) {
@@ -512,6 +532,7 @@ export default function EvolveSessionView({
       }
 
       setFollowupText('');
+      setFollowupFiles([]);
       setStatus('running-claude');
       void startStreaming();
     } catch (err) {
@@ -835,18 +856,50 @@ export default function EvolveSessionView({
                 value={followupText}
                 onChange={(e) => setFollowupText(e.target.value)}
                 placeholder="Describe what to fix or improve…"
-                className="w-full bg-gray-800 text-gray-100 placeholder-gray-500 border border-gray-700 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50 mb-3"
+                className="w-full bg-gray-800 text-gray-100 placeholder-gray-500 border border-gray-700 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50 mb-2"
               />
+              {/* Attached file chips */}
+              {followupFiles.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {followupFiles.map((file, i) => (
+                    <span key={i} className="flex items-center gap-1 px-2 py-1 rounded-md bg-gray-800 border border-gray-700 text-xs text-gray-300">
+                      <span className="truncate max-w-[160px]">{file.name}</span>
+                      <button type="button" onClick={() => handleRemoveFollowupFile(i)} className="text-gray-500 hover:text-gray-200 ml-1">✕</button>
+                    </span>
+                  ))}
+                </div>
+              )}
               {followupError && (
                 <p className="text-red-400 text-xs mb-2">{followupError}</p>
               )}
-              <button
-                onClick={handleFollowupSubmit}
-                disabled={isClaudeRunning || isSubmittingFollowup || !followupText.trim()}
-                className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium transition-colors"
-              >
-                {isSubmittingFollowup ? "Submitting…" : isClaudeRunning ? "Waiting for Claude to finish…" : "Submit follow-up"}
-              </button>
+              <div className="flex items-center gap-2">
+                <input
+                  ref={followupFileInputRef}
+                  type="file"
+                  multiple
+                  accept="image/*,application/pdf,.txt,.md,.csv,.json,.ts,.tsx,.js,.jsx,.py,.sh,.yaml,.yml"
+                  className="hidden"
+                  onChange={(e) => { if (e.target.files) handleFollowupFilesAdded(e.target.files); e.target.value = ""; }}
+                />
+                <button
+                  type="button"
+                  onClick={() => followupFileInputRef.current?.click()}
+                  disabled={isClaudeRunning || isSubmittingFollowup}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-gray-400 hover:text-gray-200 hover:bg-gray-800 border border-gray-700 transition-colors disabled:opacity-50"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                    <path fillRule="evenodd" d="M15.621 4.379a3 3 0 0 0-4.242 0l-7 7a1.5 1.5 0 0 0 2.122 2.121l7-7a.5.5 0 0 1 .707.708l-7 7a2.5 2.5 0 0 1-3.536-3.536l7-7a4.5 4.5 0 0 1 6.364 6.364l-7 7A6.5 6.5 0 0 1 2.45 9.955l7-7a.5.5 0 1 1 .707.708l-7 7A5.5 5.5 0 0 0 10.95 18.92l7-7a3 3 0 0 0 0-4.242Z" clipRule="evenodd" />
+                  </svg>
+                  Attach files
+                </button>
+                <button
+                  onClick={handleFollowupSubmit}
+                  disabled={isClaudeRunning || isSubmittingFollowup || !followupText.trim()}
+                  className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium transition-colors"
+                >
+                  {isSubmittingFollowup ? "Submitting…" : isClaudeRunning ? "Waiting for Claude to finish…" : "Submit follow-up"}
+                </button>
+              </div>
             </div>
           )}
 
@@ -941,18 +994,42 @@ export default function EvolveSessionView({
               value={followupText}
               onChange={(e) => setFollowupText(e.target.value)}
               placeholder="Describe what to try instead, or provide additional context…"
-              className="w-full bg-gray-800 text-gray-100 placeholder-gray-500 border border-gray-700 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50 mb-3"
+              className="w-full bg-gray-800 text-gray-100 placeholder-gray-500 border border-gray-700 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50 mb-2"
             />
+            {/* Attached file chips */}
+            {followupFiles.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {followupFiles.map((file, i) => (
+                  <span key={i} className="flex items-center gap-1 px-2 py-1 rounded-md bg-gray-800 border border-gray-700 text-xs text-gray-300">
+                    <span className="truncate max-w-[160px]">{file.name}</span>
+                    <button type="button" onClick={() => handleRemoveFollowupFile(i)} className="text-gray-500 hover:text-gray-200 ml-1">✕</button>
+                  </span>
+                ))}
+              </div>
+            )}
             {followupError && (
               <p className="text-red-400 text-xs mb-2">{followupError}</p>
             )}
-            <button
-              onClick={handleFollowupSubmit}
-              disabled={isSubmittingFollowup || !followupText.trim()}
-              className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium transition-colors"
-            >
-              {isSubmittingFollowup ? "Submitting…" : "Submit follow-up"}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => followupFileInputRef.current?.click()}
+                disabled={isSubmittingFollowup}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-gray-400 hover:text-gray-200 hover:bg-gray-800 border border-gray-700 transition-colors disabled:opacity-50"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                  <path fillRule="evenodd" d="M15.621 4.379a3 3 0 0 0-4.242 0l-7 7a1.5 1.5 0 0 0 2.122 2.121l7-7a.5.5 0 0 1 .707.708l-7 7a2.5 2.5 0 0 1-3.536-3.536l7-7a4.5 4.5 0 0 1 6.364 6.364l-7 7A6.5 6.5 0 0 1 2.45 9.955l7-7a.5.5 0 1 1 .707.708l-7 7A5.5 5.5 0 0 0 10.95 18.92l7-7a3 3 0 0 0 0-4.242Z" clipRule="evenodd" />
+                </svg>
+                Attach files
+              </button>
+              <button
+                onClick={handleFollowupSubmit}
+                disabled={isSubmittingFollowup || !followupText.trim()}
+                className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium transition-colors"
+              >
+                {isSubmittingFollowup ? "Submitting…" : "Submit follow-up"}
+              </button>
+            </div>
           </div>
         </div>
       )}
