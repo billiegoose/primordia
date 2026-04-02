@@ -7,7 +7,8 @@
 //
 // buildStandardMenuItems() returns the shared navigation items (Go to chat,
 // Propose a change, Sync with GitHub, Admin) used by every primary app page,
-// so callers don't have to duplicate the icon JSX.
+// so callers don't have to duplicate the icon JSX. Pass `currentPath` to
+// suppress the link to whichever page the user is already on.
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
@@ -34,18 +35,18 @@ interface HamburgerMenuProps {
 
 /**
  * Returns the standard set of navigation items (Go to chat, Propose a change,
- * Sync with GitHub, Admin) shared by all primary app pages. Pass
- * `excludeAdmin: true` when already on the admin page to suppress the
- * self-referential Admin link.
+ * Sync with GitHub, Admin) shared by all primary app pages. Any item whose
+ * `href` matches `currentPath` is omitted, so the menu never links to the
+ * page you're already on.
  */
 export function buildStandardMenuItems({
   onSyncClick,
   isAdmin,
-  excludeAdmin = false,
+  currentPath,
 }: {
   onSyncClick: () => void;
   isAdmin: boolean;
-  excludeAdmin?: boolean;
+  currentPath?: string;
 }): MenuItem[] {
   const items: MenuItem[] = [
     {
@@ -82,7 +83,7 @@ export function buildStandardMenuItems({
       ),
     },
   ];
-  if (isAdmin && !excludeAdmin) {
+  if (isAdmin) {
     items.push({
       label: "Admin",
       hoverColor: "hover:text-purple-400",
@@ -94,7 +95,7 @@ export function buildStandardMenuItems({
       ),
     });
   }
-  return items;
+  return items.filter((item) => !item.href || item.href !== currentPath);
 }
 
 export function HamburgerMenu({ sessionUser, onLogout, items }: HamburgerMenuProps) {

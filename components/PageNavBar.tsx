@@ -78,7 +78,7 @@ export function PageNavBar({ subtitle, branch, currentPage, initialSession }: Pa
           items={buildStandardMenuItems({
             onSyncClick: () => setSyncDialogOpen(true),
             isAdmin: sessionUser?.isAdmin ?? false,
-            excludeAdmin: currentPage === "admin",
+            currentPath: currentPage ? `/${currentPage}` : undefined,
           })}
         />
       )}

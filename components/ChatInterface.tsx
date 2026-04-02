@@ -222,6 +222,7 @@ export default function ChatInterface({ branch, commitMessage }: GitContext) {
           items={buildStandardMenuItems({
             onSyncClick: () => setSyncDialogOpen(true),
             isAdmin: sessionUser?.isAdmin ?? false,
+            currentPath: "/chat",
           })}
         />
         {syncDialogOpen && (

@@ -90,6 +90,7 @@ export default function EvolveForm({ branch }: EvolveFormProps = {}) {
           items={buildStandardMenuItems({
             onSyncClick: () => setSyncDialogOpen(true),
             isAdmin: sessionUser?.isAdmin ?? false,
+            currentPath: "/evolve",
           })}
         />
         {syncDialogOpen && (
