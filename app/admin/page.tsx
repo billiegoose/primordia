@@ -20,26 +20,33 @@ export default async function AdminPage() {
   const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  if (!(await isAdmin(user.id))) {
+  const db = await getDb();
+  const [adminCheck, allRoles] = await Promise.all([
+    isAdmin(user.id),
+    db.getAllRoles(),
+  ]);
+
+  const adminRoleName = allRoles.find((r) => r.name === "admin")?.displayName ?? "admin";
+  const evolveRoleName = allRoles.find((r) => r.name === "can_evolve")?.displayName ?? "Evolver";
+
+  if (!adminCheck) {
     return (
       <ForbiddenPage
-        pageDescription="This page lets you manage user roles and permissions. You can grant or revoke the 'can_evolve' role to control who can propose changes to the app."
-        requiredConditions={["Be logged in", "Have the 'admin' role"]}
+        pageDescription={`This page lets you manage user roles and permissions. You can grant or revoke the "${evolveRoleName}" role to control who can propose changes to the app.`}
+        requiredConditions={["Be logged in", `Have the "${adminRoleName}" role`]}
         metConditions={["You are logged in"]}
-        unmetConditions={["You don't have the 'admin' role"]}
+        unmetConditions={[`You don't have the "${adminRoleName}" role`]}
         howToFix={[
-          "The 'admin' role is automatically held by the first user who registered on this Primordia instance. It cannot be granted by other users.",
+          `The "${adminRoleName}" role is automatically held by the first user who registered on this Primordia instance. It cannot be granted by other users.`,
         ]}
       />
     );
   }
 
-  const db = await getDb();
-  const [allUsers, adminUsers, evolveUsers, allRoles] = await Promise.all([
+  const [allUsers, adminUsers, evolveUsers] = await Promise.all([
     db.getAllUsers(),
     db.getUsersWithRole("admin"),
     db.getUsersWithRole("can_evolve"),
-    db.getAllRoles(),
   ]);
 
   const adminSet = new Set(adminUsers);
@@ -51,9 +58,6 @@ export default async function AdminPage() {
     isAdmin: adminSet.has(u.id),
     canEvolve: evolveSet.has(u.id),
   }));
-
-  const adminRoleName = allRoles.find((r) => r.name === "admin")?.displayName ?? "owner";
-  const evolveRoleName = allRoles.find((r) => r.name === "can_evolve")?.displayName ?? "Evolver";
 
   return (
     <main className="flex flex-col w-full max-w-3xl mx-auto px-4 py-6 min-h-dvh">

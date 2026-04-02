@@ -32,8 +32,8 @@ Protected routes no longer silently redirect to `/chat` when a logged-in user la
 This pattern is documented in PRIMORDIA.md as a design principle: unauthenticated users (no session) are still redirected to `/login`; authenticated users lacking a role see the 403 page.
 
 - `components/ForbiddenPage.tsx` — new reusable server component
-- `app/evolve/page.tsx` — renders ForbiddenPage for users without `admin` or `can_evolve` role
-- `app/admin/page.tsx` — renders ForbiddenPage for users without `admin` role
+- `app/evolve/page.tsx` — renders ForbiddenPage for users without `admin` or `can_evolve` role; role names in the message are read from the DB so they reflect any customized `display_name`
+- `app/admin/page.tsx` — renders ForbiddenPage for users without `admin` role; role names in the message are read from the DB so they reflect any customized `display_name`
 
 ### Fix: roles seed inserts failed on existing databases
 
