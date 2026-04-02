@@ -106,8 +106,8 @@ export default function LandingPage() {
           <Image
             src="/primordia-logo.png"
             alt="Primordia logo"
-            width={120}
-            height={120}
+            width={180}
+            height={180}
             priority
             className="drop-shadow-[0_0_32px_rgba(34,197,94,0.4)]"
           />
