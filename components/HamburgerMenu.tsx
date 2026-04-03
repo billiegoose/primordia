@@ -31,6 +31,8 @@ interface HamburgerMenuProps {
   onLogout: () => void;
   /** Page-specific items rendered below the built-in auth section. */
   items: MenuItem[];
+  /** Optional ref exposed to callers so they can read the container's DOMRect (e.g. to anchor a floating dialog). */
+  containerRef?: React.RefObject<HTMLDivElement | null>;
 }
 
 /**
@@ -112,9 +114,10 @@ export function buildStandardMenuItems({
   return items.filter((item) => !item.href || item.href !== currentPath);
 }
 
-export function HamburgerMenu({ sessionUser, onLogout, items }: HamburgerMenuProps) {
+export function HamburgerMenu({ sessionUser, onLogout, items, containerRef }: HamburgerMenuProps) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const localRef = useRef<HTMLDivElement>(null);
+  const menuRef = containerRef ?? localRef;
 
   const handleClickOutside = useCallback((e: MouseEvent) => {
     if (menuRef.current && !menuRef.current.contains(e.target as Node)) {

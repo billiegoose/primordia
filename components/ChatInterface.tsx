@@ -38,6 +38,8 @@ interface GitContext {
 export default function ChatInterface({ branch, commitMessage }: GitContext) {
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
   const [evolveDialogOpen, setEvolveDialogOpen] = useState(false);
+  const [evolveAnchorRect, setEvolveAnchorRect] = useState<DOMRect | null>(null);
+  const hamburgerRef = useRef<HTMLDivElement>(null);
   const { sessionUser, handleLogout } = useSessionUser();
 
   const [messages, setMessages] = useState<Message[]>(() => {
@@ -221,9 +223,13 @@ export default function ChatInterface({ branch, commitMessage }: GitContext) {
         <HamburgerMenu
           sessionUser={sessionUser}
           onLogout={handleLogout}
+          containerRef={hamburgerRef}
           items={buildStandardMenuItems({
             onSyncClick: () => setSyncDialogOpen(true),
-            onEvolveClick: () => setEvolveDialogOpen(true),
+            onEvolveClick: () => {
+              setEvolveAnchorRect(hamburgerRef.current?.getBoundingClientRect() ?? null);
+              setEvolveDialogOpen(true);
+            },
             isAdmin: sessionUser?.isAdmin ?? false,
             currentPath: "/chat",
           })}
@@ -232,7 +238,10 @@ export default function ChatInterface({ branch, commitMessage }: GitContext) {
           <GitSyncDialog onClose={() => setSyncDialogOpen(false)} />
         )}
         {evolveDialogOpen && (
-          <FloatingEvolveDialog onClose={() => setEvolveDialogOpen(false)} />
+          <FloatingEvolveDialog
+            onClose={() => setEvolveDialogOpen(false)}
+            anchorRect={evolveAnchorRect}
+          />
         )}
       </header>
 

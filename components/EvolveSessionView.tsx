@@ -315,6 +315,8 @@ export default function EvolveSessionView({
   const [previewUrl, setPreviewUrl] = useState<string | null>(initialPreviewUrl);
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
   const [evolveDialogOpen, setEvolveDialogOpen] = useState(false);
+  const [evolveAnchorRect, setEvolveAnchorRect] = useState<DOMRect | null>(null);
+  const hamburgerRef = useRef<HTMLDivElement>(null);
   const { sessionUser, handleLogout } = useSessionUser();
   const [followupText, setFollowupText] = useState('');
   const [followupFiles, setFollowupFiles] = useState<File[]>([]);
@@ -670,9 +672,13 @@ export default function EvolveSessionView({
         <HamburgerMenu
           sessionUser={sessionUser}
           onLogout={handleLogout}
+          containerRef={hamburgerRef}
           items={buildStandardMenuItems({
             onSyncClick: () => setSyncDialogOpen(true),
-            onEvolveClick: () => setEvolveDialogOpen(true),
+            onEvolveClick: () => {
+              setEvolveAnchorRect(hamburgerRef.current?.getBoundingClientRect() ?? null);
+              setEvolveDialogOpen(true);
+            },
             isAdmin: sessionUser?.isAdmin ?? false,
           })}
         />
@@ -680,7 +686,10 @@ export default function EvolveSessionView({
           <GitSyncDialog onClose={() => setSyncDialogOpen(false)} />
         )}
         {evolveDialogOpen && (
-          <FloatingEvolveDialog onClose={() => setEvolveDialogOpen(false)} />
+          <FloatingEvolveDialog
+            onClose={() => setEvolveDialogOpen(false)}
+            anchorRect={evolveAnchorRect}
+          />
         )}
       </header>
 
