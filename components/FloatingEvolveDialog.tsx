@@ -37,6 +37,7 @@ export function FloatingEvolveDialog({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -144,6 +145,32 @@ export function FloatingEvolveDialog({
     }
   }
 
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragging(true);
+  }
+
+  function handleDragLeave(e: React.DragEvent) {
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setIsDragging(false);
+    }
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files.length > 0) {
+      handleFilesAdded(e.dataTransfer.files);
+    }
+  }
+
+  function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const files = Array.from(e.clipboardData.files).filter(f => f.type.startsWith("image/"));
+    if (files.length > 0) {
+      handleFilesAdded(files);
+    }
+  }
+
   function handleFilesAdded(newFiles: FileList | File[]) {
     const arr = Array.from(newFiles);
     setAttachedFiles((prev) => {
@@ -222,13 +249,17 @@ export function FloatingEvolveDialog({
 
         <form
           onSubmit={handleSubmit}
-          className="flex flex-col gap-3 border border-gray-800 rounded-xl bg-gray-900 p-3 flex-1 min-h-0"
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={`flex flex-col gap-3 border rounded-xl bg-gray-900 p-3 flex-1 min-h-0 transition-colors ${isDragging ? "border-amber-500/70 bg-amber-950/20" : "border-gray-800"}`}
         >
           <textarea
             ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder="Describe the change you want to make to this app…"
             disabled={isLoading}
             className="resize-none bg-transparent text-sm text-gray-100 placeholder-gray-600 outline-none leading-relaxed flex-1 min-h-0"
