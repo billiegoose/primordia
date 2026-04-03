@@ -346,10 +346,10 @@ async function retryAcceptAfterFix(
 
   const { branch, worktreePath, port } = current;
 
-  /** Append text and persist session to error. */
+  /** Append text and mark the session ready (with error in the log). */
   async function failWithError(msg: string): Promise<void> {
     await appendToProgress(sessionId, msg);
-    await db.updateEvolveSession(sessionId, { status: 'error' });
+    await db.updateEvolveSession(sessionId, { status: 'ready' });
   }
 
   // Re-run the TypeScript check to verify the fix worked.
@@ -502,7 +502,7 @@ async function retryAcceptAfterFix(
  * via the existing SSE endpoint.
  *
  * Writes step labels to progressText as each stage begins, and sets the
- * session status to "accepted" or "error" when done.
+ * session status to "accepted" (or "ready" with error log) when done.
  */
 async function runAcceptAsync(
   sessionId: string,
@@ -516,7 +516,7 @@ async function runAcceptAsync(
   async function failWithError(msg: string): Promise<void> {
     await appendToProgress(sessionId, msg);
     const db = await getDb();
-    await db.updateEvolveSession(sessionId, { status: 'error' });
+    await db.updateEvolveSession(sessionId, { status: 'ready' });
   }
 
   try {

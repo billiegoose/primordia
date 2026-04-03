@@ -226,10 +226,9 @@ Each evolve session tracks two independent dimensions persisted to SQLite:
 | `starting` | Session created; git worktree + `bun install` in progress |
 | `running-claude` | Claude Agent SDK `query()` is streaming tool calls into the worktree |
 | `fixing-types` | TypeScript or build gate failed on Accept; Claude is auto-fixing compilation errors; session page keeps Available Actions panel visible; server retries Accept when done (client tab does not need to be open) |
-| `ready` | Claude Code finished; worktree is live and interactive |
+| `ready` | Claude Code finished (or errored); worktree is live and interactive. If an error occurred, the progress log contains an `❌ **Error**:` entry and the Claude Code section heading is styled in red. |
 | `accepted` | User clicked Accept; branch merged into parent, worktree deleted |
 | `rejected` | User clicked Reject; worktree and branch discarded without merging |
-| `error` | An exception was thrown during `starting` or `running-claude` |
 
 **Dev server status reference**
 
@@ -253,11 +252,11 @@ Each evolve session tracks two independent dimensions persisted to SQLite:
 | `running-claude` → `ready` (devServer stays `running`) | `runFollowupInWorktree()` on success |
 | `ready` → `fixing-types` (devServer stays `running`) | `POST /api/evolve/manage` when TypeScript or build gate fails |
 | `fixing-types` → `accepted` | `runFollowupInWorktree()` success + re-typecheck + re-build both pass; server merges without client |
-| `fixing-types` → `error` | `runFollowupInWorktree()` success but type/build errors persist after fix, or merge fails |
+| `fixing-types` → `ready` (with `❌` error in log) | `runFollowupInWorktree()` success but type/build errors persist after fix, or merge fails |
 | `ready` → `accepted` / `rejected` | `POST /api/evolve/manage` |
 | devServer `running` → `disconnected` | Dev server `close` event + branch still present (3 s later) |
 | devServer `disconnected` → `starting` | `POST /api/evolve/kill-restart` |
-| any → `error` | Uncaught exception inside the respective async helper |
+| any → `ready` (with `❌` error in log) | Uncaught exception inside the respective async helper |
 
 ---
 

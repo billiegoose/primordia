@@ -21,8 +21,7 @@ function isTerminal(status: string, devServerStatus: string): boolean {
   return (
     status === 'accepted' ||
     status === 'rejected' ||
-    status === 'error' ||
-    (status === 'ready' && (devServerStatus === 'running' || devServerStatus === 'disconnected'))
+    (status === 'ready' && (devServerStatus === 'running' || devServerStatus === 'disconnected' || devServerStatus === 'none'))
   );
 }
 
