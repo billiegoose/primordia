@@ -16,7 +16,7 @@
 // server-side via getSessionUser()) so the hamburger is visible on first
 // render with no client-side fetch needed.
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { NavHeader } from "./NavHeader";
 import { GitSyncDialog } from "./GitSyncDialog";
 import { FloatingEvolveDialog } from "./FloatingEvolveDialog";
@@ -48,6 +48,8 @@ interface PageNavBarProps {
 export function PageNavBar({ subtitle, branch, currentPage, initialSession }: PageNavBarProps) {
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
   const [evolveDialogOpen, setEvolveDialogOpen] = useState(false);
+  const [evolveAnchorRect, setEvolveAnchorRect] = useState<DOMRect | null>(null);
+  const hamburgerRef = useRef<HTMLDivElement>(null);
   // undefined = still loading; null = not logged in; object = logged in
   // If initialSession was passed by the server, use it directly — no fetch needed.
   const [sessionUser, setSessionUser] = useState<SessionUser | null | undefined>(
@@ -77,9 +79,13 @@ export function PageNavBar({ subtitle, branch, currentPage, initialSession }: Pa
         <HamburgerMenu
           sessionUser={sessionUser}
           onLogout={handleLogout}
+          containerRef={hamburgerRef}
           items={buildStandardMenuItems({
             onSyncClick: () => setSyncDialogOpen(true),
-            onEvolveClick: () => setEvolveDialogOpen(true),
+            onEvolveClick: () => {
+              setEvolveAnchorRect(hamburgerRef.current?.getBoundingClientRect() ?? null);
+              setEvolveDialogOpen(true);
+            },
             isAdmin: sessionUser?.isAdmin ?? false,
             currentPath: currentPage ? `/${currentPage}` : undefined,
           })}
@@ -91,7 +97,10 @@ export function PageNavBar({ subtitle, branch, currentPage, initialSession }: Pa
         <GitSyncDialog onClose={() => setSyncDialogOpen(false)} />
       )}
       {evolveDialogOpen && (
-        <FloatingEvolveDialog onClose={() => setEvolveDialogOpen(false)} />
+        <FloatingEvolveDialog
+          onClose={() => setEvolveDialogOpen(false)}
+          anchorRect={evolveAnchorRect}
+        />
       )}
     </header>
   );

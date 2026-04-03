@@ -8,7 +8,7 @@
 // Dragging: click-and-drag the title bar to freely position the dialog.
 // Docking: four corner buttons in the title bar snap the dialog to a corner.
 
-import { useState, useRef, useEffect, FormEvent } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -24,7 +24,14 @@ interface DragOrigin {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function FloatingEvolveDialog({ onClose }: { onClose: () => void }) {
+export function FloatingEvolveDialog({
+  onClose,
+  anchorRect,
+}: {
+  onClose: () => void;
+  /** When provided, the dialog opens with its top-right corner aligned to the bottom-right of this rect. */
+  anchorRect?: DOMRect | null;
+}) {
   const router = useRouter();
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -38,6 +45,17 @@ export function FloatingEvolveDialog({ onClose }: { onClose: () => void }) {
   const [freePos, setFreePos] = useState<{ x: number; y: number } | null>(null);
   const [dock, setDock] = useState<DockPosition>("bottom-right");
   const dragOriginRef = useRef<DragOrigin | null>(null);
+
+  // Position the dialog under the hamburger button on first render if anchorRect is provided.
+  useLayoutEffect(() => {
+    if (!anchorRect || !dialogRef.current) return;
+    const dialogW = dialogRef.current.offsetWidth;
+    setFreePos({
+      x: anchorRect.right - dialogW,
+      y: anchorRect.bottom + 8,
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally only on mount
 
   // Auto-resize textarea
   useEffect(() => {
@@ -158,8 +176,8 @@ export function FloatingEvolveDialog({ onClose }: { onClose: () => void }) {
   return (
     <div
       ref={dialogRef}
-      style={{ ...positionStyle, width: 420, zIndex: 50 }}
-      className="rounded-xl border border-gray-700 bg-gray-950 shadow-2xl flex flex-col overflow-hidden"
+      style={{ ...positionStyle, zIndex: 50 }}
+      className="rounded-xl border border-gray-700 bg-gray-950 shadow-2xl flex flex-col overflow-hidden resize w-[420px] min-w-[280px]"
     >
       {/* Title bar / drag handle */}
       <div
@@ -202,7 +220,7 @@ export function FloatingEvolveDialog({ onClose }: { onClose: () => void }) {
       </div>
 
       {/* Form body */}
-      <div className="p-3 flex flex-col gap-2">
+      <div className="p-3 flex flex-col gap-2 flex-1 overflow-y-auto">
         {error && (
           <div className="px-3 py-2 rounded-lg bg-red-900/40 border border-red-700/50 text-red-300 text-xs">
             ❌ {error}
