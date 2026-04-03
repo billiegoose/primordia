@@ -1,18 +1,34 @@
 // app/api/evolve/manage/route.ts
 // Accept or reject a local evolve session — runs in the PARENT server only.
-// Only available in NODE_ENV=development.
 //
 // POST
 //   Body: { action: "accept" | "reject", sessionId: string }
 //
 //   accept — looks up the session in SQLite, kills the preview dev server
-//            (found by its port via lsof), merges the preview branch into the
-//            parent branch, removes the worktree and branch, and updates the
-//            session status to "accepted".
+//            (found by its port via lsof), then performs one of two merge paths:
+//
+//            BLUE/GREEN (production, when primordia-worktrees/current symlink exists):
+//              1. bun install --frozen-lockfile in the session worktree
+//              2. Create merge commit via git plumbing (no working-tree writes)
+//              3. Detach the session worktree HEAD onto the merge commit
+//              4. Health-check the new slot (start on temp port, verify HTTP response)
+//              5. Copy production DB into new slot (VACUUM INTO — atomic snapshot)
+//              6. Atomically swap the 'current' symlink to the session worktree
+//              7. Schedule `sudo systemctl restart primordia` (fire-and-forget)
+//              8. Clean up old production slot (if it was a worktree, not the main repo)
+//              9. Delete the now-orphaned branch ref
+//
+//            LEGACY (local dev, no systemd 'current' symlink):
+//              git checkout → stash → merge → stash-pop → bun install → worktree remove
+//
 //   reject — kills the preview dev server, removes the worktree and branch
 //            without merging, updates the session status to "rejected".
 
 import { execSync, spawn } from 'child_process';
+import * as fs from 'fs';
+import * as net from 'net';
+import * as path from 'path';
+import { Database } from 'bun:sqlite';
 import {
   runGit,
   resolveConflictsWithClaude,
@@ -37,6 +53,268 @@ function runCmd(
     proc.on('close', (code) => resolve({ stdout, stderr, code: code ?? 1 }));
     proc.on('error', (err) => resolve({ stdout: '', stderr: err.message, code: 1 }));
   });
+}
+
+/**
+ * Returns the path of the blue/green 'current' symlink if the infrastructure
+ * is set up (i.e. primordia-worktrees/current exists as a symlink), else null.
+ *
+ * The symlink lives in the same directory as the session worktrees so its
+ * parent directory can be inferred from any session's worktreePath.
+ */
+function findCurrentSymlink(worktreePath: string): string | null {
+  const candidate = path.join(path.dirname(worktreePath), 'current');
+  try {
+    return fs.lstatSync(candidate).isSymbolicLink() ? candidate : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Creates a merge commit in git WITHOUT modifying any working tree.
+ *
+ * Gate 1 (ancestor check) guarantees that the session branch already contains
+ * all commits from parentBranch, so the branch's tree IS the correct merged
+ * tree. We use git plumbing to:
+ *   1. Build a merge commit object from the branch's tree with both branch tips
+ *      as parents.
+ *   2. Advance the parentBranch ref to the new commit.
+ *
+ * The production directory's files are never touched.
+ */
+async function createMergeCommitNoCheckout(
+  repoRoot: string,
+  parentBranch: string,
+  branch: string,
+): Promise<{ commitHash: string } | { error: string }> {
+  const [treeRes, parentRes, branchRes] = await Promise.all([
+    runGit(['rev-parse', `${branch}^{tree}`], repoRoot),
+    runGit(['rev-parse', `refs/heads/${parentBranch}`], repoRoot),
+    runGit(['rev-parse', `refs/heads/${branch}`], repoRoot),
+  ]);
+  for (const r of [treeRes, parentRes, branchRes]) {
+    if (r.code !== 0) return { error: r.stderr };
+  }
+
+  const commitRes = await runGit(
+    [
+      'commit-tree', treeRes.stdout.trim(),
+      '-p', parentRes.stdout.trim(),
+      '-p', branchRes.stdout.trim(),
+      '-m', `chore: merge ${branch}`,
+    ],
+    repoRoot,
+  );
+  if (commitRes.code !== 0) return { error: commitRes.stderr };
+
+  const mergeCommit = commitRes.stdout.trim();
+  const updateRes = await runGit(
+    ['update-ref', `refs/heads/${parentBranch}`, mergeCommit],
+    repoRoot,
+  );
+  if (updateRes.code !== 0) return { error: updateRes.stderr };
+
+  return { commitHash: mergeCommit };
+}
+
+const DB_NAME = '.primordia-auth.db';
+
+/**
+ * Creates a consistent point-in-time snapshot of the SQLite DB using
+ * VACUUM INTO — safe while the source DB is being actively written to.
+ */
+function copyDb(srcDir: string, dstDir: string): void {
+  const srcDb = path.join(srcDir, DB_NAME);
+  if (!fs.existsSync(srcDb)) return;
+  const dstDb = path.join(dstDir, DB_NAME);
+  // VACUUM INTO fails if the destination file already exists
+  fs.rmSync(dstDb, { force: true });
+  fs.rmSync(dstDb + '-wal', { force: true });
+  fs.rmSync(dstDb + '-shm', { force: true });
+  const db = new Database(srcDb);
+  try {
+    db.prepare('VACUUM INTO ?').run(dstDb);
+  } finally {
+    db.close();
+  }
+}
+
+/** Returns an available TCP port on 127.0.0.1 (OS picks one). */
+function findFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      const port = typeof addr === 'object' && addr ? addr.port : 0;
+      server.close(() => resolve(port));
+    });
+    server.on('error', reject);
+  });
+}
+
+/**
+ * Starts the built production server from slotPath on a temporary free port
+ * and verifies it responds to HTTP. Returns { ok: true } on success.
+ * Kills the test server when done regardless of outcome.
+ */
+async function healthCheckSlot(slotPath: string): Promise<{ ok: boolean; error?: string }> {
+  const port = await findFreePort();
+  const server = spawn('bun', ['run', 'start'], {
+    cwd: slotPath,
+    env: { ...process.env, PORT: String(port) },
+    stdio: 'ignore',
+    detached: false,
+  });
+
+  let spawnError: string | undefined;
+  let exitCode: number | null = null;
+  server.on('error', (err: Error) => { spawnError = err.message; });
+  server.on('exit', (code) => { exitCode = code ?? 1; });
+
+  try {
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 1_000));
+      if (spawnError) return { ok: false, error: `Server process error: ${spawnError}` };
+      if (exitCode !== null) return { ok: false, error: `Server exited early with code ${exitCode}` };
+      try {
+        await fetch(`http://localhost:${port}/`, {
+          signal: AbortSignal.timeout(3_000),
+          redirect: 'manual',
+        });
+        return { ok: true };
+      } catch {
+        // Not ready yet — keep polling
+      }
+    }
+    return { ok: false, error: 'Health check timed out after 30s' };
+  } finally {
+    server.kill('SIGTERM');
+    // Brief pause to let the process release its port binding
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+}
+
+/**
+ * Blue/green accept path.
+ *
+ * Builds and activates the session worktree as the new production slot without
+ * running any git or bun commands in the live production directory.
+ *
+ * Returns null on success, or an error message string on failure.
+ */
+async function blueGreenAccept(
+  currentSymlink: string,
+  worktreePath: string,
+  branch: string,
+  parentBranch: string,
+  repoRoot: string,
+): Promise<string | null> {
+  // Step 1: ensure node_modules are up to date in the session worktree.
+  // This is the only bun install that runs, and it runs in the worktree (not production).
+  const installResult = await runCmd('bun', ['install', '--frozen-lockfile'], worktreePath);
+  if (installResult.code !== 0) {
+    return (
+      `bun install --frozen-lockfile failed in session worktree:\n` +
+      (installResult.stdout + installResult.stderr).trim()
+    );
+  }
+
+  // Step 2: create the merge commit in git history without touching any working tree.
+  const mergeRes = await createMergeCommitNoCheckout(repoRoot, parentBranch, branch);
+  if ('error' in mergeRes) {
+    return `Failed to create merge commit: ${mergeRes.error}`;
+  }
+  const mergeCommit = mergeRes.commitHash;
+
+  // Step 3: detach the session worktree HEAD onto the merge commit.
+  // The files are already correct (same tree — guaranteed by Gate 1), so this
+  // is effectively a no-op for file content and just updates HEAD.
+  // Detaching from the named branch ref allows us to delete the branch afterwards.
+  await runGit(['checkout', '--detach', mergeCommit], worktreePath);
+
+  // Step 4: read the current slot before swapping so we can handle it afterwards.
+  const oldSlot = path.resolve(fs.readlinkSync(currentSymlink));
+
+  // Resolve the main git repo root so we never accidentally remove it.
+  // 'git rev-parse --git-common-dir' in any worktree returns the shared .git path;
+  // dirname of that is the main repo directory, which is stable and never deleted.
+  const gitCommonResult = await runGit(['rev-parse', '--git-common-dir'], worktreePath);
+  const mainRepoRoot = gitCommonResult.code === 0
+    ? path.dirname(path.resolve(worktreePath, gitCommonResult.stdout.trim()))
+    : path.resolve(repoRoot); // fallback: assume repoRoot is the main repo
+
+  // Step 4a: Health-check the new slot before committing to the swap.
+  // Starts the production server on a temporary free port and verifies it serves HTTP.
+  const healthCheck = await healthCheckSlot(path.resolve(worktreePath));
+  if (!healthCheck.ok) {
+    return `New slot failed health check: ${healthCheck.error ?? 'server did not respond'}`;
+  }
+
+  // Step 4b: Copy the production database into the new slot via VACUUM INTO —
+  // an atomic, consistent snapshot safe to take while the live server writes.
+  try {
+    copyDb(oldSlot, path.resolve(worktreePath));
+  } catch {
+    // Non-fatal: the worktree's existing DB snapshot from session creation is still usable.
+  }
+
+  // Step 4c: Fix the .env.local symlink in the new slot so it always points
+  // directly to the main repo's copy — which is never deleted. Without this,
+  // the symlink would point to the old slot's .env.local, which gets cleaned up
+  // on the next accept, leaving a dangling link.
+  const mainEnvPath = path.join(mainRepoRoot, '.env.local');
+  const worktreeEnvPath = path.join(path.resolve(worktreePath), '.env.local');
+  if (fs.existsSync(mainEnvPath)) {
+    fs.rmSync(worktreeEnvPath, { force: true });
+    fs.symlinkSync(mainEnvPath, worktreeEnvPath);
+  }
+
+  // Step 5: atomically swap the symlink.
+  // ln -sfn creates the new symlink at a temp path; renameSync replaces the
+  // old symlink in a single atomic rename(2) syscall.
+  const tmpLink = currentSymlink + '.tmp';
+  fs.symlinkSync(path.resolve(worktreePath), tmpLink);
+  fs.renameSync(tmpLink, currentSymlink);
+
+  // Step 6: Preserve the old slot as 'previous' for fast rollback, and clean up
+  // whatever was 'previous' before (two accepts ago).
+  const previousSymlink = path.join(path.dirname(currentSymlink), 'previous');
+
+  // Read the slot that was 'previous' before this accept so we can remove it.
+  let veryOldSlot: string | null = null;
+  try {
+    const prevTarget = fs.readlinkSync(previousSymlink);
+    veryOldSlot = path.resolve(prevTarget);
+  } catch { /* no previous slot yet — first or second accept */ }
+
+  // Atomically move 'previous' to point at the slot we just retired.
+  const tmpPrev = previousSymlink + '.tmp';
+  if (oldSlot !== mainRepoRoot) {
+    // Only create a 'previous' symlink when the old slot is a worktree (not main).
+    // If old slot IS the main repo it will stick around forever anyway.
+    fs.symlinkSync(oldSlot, tmpPrev);
+    fs.renameSync(tmpPrev, previousSymlink);
+  }
+
+  // Remove the slot that was 'previous' before this accept (two accepts ago),
+  // unless it is the main git repository, which must never be removed.
+  if (veryOldSlot && veryOldSlot !== mainRepoRoot) {
+    await runGit(['worktree', 'remove', '--force', veryOldSlot], repoRoot);
+  }
+
+  // Step 7: delete the now-orphaned branch ref (HEAD is detached, so this succeeds).
+  await runGit(['branch', '-D', branch], repoRoot);
+  await runGit(['config', '--remove-section', `branch.${branch}`], repoRoot);
+
+  // Step 8: schedule the systemd service restart fire-and-forget.
+  // The 500 ms delay gives the HTTP response time to flush before the process dies.
+  setTimeout(() => {
+    try { execSync('sudo systemctl restart primordia', { stdio: 'ignore' }); } catch { /* best-effort */ }
+  }, 500);
+
+  return null; // success
 }
 
 /**
@@ -88,7 +366,20 @@ async function retryAcceptAfterFix(
     return;
   }
 
-  // Type check passed — kill the preview dev server.
+  // Also verify the production build succeeds.
+  console.log(`[retryAcceptAfterFix] re-running build in ${worktreePath}`);
+  const buildResult = await runCmd('bun', ['run', 'build'], worktreePath);
+  console.log(`[retryAcceptAfterFix] build exit code=${buildResult.code}`);
+  if (buildResult.code !== 0) {
+    const buildErrors = (buildResult.stdout + buildResult.stderr).trim();
+    console.log(`[retryAcceptAfterFix] build still failing:\n${buildErrors}`);
+    await failWithError(
+      `\n\n❌ **Auto-fix failed**: Production build still failing after the fix attempt.\n\n\`\`\`\n${buildErrors}\n\`\`\`\n`,
+    );
+    return;
+  }
+
+  // Both typecheck and build passed — kill the preview dev server.
   console.log(`[retryAcceptAfterFix] typecheck passed, killing dev server on port ${port}`);
   if (port !== null) {
     try {
@@ -102,75 +393,97 @@ async function retryAcceptAfterFix(
     } catch { /* no process on that port */ }
   }
 
-  // Checkout the parent branch so the merge lands on the right branch.
-  console.log(`[retryAcceptAfterFix] checking out parent branch ${parentBranch} in ${repoRoot}`);
-  const checkoutResult = await runGit(['checkout', parentBranch], repoRoot);
-  console.log(`[retryAcceptAfterFix] checkout exit code=${checkoutResult.code}${checkoutResult.code !== 0 ? ` stderr=${checkoutResult.stderr}` : ''}`);
-  let mergeRoot = repoRoot;
-  if (checkoutResult.code !== 0) {
-    const alreadyCheckedOutMatch = checkoutResult.stderr.match(
-      /(?:already checked out at|already used by worktree at) '([^']+)'/,
-    );
-    if (alreadyCheckedOutMatch) {
-      mergeRoot = alreadyCheckedOutMatch[1];
-      console.log(`[retryAcceptAfterFix] parent branch already checked out at ${mergeRoot}`);
-    } else {
-      await failWithError(
-        `\n\n❌ **Accept failed**: \`git checkout ${parentBranch}\` failed:\n${checkoutResult.stderr}\n`,
-      );
+  // ── Merge: blue/green or legacy ────────────────────────────────────────────
+
+  const currentSymlink = findCurrentSymlink(worktreePath);
+
+  if (currentSymlink) {
+    // Blue/green path: build is already done in the worktree, swap the slot.
+    console.log(`[retryAcceptAfterFix] blue/green accept for session ${sessionId}`);
+    const err = await blueGreenAccept(currentSymlink, worktreePath, branch, parentBranch, repoRoot);
+    if (err) {
+      console.log(`[retryAcceptAfterFix] blue/green accept failed: ${err}`);
+      await failWithError(`\n\n❌ **Accept failed**: ${err}\n`);
       return;
     }
-  }
+  } else {
+    // Legacy path (local dev without systemd).
 
-  // Stash any uncommitted changes so they don't block the merge.
-  let stashed = false;
-  const statusResult = await runGit(['status', '--porcelain'], mergeRoot);
-  if (statusResult.stdout.trim()) {
-    console.log(`[retryAcceptAfterFix] stashing uncommitted changes in ${mergeRoot}`);
-    const stashResult = await runGit(
-      ['stash', 'push', '-u', '-m', 'primordia-auto-stash-before-merge'],
+    // Checkout the parent branch so the merge lands on the right branch.
+    console.log(`[retryAcceptAfterFix] checking out parent branch ${parentBranch} in ${repoRoot}`);
+    const checkoutResult = await runGit(['checkout', parentBranch], repoRoot);
+    console.log(`[retryAcceptAfterFix] checkout exit code=${checkoutResult.code}${checkoutResult.code !== 0 ? ` stderr=${checkoutResult.stderr}` : ''}`);
+    let mergeRoot = repoRoot;
+    if (checkoutResult.code !== 0) {
+      const alreadyCheckedOutMatch = checkoutResult.stderr.match(
+        /(?:already checked out at|already used by worktree at) '([^']+)'/,
+      );
+      if (alreadyCheckedOutMatch) {
+        mergeRoot = alreadyCheckedOutMatch[1];
+        console.log(`[retryAcceptAfterFix] parent branch already checked out at ${mergeRoot}`);
+      } else {
+        await failWithError(
+          `\n\n❌ **Accept failed**: \`git checkout ${parentBranch}\` failed:\n${checkoutResult.stderr}\n`,
+        );
+        return;
+      }
+    }
+
+    // Stash any uncommitted changes so they don't block the merge.
+    let stashed = false;
+    const statusResult = await runGit(['status', '--porcelain'], mergeRoot);
+    if (statusResult.stdout.trim()) {
+      console.log(`[retryAcceptAfterFix] stashing uncommitted changes in ${mergeRoot}`);
+      const stashResult = await runGit(
+        ['stash', 'push', '-u', '-m', 'primordia-auto-stash-before-merge'],
+        mergeRoot,
+      );
+      stashed = stashResult.code === 0 && !stashResult.stdout.includes('No local changes');
+      console.log(`[retryAcceptAfterFix] stash result: stashed=${stashed}`);
+    }
+
+    // Merge the preview branch.
+    console.log(`[retryAcceptAfterFix] merging branch ${branch} into ${parentBranch} at ${mergeRoot}`);
+    const mergeResult = await runGit(
+      ['merge', branch, '--no-ff', '-m', `chore: merge ${branch}`],
       mergeRoot,
     );
-    stashed = stashResult.code === 0 && !stashResult.stdout.includes('No local changes');
-    console.log(`[retryAcceptAfterFix] stash result: stashed=${stashed}`);
-  }
+    console.log(`[retryAcceptAfterFix] merge exit code=${mergeResult.code}${mergeResult.code !== 0 ? ` stderr=${mergeResult.stderr}` : ''}`);
 
-  // Merge the preview branch.
-  console.log(`[retryAcceptAfterFix] merging branch ${branch} into ${parentBranch} at ${mergeRoot}`);
-  const mergeResult = await runGit(
-    ['merge', branch, '--no-ff', '-m', `chore: merge ${branch}`],
-    mergeRoot,
-  );
-  console.log(`[retryAcceptAfterFix] merge exit code=${mergeResult.code}${mergeResult.code !== 0 ? ` stderr=${mergeResult.stderr}` : ''}`);
+    if (mergeResult.code !== 0) {
+      const resolution = await resolveConflictsWithClaude(mergeRoot, branch, parentBranch);
+      console.log(`[retryAcceptAfterFix] conflict resolution success=${resolution.success}`);
+      if (!resolution.success) {
+        await runGit(['merge', '--abort'], mergeRoot);
+        if (stashed) await runGit(['stash', 'pop'], mergeRoot);
+        await failWithError(
+          `\n\n❌ **Accept failed**: merge failed and automatic conflict resolution also failed.\n\n` +
+          `Merge error:\n${mergeResult.stderr}\n\nAuto-resolution log:\n${resolution.log}\n`,
+        );
+        return;
+      }
+    }
 
-  if (mergeResult.code !== 0) {
-    const resolution = await resolveConflictsWithClaude(mergeRoot, branch, parentBranch);
-    console.log(`[retryAcceptAfterFix] conflict resolution success=${resolution.success}`);
-    if (!resolution.success) {
-      await runGit(['merge', '--abort'], mergeRoot);
-      if (stashed) await runGit(['stash', 'pop'], mergeRoot);
+    if (stashed) await runGit(['stash', 'pop'], mergeRoot);
+
+    // Sync dependencies after merge so the running server reflects any
+    // package.json changes that came in from the accepted branch.
+    console.log(`[retryAcceptAfterFix] running bun install --frozen-lockfile in ${mergeRoot}`);
+    const installResult = await runCmd('bun', ['install', '--frozen-lockfile'], mergeRoot);
+    console.log(`[retryAcceptAfterFix] bun install exit code=${installResult.code}`);
+    if (installResult.code !== 0) {
       await failWithError(
-        `\n\n❌ **Accept failed**: merge failed and automatic conflict resolution also failed.\n\n` +
-        `Merge error:\n${mergeResult.stderr}\n\nAuto-resolution log:\n${resolution.log}\n`,
+        `\n\n❌ **Accept failed**: \`bun install --frozen-lockfile\` failed after merge. ` +
+        `The lockfile may be out of sync with package.json.\n\n` +
+        `\`\`\`\n${(installResult.stdout + installResult.stderr).trim()}\n\`\`\`\n`,
       );
       return;
     }
-  }
 
-  if (stashed) await runGit(['stash', 'pop'], mergeRoot);
-
-  // Sync dependencies after merge so the running server reflects any
-  // package.json changes that came in from the accepted branch.
-  console.log(`[retryAcceptAfterFix] running bun install --frozen-lockfile in ${mergeRoot}`);
-  const installResult = await runCmd('bun', ['install', '--frozen-lockfile'], mergeRoot);
-  console.log(`[retryAcceptAfterFix] bun install exit code=${installResult.code}`);
-  if (installResult.code !== 0) {
-    await failWithError(
-      `\n\n❌ **Accept failed**: \`bun install --frozen-lockfile\` failed after merge. ` +
-      `The lockfile may be out of sync with package.json.\n\n` +
-      `\`\`\`\n${(installResult.stdout + installResult.stderr).trim()}\n\`\`\`\n`,
-    );
-    return;
+    // Cleanup.
+    await runGit(['worktree', 'remove', '--force', worktreePath], repoRoot);
+    await runGit(['branch', '-D', branch], repoRoot);
+    await runGit(['config', '--remove-section', `branch.${branch}`], repoRoot);
   }
 
   // Mark as accepted and log the decision.
@@ -182,24 +495,12 @@ async function retryAcceptAfterFix(
     port: row?.port ?? null,
     previewUrl: row?.previewUrl ?? null,
   });
-
-  // Cleanup.
-  await runGit(['worktree', 'remove', '--force', worktreePath], repoRoot);
-  await runGit(['branch', '-D', branch], repoRoot);
-  await runGit(['config', '--remove-section', `branch.${branch}`], repoRoot);
 }
 
 export async function POST(request: Request) {
   const user = await getSessionUser();
   if (!user) {
     return Response.json({ error: 'Authentication required' }, { status: 401 });
-  }
-
-  if (process.env.NODE_ENV !== 'development') {
-    return Response.json(
-      { error: 'Local evolve is only available in development mode' },
-      { status: 403 },
-    );
   }
 
   const body = (await request.json()) as { action?: string; sessionId?: string };
@@ -321,7 +622,56 @@ export async function POST(request: Request) {
         return Response.json({ outcome: 'auto-fixing-types' });
       }
 
+      // Gate 4: production build must succeed.
+      const buildResult = await runCmd('bun', ['run', 'build'], worktreePath);
+      if (buildResult.code !== 0) {
+        const buildErrors = (buildResult.stdout + buildResult.stderr).trim();
+        // Automatically start a follow-up pass to fix the build errors.
+        const buildFixPrompt =
+          `The production build failed (\`bun run build\`). Fix all build errors so the build ` +
+          `completes successfully. Do not change any runtime behaviour — only fix the build issues.\n\n` +
+          `Build output:\n\`\`\`\n${buildErrors}\n\`\`\``;
+        const autoFixSession: LocalSession = {
+          id: session.id,
+          branch: session.branch,
+          worktreePath: session.worktreePath,
+          status: session.status as LocalSession['status'],
+          devServerStatus: 'running',
+          progressText: session.progressText,
+          port: session.port,
+          previewUrl: session.previewUrl,
+          request: session.request,
+          createdAt: session.createdAt,
+        };
+        console.log(`[manage/accept] build errors detected for session ${session.id}, starting auto-fix`);
+        await db.updateEvolveSession(session.id, { status: 'fixing-types' });
+        void runFollowupInWorktree(
+          autoFixSession, buildFixPrompt, repoRoot, 'fixing-types',
+          (fixedSession) => retryAcceptAfterFix(fixedSession.id, repoRoot, parentBranch),
+          /* skipChangelog */ true,
+        );
+        return Response.json({ outcome: 'auto-fixing-build' });
+      }
+
       // ── End pre-accept gates ────────────────────────────────────────────────
+
+      // ── Merge: blue/green or legacy ─────────────────────────────────────────
+
+      const currentSymlink = findCurrentSymlink(worktreePath);
+
+      if (currentSymlink) {
+        // ── Blue/green path ────────────────────────────────────────────────────
+        // The session worktree already has a passing build (.next/ from Gate 4).
+        // Swap it in as the new production slot without touching the live directory.
+        const err = await blueGreenAccept(currentSymlink, worktreePath, branch, parentBranch, repoRoot);
+        if (err) {
+          return Response.json({ error: err }, { status: 500 });
+        }
+        await logDecision('accept');
+        return Response.json({ outcome: 'accepted', branch, parentBranch });
+      }
+
+      // ── Legacy path (local dev, no systemd) ────────────────────────────────
 
       // Checkout the parent branch so the merge lands on the right branch.
       const checkoutResult = await runGit(['checkout', parentBranch], repoRoot);

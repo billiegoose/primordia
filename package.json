@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "deploy-to-exe.dev": "bash scripts/deploy-to-exe-dev.sh"
+    "deploy-to-exe.dev": "bash scripts/deploy-to-exe-dev.sh",
+    "rollback": "bun scripts/rollback.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.76",
