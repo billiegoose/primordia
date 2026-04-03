@@ -973,15 +973,15 @@ export async function restartDevServerInWorktree(
       const { PORT: _omit, ...envWithoutPort } = process.env;
       const env =
         oldPort !== null
-          ? { ...envWithoutPort, NODE_ENV: 'development', PORT: String(oldPort) }
-          : { ...envWithoutPort, NODE_ENV: 'development' };
+          ? { ...envWithoutPort, NODE_ENV: 'development' as const, PORT: String(oldPort) }
+          : { ...envWithoutPort, NODE_ENV: 'development' as const };
 
       const proc = spawn('bun', ['run', 'dev'], {
         cwd: session.worktreePath,
         env,
         detached: true,
         stdio: ['ignore', 'pipe', 'pipe'],
-      });
+      }) as ChildProcess;
       proc.unref();
       activeDevServerProcesses.set(session.id, proc);
 
