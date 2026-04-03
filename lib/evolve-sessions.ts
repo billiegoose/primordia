@@ -15,8 +15,7 @@ export type LocalSessionStatus =
   | 'fixing-types'
   | 'ready'
   | 'accepted'
-  | 'rejected'
-  | 'error';
+  | 'rejected';
 
 export type DevServerStatus =
   | 'none'
@@ -628,8 +627,9 @@ export async function startLocalEvolve(
     await persist();
 
   } catch (err) {
-    // Write error state to SQLite so the session page shows the failure.
-    session.status = 'error';
+    // Mark the session ready (with an error note in the log) so the UI shows
+    // the failure and allows follow-up requests to retry or recover.
+    session.status = 'ready';
     const msg = err instanceof Error ? err.message : String(err);
     const causeMsg =
       err instanceof Error && err.cause instanceof Error
@@ -886,7 +886,7 @@ export async function runFollowupInWorktree(
       await persist();
     }
   } catch (err) {
-    session.status = 'error';
+    session.status = 'ready';
     const msg = err instanceof Error ? err.message : String(err);
     const causeMsg =
       err instanceof Error && err.cause instanceof Error
@@ -1042,7 +1042,7 @@ export async function restartDevServerInWorktree(
     appendProgress(session, `\n✅ **Ready on port ${session.port}**\n`);
     await persist();
   } catch (err) {
-    session.status = 'error';
+    session.status = 'ready';
     const msg = err instanceof Error ? err.message : String(err);
     appendProgress(session, `\n\n❌ **Error**: ${msg}\n`);
     await persist().catch(() => {});

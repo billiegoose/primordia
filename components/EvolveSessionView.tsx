@@ -132,14 +132,16 @@ function LogSection({
   if (isClaudeSection || isTypeFixSection) {
     const borderClass = isTypeFixSection ? "border-orange-700/50" : "border-blue-700/50";
     const headingClass = isTypeFixSection ? "text-orange-300" : "text-blue-300";
-    const doneTitle = isTypeFixSection ? "🔧 Type errors fixed" : "🤖 Claude Code finished";
 
     // Treat the section as finished if the content already contains an end marker,
     // even if the status update hasn't arrived in the same SSE tick yet.
     const hasFinishMarker =
       content.includes("✅ **Claude Code finished.**") ||
       content.includes("✅ **Follow-up complete. Preview server will reload automatically.**");
-    const isRunning = isActive && !hasFinishMarker;
+    const hasErrorMarker =
+      content.includes("❌ **Error**:") ||
+      content.includes("❌ **Auto-fix failed");
+    const isRunning = isActive && !hasFinishMarker && !hasErrorMarker;
 
     if (isRunning) {
       return (
@@ -160,10 +162,15 @@ function LogSection({
 
     // Done — collapse tool calls into <details>, show final message outside
     const { detailsContent, finalItem, toolCallCount } = splitClaudeContent(content);
+    const doneBorderClass = hasErrorMarker ? "border-red-700/50" : borderClass;
+    const doneHeadingClass = hasErrorMarker ? "text-red-400" : headingClass;
+    const doneTitle = hasErrorMarker
+      ? (isTypeFixSection ? "❌ Auto-fix failed" : "❌ Claude Code failed")
+      : (isTypeFixSection ? "🔧 Type errors fixed" : "🤖 Claude Code finished");
     return (
-      <div className={`rounded-lg border ${borderClass} bg-gray-900 text-sm overflow-hidden`}>
+      <div className={`rounded-lg border ${doneBorderClass} bg-gray-900 text-sm overflow-hidden`}>
         <div className="px-4 py-2.5 border-b border-gray-800">
-          <span className={`font-semibold text-xs ${headingClass}`}>{doneTitle}</span>
+          <span className={`font-semibold text-xs ${doneHeadingClass}`}>{doneTitle}</span>
         </div>
         {detailsContent && (
           <details className="group border-b border-gray-800">
@@ -444,8 +451,7 @@ export default function EvolveSessionView({
     const alreadyTerminal =
       initialStatus === "accepted" ||
       initialStatus === "rejected" ||
-      initialStatus === "error" ||
-      (initialStatus === "ready" && (initialDevServerStatus === "running" || initialDevServerStatus === "disconnected"));
+      (initialStatus === "ready" && (initialDevServerStatus === "running" || initialDevServerStatus === "disconnected" || initialDevServerStatus === "none"));
     if (alreadyTerminal) return;
 
     void startStreaming();
@@ -670,8 +676,7 @@ export default function EvolveSessionView({
   const isTerminal =
     status === "accepted" ||
     status === "rejected" ||
-    status === "error" ||
-    (status === "ready" && (devServerStatus === "running" || devServerStatus === "disconnected"));
+    (status === "ready" && (devServerStatus === "running" || devServerStatus === "disconnected" || devServerStatus === "none"));
 
   /** True while the session pipeline is actively running (not yet ready for action). */
   const isClaudeRunning = status === "starting" || status === "running-claude" || status === "fixing-types";
@@ -843,7 +848,7 @@ export default function EvolveSessionView({
       )}
 
       {/* Three-action panel — shown to users with can_evolve permission; hidden for public viewers */}
-      {canEvolve && status !== "accepted" && status !== "rejected" && status !== "error" && (
+      {canEvolve && status !== "accepted" && status !== "rejected" && (
         <div className="mb-6 rounded-lg bg-gray-900 border border-gray-700 text-sm overflow-hidden">
 
           {/* ── Header ── */}
@@ -1062,81 +1067,6 @@ export default function EvolveSessionView({
             </div>
           )}
 
-        </div>
-      )}
-
-      {/* Error state — allow follow-up requests to retry or recover; hidden for non-evolvers */}
-      {canEvolve && status === "error" && (
-        <div className="mb-6 rounded-lg bg-gray-900 border border-red-800/50 text-sm overflow-hidden">
-          <div className="px-4 py-3 border-b border-red-800/30">
-            <p className="text-red-400 text-xs font-medium uppercase tracking-wide">Claude encountered an error</p>
-          </div>
-          <div
-            className="px-4 py-4"
-            onDragOver={handleFollowupDragOver}
-            onDragLeave={handleFollowupDragLeave}
-            onDrop={handleFollowupDrop}
-          >
-            <div className="mb-4 pb-4 border-b border-red-800/30">
-              <p className="text-gray-500 text-xs mb-2">You can restart the dev server to attempt recovery.</p>
-              {restartError && (
-                <p className="text-red-400 text-xs mb-2">{restartError}</p>
-              )}
-              <button
-                type="button"
-                onClick={handleRestartServer}
-                disabled={isRestartingServer}
-                className="px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 text-gray-300 text-xs font-medium transition-colors"
-              >
-                {isRestartingServer ? "Restarting…" : "↺ Restart preview"}
-              </button>
-            </div>
-            <p className="text-gray-400 text-xs mb-3">
-              You can submit a follow-up request to retry or provide additional guidance.
-            </p>
-            <textarea
-              rows={4}
-              value={followupText}
-              onChange={(e) => setFollowupText(e.target.value)}
-              onPaste={handleFollowupPaste}
-              placeholder="Describe what to try instead, or provide additional context…"
-              className={`w-full bg-gray-800 text-gray-100 placeholder-gray-500 border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50 mb-2 transition-colors ${isDraggingFollowup ? "border-amber-500/70" : "border-gray-700"}`}
-            />
-            {/* Attached file chips */}
-            {followupFiles.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-2">
-                {followupFiles.map((file, i) => (
-                  <span key={i} className="flex items-center gap-1 px-2 py-1 rounded-md bg-gray-800 border border-gray-700 text-xs text-gray-300">
-                    <span className="truncate max-w-[160px]">{file.name}</span>
-                    <button type="button" onClick={() => handleRemoveFollowupFile(i)} className="text-gray-500 hover:text-gray-200 ml-1">✕</button>
-                  </span>
-                ))}
-              </div>
-            )}
-            {followupError && (
-              <p className="text-red-400 text-xs mb-2">{followupError}</p>
-            )}
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => followupFileInputRef.current?.click()}
-                disabled={isSubmittingFollowup}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-gray-400 hover:text-gray-200 hover:bg-gray-800 border border-gray-700 transition-colors disabled:opacity-50"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
-                  <path fillRule="evenodd" d="M15.621 4.379a3 3 0 0 0-4.242 0l-7 7a1.5 1.5 0 0 0 2.122 2.121l7-7a.5.5 0 0 1 .707.708l-7 7a2.5 2.5 0 0 1-3.536-3.536l7-7a4.5 4.5 0 0 1 6.364 6.364l-7 7A6.5 6.5 0 0 1 2.45 9.955l7-7a.5.5 0 1 1 .707.708l-7 7A5.5 5.5 0 0 0 10.95 18.92l7-7a3 3 0 0 0 0-4.242Z" clipRule="evenodd" />
-                </svg>
-                Attach files
-              </button>
-              <button
-                onClick={handleFollowupSubmit}
-                disabled={isSubmittingFollowup || !followupText.trim()}
-                className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium transition-colors"
-              >
-                {isSubmittingFollowup ? "Submitting…" : "Submit follow-up"}
-              </button>
-            </div>
-          </div>
         </div>
       )}
 
