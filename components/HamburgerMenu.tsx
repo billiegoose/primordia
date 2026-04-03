@@ -43,10 +43,13 @@ export function buildStandardMenuItems({
   onSyncClick,
   isAdmin,
   currentPath,
+  onEvolveClick,
 }: {
   onSyncClick: () => void;
   isAdmin: boolean;
   currentPath?: string;
+  /** When provided, "Propose a change" opens this callback instead of navigating to /evolve. */
+  onEvolveClick?: () => void;
 }): MenuItem[] {
   const items: MenuItem[] = [
     {
@@ -62,7 +65,7 @@ export function buildStandardMenuItems({
     {
       label: "Propose a change",
       hoverColor: "hover:text-amber-400",
-      href: "/evolve",
+      ...(onEvolveClick ? { onClick: onEvolveClick } : { href: "/evolve" }),
       icon: (
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>

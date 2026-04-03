@@ -14,6 +14,7 @@
 import { useState, useRef, useEffect, FormEvent } from "react";
 import { SimpleMarkdown } from "./SimpleMarkdown";
 import { GitSyncDialog } from "./GitSyncDialog";
+import { FloatingEvolveDialog } from "./FloatingEvolveDialog";
 import { NavHeader } from "./NavHeader";
 import { HamburgerMenu, buildStandardMenuItems } from "./HamburgerMenu";
 import { useSessionUser } from "../lib/hooks";
@@ -36,6 +37,7 @@ interface GitContext {
 
 export default function ChatInterface({ branch, commitMessage }: GitContext) {
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
+  const [evolveDialogOpen, setEvolveDialogOpen] = useState(false);
   const { sessionUser, handleLogout } = useSessionUser();
 
   const [messages, setMessages] = useState<Message[]>(() => {
@@ -221,12 +223,16 @@ export default function ChatInterface({ branch, commitMessage }: GitContext) {
           onLogout={handleLogout}
           items={buildStandardMenuItems({
             onSyncClick: () => setSyncDialogOpen(true),
+            onEvolveClick: () => setEvolveDialogOpen(true),
             isAdmin: sessionUser?.isAdmin ?? false,
             currentPath: "/chat",
           })}
         />
         {syncDialogOpen && (
           <GitSyncDialog onClose={() => setSyncDialogOpen(false)} />
+        )}
+        {evolveDialogOpen && (
+          <FloatingEvolveDialog onClose={() => setEvolveDialogOpen(false)} />
         )}
       </header>
 
