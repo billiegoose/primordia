@@ -32,13 +32,6 @@ export async function GET(request: Request) {
     return Response.json({ error: 'Authentication required' }, { status: 401 });
   }
 
-  if (process.env.NODE_ENV !== 'development') {
-    return Response.json(
-      { error: 'Local evolve is only available in development mode' },
-      { status: 403 },
-    );
-  }
-
   const url = new URL(request.url);
   const sessionId = url.searchParams.get('sessionId');
   if (!sessionId) {

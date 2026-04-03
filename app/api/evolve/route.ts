@@ -1,6 +1,5 @@
 // app/api/evolve/route.ts
 // Local development evolve flow — bypasses GitHub entirely.
-// Only available when NODE_ENV=development.
 //
 // POST — start a new local evolve session.
 //   Body: { request: string }
@@ -88,13 +87,6 @@ export async function POST(request: Request) {
 
   if (!(await hasEvolvePermission(user.id))) {
     return Response.json({ error: 'You do not have permission to use the evolve flow' }, { status: 403 });
-  }
-
-  if (process.env.NODE_ENV !== 'development') {
-    return Response.json(
-      { error: 'Local evolve is only available in development mode' },
-      { status: 403 },
-    );
   }
 
   // Parse request body — supports both JSON (legacy) and multipart/form-data (with file attachments).
@@ -199,13 +191,6 @@ export async function GET(request: Request) {
   const user = await getSessionUser();
   if (!user) {
     return Response.json({ error: 'Authentication required' }, { status: 401 });
-  }
-
-  if (process.env.NODE_ENV !== 'development') {
-    return Response.json(
-      { error: 'Local evolve is only available in development mode' },
-      { status: 403 },
-    );
   }
 
   const sessionId = new URL(request.url).searchParams.get('sessionId');

@@ -26,7 +26,7 @@ The core idea: **the app becomes whatever its users need it to be**, with no cod
 | Styling | Tailwind CSS | AI models write Tailwind well; no CSS files to manage |
 | Language | TypeScript | Catches mistakes; Claude Code understands it well |
 | AI API | Anthropic SDK (`@anthropic-ai/sdk`) | Streaming chat via `claude-sonnet-4-6`; prefers exe.dev LLM gateway, falls back to `ANTHROPIC_API_KEY` |
-| Hosting | exe.dev | Remote dev servers via `bun run dev`; no build step required |
+| Hosting | exe.dev | Production builds via `bun run build && bun run start`; systemd service; blue/green slot swap on accept |
 | AI code gen | `@anthropic-ai/claude-agent-sdk` | `query()` runs Claude Code in git worktrees for evolve requests |
 | Database | bun:sqlite | Local SQLite for passkey auth **and evolve session persistence**; same adapter on exe.dev and local dev |
 
@@ -51,8 +51,8 @@ primordia/
 │
 ├── scripts/
 │   ├── deploy-to-exe-dev.sh      ← `bun run deploy-to-exe.dev <server>`: SSH deploy to <server>.exe.xyz
-│   ├── install-service.sh        ← Installs/re-installs the Primordia systemd service via symlink
-│   └── primordia.service         ← systemd service unit file for running Primordia as a background service
+│   ├── install-service.sh        ← Installs/re-installs the systemd service; creates primordia-worktrees/current symlink (blue/green bootstrap)
+│   └── primordia.service         ← systemd service unit file; WorkingDirectory points at primordia-worktrees/current (the active blue/green slot)
 │
 ├── public/
 │   (no generated files)
@@ -101,6 +101,8 @@ primordia/
 │       │   └── route.ts           ← Returns list of missing required env vars (called on page load)
 │       ├── git-sync/
 │       │   └── route.ts           ← POST pull + push the current branch (used by GitSyncDialog)
+│       ├── rollback/
+│       │   └── route.ts           ← GET hasPrevious check; POST swap current↔previous + systemd restart (admin only)
 │       ├── prune-branches/
 │       │   └── route.ts           ← POST delete all local branches merged into main; streams SSE progress
 │       ├── auth/
@@ -171,7 +173,7 @@ User types message
   → Message appended to chat
 ```
 
-#### Evolve Request (local dev and exe.dev — NODE_ENV=development)
+#### Evolve Request
 ```
 User types change request on /evolve page
   → POST /api/evolve
@@ -194,8 +196,15 @@ User types change request on /evolve page
       → GET streams delta progressText + state every 500 ms from SQLite until terminal
   → Preview link shown when status becomes "ready"
   → User clicks Accept → POST /api/evolve/manage { action: "accept" }
-      → git merge {branch} --no-ff
-      → kill dev server, git worktree remove, git branch -D
+      → pre-accept gates: ancestor check, clean worktree, bun run typecheck, bun run build (all in session worktree)
+      → blue/green deploy (production): bun install in worktree → git commit-tree + update-ref (no production dir writes)
+          → copy prod DB from old slot into new slot (preserves auth data)
+          → fix .env.local symlink in new slot to point to main repo (prevents dangling link)
+          → atomic symlink swap: primordia-worktrees/current → session worktree
+          → keep old slot as primordia-worktrees/previous (enables fast rollback via POST /api/rollback)
+          → delete slot from two accepts ago (if worktree), delete session branch
+          → sudo systemctl restart primordia (fire-and-forget)
+      → legacy deploy (local dev, no systemd): git merge in production dir → bun install → worktree remove
   → User clicks Reject → POST /api/evolve/manage { action: "reject" }
       → kill dev server, git worktree remove, git branch -D
 ```
@@ -213,7 +222,7 @@ Each evolve session tracks two independent dimensions persisted to SQLite:
 |---|---|
 | `starting` | Session created; git worktree + `bun install` in progress |
 | `running-claude` | Claude Agent SDK `query()` is streaming tool calls into the worktree |
-| `fixing-types` | TypeScript gate failed on Accept; Claude is auto-fixing type errors; session page keeps Available Actions panel visible; server retries Accept when done (client tab does not need to be open) |
+| `fixing-types` | TypeScript or build gate failed on Accept; Claude is auto-fixing compilation errors; session page keeps Available Actions panel visible; server retries Accept when done (client tab does not need to be open) |
 | `ready` | Claude Code finished; worktree is live and interactive |
 | `accepted` | User clicked Accept; branch merged into parent, worktree deleted |
 | `rejected` | User clicked Reject; worktree and branch discarded without merging |
@@ -238,9 +247,9 @@ Each evolve session tracks two independent dimensions persisted to SQLite:
 | devServer `starting` → `running` | Next.js "Ready" string detected in dev server output |
 | `ready` → `running-claude` (devServer stays `running`) | `POST /api/evolve/followup` |
 | `running-claude` → `ready` (devServer stays `running`) | `runFollowupInWorktree()` on success |
-| `ready` → `fixing-types` (devServer stays `running`) | `POST /api/evolve/manage` when TypeScript gate fails |
-| `fixing-types` → `accepted` | `runFollowupInWorktree()` success + re-typecheck passes; server merges without client |
-| `fixing-types` → `error` | `runFollowupInWorktree()` success but type errors persist after fix, or merge fails |
+| `ready` → `fixing-types` (devServer stays `running`) | `POST /api/evolve/manage` when TypeScript or build gate fails |
+| `fixing-types` → `accepted` | `runFollowupInWorktree()` success + re-typecheck + re-build both pass; server merges without client |
+| `fixing-types` → `error` | `runFollowupInWorktree()` success but type/build errors persist after fix, or merge fails |
 | `ready` → `accepted` / `rejected` | `POST /api/evolve/manage` |
 | devServer `running` → `disconnected` | Dev server `close` event + branch still present (3 s later) |
 | devServer `disconnected` → `starting` | `POST /api/evolve/kill-restart` |
@@ -278,10 +287,10 @@ bun run deploy-to-exe.dev <server-name>
   → ssh: install git + bun if missing
   → ssh: git clone / git pull origin main
   → ssh: bun install
-  → ssh: nohup HOSTNAME=0.0.0.0 bun run dev  (NODE_ENV=development)
+  → ssh: bun run build
+  → ssh: systemd service starts `bun run start`
   → wait for "Ready" signal, tail logs
   → app is reachable at http://<server-name>.exe.xyz:3000
-     (uses the same local evolve flow — no GitHub/Vercel required)
 ```
 
 ---
@@ -352,7 +361,8 @@ These were noted at project inception but are explicitly out of scope for the MV
 
 - **Fork flow**: one-click fork to user's own instance
 - **Voting**: upvote proposed evolve requests before they get built
-- **Rollback**: "go back to before X was added" via natural language
+- **Rollback UI**: A dedicated UI for the `POST /api/rollback` endpoint (endpoint exists; no UI yet)
+- **Deep rollback**: "go back to before X was added" via natural language (only one level of rollback is available today via `previous`)
 - **Multi-tenant**: each user gets their own Primordia instance
 
 ## Changelog
