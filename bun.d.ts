@@ -17,3 +17,9 @@ declare module "bun:sqlite" {
     all(...params: unknown[]): unknown[];
   }
 }
+
+// Bun extends ImportMeta with additional properties not present in standard TypeScript.
+interface ImportMeta {
+  /** Absolute path to the directory containing the current file (Bun only). */
+  dir: string;
+}

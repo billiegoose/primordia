@@ -8,6 +8,7 @@
 import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import { Database } from 'bun:sqlite';
 import { getSessionUser, isAdmin } from '../../../lib/auth';
 
 const DB_NAME = '.primordia-auth.db';
@@ -27,22 +28,22 @@ function findCurrentSymlink(): string | null {
 }
 
 /**
- * Copies the SQLite database (plus WAL/SHM companion files) from src to dst.
- * Stale companion files in dst that are absent in src are deleted so SQLite
- * doesn't misinterpret them after the copy.
+ * Creates a consistent point-in-time snapshot of the SQLite DB using
+ * VACUUM INTO — safe while the source DB is being actively written to.
  */
 function copyDb(srcDir: string, dstDir: string): void {
   const srcDb = path.join(srcDir, DB_NAME);
   if (!fs.existsSync(srcDb)) return;
-  fs.copyFileSync(srcDb, path.join(dstDir, DB_NAME));
-  for (const ext of ['-wal', '-shm']) {
-    const src = srcDb + ext;
-    const dst = path.join(dstDir, DB_NAME) + ext;
-    if (fs.existsSync(src)) {
-      fs.copyFileSync(src, dst);
-    } else {
-      fs.rmSync(dst, { force: true });
-    }
+  const dstDb = path.join(dstDir, DB_NAME);
+  // VACUUM INTO fails if the destination file already exists
+  fs.rmSync(dstDb, { force: true });
+  fs.rmSync(dstDb + '-wal', { force: true });
+  fs.rmSync(dstDb + '-shm', { force: true });
+  const db = new Database(srcDb);
+  try {
+    db.prepare('VACUUM INTO ?').run(dstDb);
+  } finally {
+    db.close();
   }
 }
 

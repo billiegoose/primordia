@@ -11,10 +11,12 @@
 //              1. bun install --frozen-lockfile in the session worktree
 //              2. Create merge commit via git plumbing (no working-tree writes)
 //              3. Detach the session worktree HEAD onto the merge commit
-//              4. Atomically swap the 'current' symlink to the session worktree
-//              5. Schedule `sudo systemctl restart primordia` (fire-and-forget)
-//              6. Clean up old production slot (if it was a worktree, not the main repo)
-//              7. Delete the now-orphaned branch ref
+//              4. Health-check the new slot (start on temp port, verify HTTP response)
+//              5. Copy production DB into new slot (VACUUM INTO — atomic snapshot)
+//              6. Atomically swap the 'current' symlink to the session worktree
+//              7. Schedule `sudo systemctl restart primordia` (fire-and-forget)
+//              8. Clean up old production slot (if it was a worktree, not the main repo)
+//              9. Delete the now-orphaned branch ref
 //
 //            LEGACY (local dev, no systemd 'current' symlink):
 //              git checkout → stash → merge → stash-pop → bun install → worktree remove
@@ -24,7 +26,9 @@
 
 import { execSync, spawn } from 'child_process';
 import * as fs from 'fs';
+import * as net from 'net';
 import * as path from 'path';
+import { Database } from 'bun:sqlite';
 import {
   runGit,
   resolveConflictsWithClaude,
@@ -114,6 +118,81 @@ async function createMergeCommitNoCheckout(
   return { commitHash: mergeCommit };
 }
 
+const DB_NAME = '.primordia-auth.db';
+
+/**
+ * Creates a consistent point-in-time snapshot of the SQLite DB using
+ * VACUUM INTO — safe while the source DB is being actively written to.
+ */
+function copyDb(srcDir: string, dstDir: string): void {
+  const srcDb = path.join(srcDir, DB_NAME);
+  if (!fs.existsSync(srcDb)) return;
+  const dstDb = path.join(dstDir, DB_NAME);
+  // VACUUM INTO fails if the destination file already exists
+  fs.rmSync(dstDb, { force: true });
+  fs.rmSync(dstDb + '-wal', { force: true });
+  fs.rmSync(dstDb + '-shm', { force: true });
+  const db = new Database(srcDb);
+  try {
+    db.prepare('VACUUM INTO ?').run(dstDb);
+  } finally {
+    db.close();
+  }
+}
+
+/** Returns an available TCP port on 127.0.0.1 (OS picks one). */
+function findFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      const port = typeof addr === 'object' && addr ? addr.port : 0;
+      server.close(() => resolve(port));
+    });
+    server.on('error', reject);
+  });
+}
+
+/**
+ * Starts the built production server from slotPath on a temporary free port
+ * and verifies it responds to HTTP. Returns { ok: true } on success.
+ * Kills the test server when done regardless of outcome.
+ */
+async function healthCheckSlot(slotPath: string): Promise<{ ok: boolean; error?: string }> {
+  const port = await findFreePort();
+  const server = spawn('bun', ['run', 'start'], {
+    cwd: slotPath,
+    env: { ...process.env, PORT: String(port) },
+    stdio: 'ignore',
+    detached: false,
+  });
+
+  let spawnError: string | undefined;
+  server.on('error', (err: Error) => { spawnError = err.message; });
+
+  try {
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 1_000));
+      if (spawnError) return { ok: false, error: `Server process error: ${spawnError}` };
+      try {
+        await fetch(`http://localhost:${port}/`, {
+          signal: AbortSignal.timeout(3_000),
+          redirect: 'manual',
+        });
+        return { ok: true };
+      } catch {
+        // Not ready yet — keep polling
+      }
+    }
+    return { ok: false, error: 'Health check timed out after 30s' };
+  } finally {
+    server.kill('SIGTERM');
+    // Brief pause to let the process release its port binding
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+}
+
 /**
  * Blue/green accept path.
  *
@@ -163,28 +242,22 @@ async function blueGreenAccept(
     ? path.dirname(path.resolve(worktreePath, gitCommonResult.stdout.trim()))
     : path.resolve(repoRoot); // fallback: assume repoRoot is the main repo
 
-  // Step 4a: Copy the production database from the old slot into the new slot.
-  // The session worktree was initialised with a point-in-time snapshot of the DB;
-  // by accept time that copy is stale. Overwriting it here ensures all auth data,
-  // passkeys, user sessions, etc. survive the slot swap.
-  const dbName = '.primordia-auth.db';
-  const oldDb = path.join(oldSlot, dbName);
-  const newDb = path.join(path.resolve(worktreePath), dbName);
-  if (fs.existsSync(oldDb)) {
-    fs.copyFileSync(oldDb, newDb);
-    for (const ext of ['-wal', '-shm']) {
-      const srcExtra = oldDb + ext;
-      const dstExtra = newDb + ext;
-      if (fs.existsSync(srcExtra)) {
-        fs.copyFileSync(srcExtra, dstExtra);
-      } else {
-        // Remove any stale companion file so SQLite isn't confused after the copy.
-        fs.rmSync(dstExtra, { force: true });
-      }
-    }
+  // Step 4a: Health-check the new slot before committing to the swap.
+  // Starts the production server on a temporary free port and verifies it serves HTTP.
+  const healthCheck = await healthCheckSlot(path.resolve(worktreePath));
+  if (!healthCheck.ok) {
+    return `New slot failed health check: ${healthCheck.error ?? 'server did not respond'}`;
   }
 
-  // Step 4b: Fix the .env.local symlink in the new slot so it always points
+  // Step 4b: Copy the production database into the new slot via VACUUM INTO —
+  // an atomic, consistent snapshot safe to take while the live server writes.
+  try {
+    copyDb(oldSlot, path.resolve(worktreePath));
+  } catch {
+    // Non-fatal: the worktree's existing DB snapshot from session creation is still usable.
+  }
+
+  // Step 4c: Fix the .env.local symlink in the new slot so it always points
   // directly to the main repo's copy — which is never deleted. Without this,
   // the symlink would point to the old slot's .env.local, which gets cleaned up
   // on the next accept, leaving a dangling link.

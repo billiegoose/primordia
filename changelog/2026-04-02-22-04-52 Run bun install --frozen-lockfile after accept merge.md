@@ -17,57 +17,51 @@ After all gates pass, the accept flow takes one of two paths depending on whethe
 1. `bun install --frozen-lockfile` in the session worktree (not the production directory)
 2. Create a merge commit via git plumbing (`git commit-tree` + `git update-ref`) — no working-tree writes to the production directory
 3. Detach the session worktree HEAD onto the merge commit
-4. Copy the production database from the old slot into the new slot (overwrites the stale point-in-time copy made at session creation; preserves all auth data and user sessions)
-5. Fix the `.env.local` symlink in the new slot to point directly to the main repo's copy (which is never deleted), preventing a broken symlink chain after the old slot is cleaned up
-6. Atomically swap the `current` symlink from the old production slot to the session worktree
-7. Keep the old slot as a `previous` symlink for fast rollback; clean up the slot from two accepts ago (if it was a worktree)
-8. Delete the session branch ref
-9. Fire-and-forget `sudo systemctl restart primordia` (500 ms delay to flush HTTP response)
+4. **Health-check the new slot** — start the production server (`bun run start`) on a temporary free port and verify it responds to HTTP. If the server doesn't respond within 30 s, the accept is aborted before any swap occurs.
+5. **Atomic DB snapshot** — copy the production database into the new slot using SQLite's `VACUUM INTO`, which creates a consistent point-in-time snapshot that is safe to take while the live server is actively writing (replaces the previous `copyFileSync` approach, which had a race window)
+6. Fix the `.env.local` symlink in the new slot to point directly to the main repo's copy (which is never deleted), preventing a broken symlink chain after the old slot is cleaned up
+7. Atomically swap the `current` symlink from the old production slot to the session worktree
+8. Keep the old slot as a `previous` symlink for fast rollback; clean up the slot from two accepts ago (if it was a worktree)
+9. Delete the session branch ref
+10. Fire-and-forget `sudo systemctl restart primordia` (500 ms delay to flush HTTP response)
 
-### Fast rollback (`app/api/rollback/route.ts`) *(new)*
+### Fast rollback (`app/api/rollback/route.ts` + `scripts/rollback.ts`) *(updated)*
 
-New admin-only endpoint:
+Admin-only API endpoint (unchanged interface):
 
-- `GET /api/rollback` — returns `{ hasPrevious: boolean }` so a UI can show/hide a rollback button.
-- `POST /api/rollback` — swaps `current` ↔ `previous` atomically, copies the production DB into the rollback target to preserve auth data, then fires `sudo systemctl restart primordia`. Returns `{ outcome: 'rolled-back' }` or an error object.
+- `GET /api/rollback` — returns `{ hasPrevious: boolean }`.
+- `POST /api/rollback` — swaps `current` ↔ `previous` atomically, copies the production DB via `VACUUM INTO` (consistent snapshot), then fires `sudo systemctl restart primordia`.
+
+**New: `bun run rollback` standalone script** (`scripts/rollback.ts`) — performs the identical rollback operation directly via bun, bypassing the HTTP server entirely. Use this when the server itself is broken or unresponsive and the API endpoint is not reachable. Requires SSH / direct terminal access; no authentication is checked.
 
 **Legacy path** (local dev — no `current` symlink):
 git merge → stash/pop → `bun install --frozen-lockfile` → worktree remove (unchanged from before)
 
-The self-healing retry (`retryAcceptAfterFix`) now re-runs **both** typecheck and build before merging — so a type-error fix that accidentally breaks the build is caught before it reaches main. Both the main accept path and the retry path use the same blue/green / legacy detection.
+The self-healing retry (`retryAcceptAfterFix`) re-runs **both** typecheck and build before merging — so a type-error fix that accidentally breaks the build is caught before it reaches main.
 
 ### Always-on evolve — `PRIMORDIA_EVOLVE` removed
 
-The `PRIMORDIA_EVOLVE=true` environment-variable guard has been removed from all six evolve API routes:
-
-- `app/api/evolve/route.ts`
-- `app/api/evolve/stream/route.ts`
-- `app/api/evolve/manage/route.ts`
-- `app/api/evolve/followup/route.ts`
-- `app/api/evolve/upstream-sync/route.ts`
-- `app/api/evolve/kill-restart/route.ts`
-
-The evolve feature is now always available. Access is still gated by RBAC (`admin` or `can_evolve` role) — the env var was an extra layer that only added friction.
-
-Also removed: `PRIMORDIA_EVOLVE=true` from `.env.example`, `scripts/deploy-to-exe-dev.sh` (the `bun run build` step no longer needs the prefix), and all references in `PRIMORDIA.md`.
+The `PRIMORDIA_EVOLVE=true` environment-variable guard has been removed from all six evolve API routes. The evolve feature is now always available; access is still gated by RBAC.
 
 ### Blue/green infrastructure (`scripts/primordia.service`, `scripts/install-service.sh`)
 
-- **`primordia.service`** — `WorkingDirectory` and `EnvironmentFile` now point at `/home/exedev/primordia-worktrees/current` (a symlink) instead of the hardcoded main repo path. systemd resolves the symlink at service start, so it always uses whichever slot is currently live.
-- **`install-service.sh`** — on first install, creates `/home/exedev/primordia-worktrees/current` → `/home/exedev/primordia` (the initial production slot). Re-runs leave an existing symlink untouched so a live green slot is never overwritten.
+- **`primordia.service`** — `WorkingDirectory` and `EnvironmentFile` now point at `/home/exedev/primordia-worktrees/current`.
+- **`install-service.sh`** — on first install, creates `/home/exedev/primordia-worktrees/current` → `/home/exedev/primordia`.
 
 ## Why
 
-**Blue/green:** The production server runs `bun run start`, which serves a pre-built `.next/` directory. After accepting a change, the old flow ran `git merge` and `bun install` directly in the live production directory while the server was actively serving requests. The build gate then added `bun run build` there too — a long-running process that rewrites `.next/` while the running process reads it. Blue/green eliminates this entirely: all build work happens in the session worktree (which is already fully built by Gate 4), then the `current` symlink is swapped atomically and the service restarts onto the new slot in a clean state.
+**Blue/green:** After accepting a change, all build work happens in the session worktree (already fully built by Gate 4), then the `current` symlink is swapped atomically and the service restarts onto the new slot in a clean state. No build activity happens in the live production directory.
 
-**Build gate:** TypeScript type-checking (`tsc --noEmit`) only verifies types — it doesn't run the full Next.js compiler. A branch can pass typecheck but still fail `bun run build` due to import errors, missing exports, invalid JSX, or other build-time issues. Adding a build gate catches these before they reach the main branch, and auto-fixing them with Claude keeps the flow hands-free.
+**Build gate:** TypeScript type-checking (`tsc --noEmit`) only verifies types — it doesn't run the full Next.js compiler. Adding a build gate catches import errors, missing exports, invalid JSX, and other build-time issues before they reach main.
 
-**`bun install --frozen-lockfile` in the worktree:** When an evolve branch adds or upgrades packages, the worktree's `node_modules` needs to be current before the service restarts onto it. Running install in the worktree (not production) ensures the new slot is self-contained.
+**`bun install --frozen-lockfile` in the worktree:** Ensures the new slot is self-contained when an evolve branch adds or upgrades packages.
 
-**Remove PRIMORDIA_EVOLVE:** The production instance always runs with the evolve feature active. The env var gate was originally introduced to prevent the evolve routes from being accessible in environments where Claude Code wasn't available, but since RBAC already enforces who can call those routes, the extra env var was redundant operational friction.
+**Health check before swap:** Even though the build gate passes, a server might fail to start due to runtime issues (missing env var, port conflict, startup crash). The health check catches these before the swap so a bad deploy never goes live. The accept is aborted cleanly if the new slot doesn't serve HTTP within 30 s.
 
-**DB preservation:** The session worktree is created with a point-in-time snapshot of the production database. By the time the user accepts, the live DB may have accumulated new passkeys, user sessions, or other auth data. Without copying the latest DB into the new slot before the swap, that data would be lost the moment the service restarted on the new slot.
+**Atomic DB copy via VACUUM INTO:** The previous `copyFileSync` approach copied `.db`, `-wal`, and `-shm` files in three separate syscalls. Between those copies, the running server could write a new WAL entry, leaving the destination with a `.db` that was inconsistent with its `-wal` file. SQLite's `VACUUM INTO` takes a single read snapshot inside a transaction, producing a fully-checkpointed database file with no WAL companion — consistent regardless of concurrent writes.
 
-**`.env.local` preservation:** The session worktree's `.env.local` is a symlink pointing to the *currently active* slot's copy. After the old slot is cleaned up (on the next accept), that symlink becomes dangling. Repointing it to the main repo's `.env.local` (which is never deleted) before the swap breaks the chain permanently.
+**`bun run rollback` script:** If the newly-deployed server is broken and unresponsive, `POST /api/rollback` can't be reached. The standalone script performs the identical swap + restart directly on the server via SSH without requiring the app to be running.
 
-**Fast rollback:** If an accepted change causes unexpected issues in production, being able to instantly revert to the previous build is critical. The `previous` symlink gives a one-API-call rollback path without needing git revert, rebuild, or SSH access — the prior slot's `.next/` bundle is still on disk and ready to serve immediately.
+**DB preservation on rollback:** Copying the live DB before swapping back ensures passkey registrations and sessions created since the last deploy are not lost when rolling back.
+
+**Remove PRIMORDIA_EVOLVE:** The env var gate was redundant — RBAC already enforces who can call the evolve routes.
