@@ -61,42 +61,66 @@ export function FloatingEvolveDialog({
 
   // ── Dragging ──────────────────────────────────────────────────────────────
 
-  function handleDragStart(e: React.MouseEvent<HTMLDivElement>) {
-    // Don't hijack clicks on buttons inside the title bar
-    if ((e.target as HTMLElement).closest("button")) return;
-    e.preventDefault();
-
+  function startDrag(clientX: number, clientY: number) {
     const dialog = dialogRef.current;
     if (!dialog) return;
-
     const rect = dialog.getBoundingClientRect();
     dragOriginRef.current = {
-      mouseX: e.clientX,
-      mouseY: e.clientY,
+      mouseX: clientX,
+      mouseY: clientY,
       dialogX: rect.left,
       dialogY: rect.top,
     };
   }
 
+  function handleDragStart(e: React.MouseEvent<HTMLDivElement>) {
+    // Don't hijack clicks on buttons inside the title bar
+    if ((e.target as HTMLElement).closest("button")) return;
+    e.preventDefault();
+    startDrag(e.clientX, e.clientY);
+  }
+
+  function handleTouchStart(e: React.TouchEvent<HTMLDivElement>) {
+    // Don't hijack taps on buttons inside the title bar
+    if ((e.target as HTMLElement).closest("button")) return;
+    const touch = e.touches[0];
+    startDrag(touch.clientX, touch.clientY);
+  }
+
   useEffect(() => {
-    function onMouseMove(e: MouseEvent) {
+    function onMove(clientX: number, clientY: number) {
       if (!dragOriginRef.current) return;
       const { mouseX, mouseY, dialogX, dialogY } = dragOriginRef.current;
       setFreePos({
-        x: dialogX + (e.clientX - mouseX),
-        y: dialogY + (e.clientY - mouseY),
+        x: dialogX + (clientX - mouseX),
+        y: dialogY + (clientY - mouseY),
       });
     }
 
-    function onMouseUp() {
+    function onMouseMove(e: MouseEvent) {
+      onMove(e.clientX, e.clientY);
+    }
+
+    function onTouchMove(e: TouchEvent) {
+      if (!dragOriginRef.current) return;
+      e.preventDefault();
+      const touch = e.touches[0];
+      onMove(touch.clientX, touch.clientY);
+    }
+
+    function onEnd() {
       dragOriginRef.current = null;
     }
 
     window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
+    window.addEventListener("mouseup", onEnd);
+    window.addEventListener("touchmove", onTouchMove, { passive: false });
+    window.addEventListener("touchend", onEnd);
     return () => {
       window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
+      window.removeEventListener("mouseup", onEnd);
+      window.removeEventListener("touchmove", onTouchMove);
+      window.removeEventListener("touchend", onEnd);
     };
   }, []);
 
@@ -202,7 +226,8 @@ export function FloatingEvolveDialog({
       {/* Title bar / drag handle */}
       <div
         onMouseDown={handleDragStart}
-        className="flex items-center gap-2 px-4 py-2.5 bg-gray-900 border-b border-gray-800 cursor-grab active:cursor-grabbing select-none"
+        onTouchStart={handleTouchStart}
+        className="flex items-center gap-2 px-4 py-2.5 bg-gray-900 border-b border-gray-800 cursor-grab active:cursor-grabbing select-none touch-none"
       >
         <span className="flex-1 text-sm font-medium text-amber-400">Propose a change</span>
 
