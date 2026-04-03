@@ -9,6 +9,24 @@ import * as fs from 'fs';
 import { getDb } from './db';
 import { isGatewayAvailable } from './llm-client';
 
+const GATEWAY_BASE_URL = 'http://169.254.169.254/gateway/llm/anthropic';
+
+/**
+ * Returns env vars to inject into the Claude Code CLI subprocess so it routes
+ * through the exe.dev LLM gateway instead of calling Anthropic directly.
+ * Returns an empty object when the gateway is not available (falls back to
+ * whatever ANTHROPIC_API_KEY is set in the process environment).
+ */
+async function getGatewayEnv(): Promise<Record<string, string>> {
+  if (await isGatewayAvailable()) {
+    return {
+      ANTHROPIC_BASE_URL: GATEWAY_BASE_URL,
+      ANTHROPIC_API_KEY: 'gateway',
+    };
+  }
+  return {};
+}
+
 export type LocalSessionStatus =
   | 'starting'
   | 'running-claude'
@@ -411,6 +429,7 @@ export async function startLocalEvolve(
       prompt,
       options: {
         cwd: session.worktreePath,
+        env: await getGatewayEnv(),
         systemPrompt: {
           type: 'preset',
           preset: 'claude_code',
@@ -732,6 +751,7 @@ export async function runFollowupInWorktree(
       prompt,
       options: {
         cwd: session.worktreePath,
+        env: await getGatewayEnv(),
         systemPrompt: {
           type: 'preset',
           preset: 'claude_code',
@@ -1015,6 +1035,7 @@ export async function resolveConflictsWithClaude(
       prompt,
       options: {
         cwd: mergeRoot,
+        env: await getGatewayEnv(),
         systemPrompt: {
           type: 'preset',
           preset: 'claude_code',
