@@ -816,14 +816,16 @@ export default function EvolveSessionView({
               >
                 {isAborting ? "Aborting…" : "⏹ Abort"}
               </button>
-            ) : status === "ready" && devServerStatus !== "none" && devServerStatus !== "starting" ? (
+            ) : status === "ready" && devServerStatus !== "starting" ? (
               <button
                 type="button"
                 onClick={handleRestartServer}
                 disabled={isRestartingServer}
                 className="text-xs text-gray-400 hover:text-gray-200 disabled:text-gray-600 transition-colors"
               >
-                {isRestartingServer ? "Restarting…" : "↺ Restart preview"}
+                {isRestartingServer
+                  ? (devServerStatus === "none" ? "Starting…" : "Restarting…")
+                  : (devServerStatus === "none" ? "▶ Start dev server" : "↺ Restart preview")}
               </button>
             ) : null}
           </div>
