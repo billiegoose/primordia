@@ -326,6 +326,7 @@ export default function EvolveSessionView({
   const [restartError, setRestartError] = useState<string | null>(null);
   const [isAborting, setIsAborting] = useState(false);
   const [abortError, setAbortError] = useState<string | null>(null);
+  const [isDraggingFollowup, setIsDraggingFollowup] = useState(false);
   const [remainingUpstream, setRemainingUpstream] = useState(upstreamCommitCount);
   const [upstreamSyncLoading, setUpstreamSyncLoading] = useState<"merge" | "rebase" | null>(null);
   const [upstreamSyncError, setUpstreamSyncError] = useState<string | null>(null);
@@ -534,6 +535,32 @@ export default function EvolveSessionView({
 
   function handleRemoveFollowupFile(index: number) {
     setFollowupFiles(prev => prev.filter((_, i) => i !== index));
+  }
+
+  function handleFollowupDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDraggingFollowup(true);
+  }
+
+  function handleFollowupDragLeave(e: React.DragEvent) {
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setIsDraggingFollowup(false);
+    }
+  }
+
+  function handleFollowupDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDraggingFollowup(false);
+    if (e.dataTransfer.files.length > 0) {
+      handleFollowupFilesAdded(e.dataTransfer.files);
+    }
+  }
+
+  function handleFollowupPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const files = Array.from(e.clipboardData.files).filter(f => f.type.startsWith("image/"));
+    if (files.length > 0) {
+      handleFollowupFilesAdded(files);
+    }
   }
 
   async function handleFollowupSubmit() {
@@ -897,7 +924,12 @@ export default function EvolveSessionView({
 
           {/* ── Follow-up panel ── */}
           {activeAction === "followup" && (
-            <div className="px-4 py-4 border-t border-gray-700">
+            <div
+              className={`px-4 py-4 border-t transition-colors ${isDraggingFollowup ? "border-amber-500/70 bg-amber-950/10" : "border-gray-700"}`}
+              onDragOver={handleFollowupDragOver}
+              onDragLeave={handleFollowupDragLeave}
+              onDrop={handleFollowupDrop}
+            >
               <p className="text-gray-400 text-xs mb-3">
                 Address feedback on the changes, e.g. &quot;I got this error when using it:&quot; or
                 &quot;please change the design of the button&quot;.
@@ -907,6 +939,7 @@ export default function EvolveSessionView({
                 rows={4}
                 value={followupText}
                 onChange={(e) => setFollowupText(e.target.value)}
+                onPaste={handleFollowupPaste}
                 placeholder="Describe what to fix or improve…"
                 className="w-full bg-gray-800 text-gray-100 placeholder-gray-500 border border-gray-700 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50 mb-2"
               />
@@ -1023,7 +1056,12 @@ export default function EvolveSessionView({
           <div className="px-4 py-3 border-b border-red-800/30">
             <p className="text-red-400 text-xs font-medium uppercase tracking-wide">Claude encountered an error</p>
           </div>
-          <div className="px-4 py-4">
+          <div
+            className="px-4 py-4"
+            onDragOver={handleFollowupDragOver}
+            onDragLeave={handleFollowupDragLeave}
+            onDrop={handleFollowupDrop}
+          >
             <div className="mb-4 pb-4 border-b border-red-800/30">
               <p className="text-gray-500 text-xs mb-2">You can restart the dev server to attempt recovery.</p>
               {restartError && (
@@ -1045,8 +1083,9 @@ export default function EvolveSessionView({
               rows={4}
               value={followupText}
               onChange={(e) => setFollowupText(e.target.value)}
+              onPaste={handleFollowupPaste}
               placeholder="Describe what to try instead, or provide additional context…"
-              className="w-full bg-gray-800 text-gray-100 placeholder-gray-500 border border-gray-700 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50 mb-2"
+              className={`w-full bg-gray-800 text-gray-100 placeholder-gray-500 border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50 mb-2 transition-colors ${isDraggingFollowup ? "border-amber-500/70" : "border-gray-700"}`}
             />
             {/* Attached file chips */}
             {followupFiles.length > 0 && (
