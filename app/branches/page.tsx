@@ -1,6 +1,6 @@
 // app/branches/page.tsx
 // Shows all local git branches as a tree rooted at the current branch, with
-// links to active preview servers. Only meaningful in development mode.
+// links to active preview servers. Admin-only; available in all environments.
 //
 // Implemented as a React Server Component — data is fetched directly on the
 // server, no separate API route needed. This also makes diagnostics trivial
@@ -16,6 +16,8 @@ import { PageNavBar } from "@/components/PageNavBar";
 import { PruneBranchesButton } from "@/components/PruneBranchesButton";
 import { buildPageTitle } from "@/lib/page-title";
 import { getSessionUser, isAdmin } from "@/lib/auth";
+import ForbiddenPage from "@/components/ForbiddenPage";
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -322,13 +324,23 @@ function GitResultRow({
 // ─── Page ───────────────────────────────────────────────────────────────────────
 
 export default async function BranchesPage() {
-  if (process.env.NODE_ENV !== "development") {
+  const user = await getSessionUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  const userIsAdmin = await isAdmin(user.id);
+
+  if (!userIsAdmin) {
     return (
-      <main className="flex flex-col w-full max-w-3xl mx-auto px-4 py-6 min-h-screen">
-        <p className="text-red-400 text-sm">
-          Branches page is only available in development mode.
-        </p>
-      </main>
+      <ForbiddenPage
+        pageDescription="The Branches page shows all local git branches, their evolve session statuses, and links to active preview servers."
+        requiredConditions={["Must be logged in", "Must have the Prime (admin) role"]}
+        metConditions={["Logged in"]}
+        unmetConditions={["Prime (admin) role"]}
+        howToFix={["Ask an existing Prime to grant you the admin role via direct database access."]}
+      />
     );
   }
 
@@ -339,13 +351,10 @@ export default async function BranchesPage() {
   // matching the pattern used in app/api/auth/exe-dev/route.ts (getPublicOrigin).
   // When running behind exe.dev's proxy, x-forwarded-proto/host give the real URL.
   // Falls back to http://localhost:PORT for plain local dev.
-  const [headerStore, user] = await Promise.all([
+  const [headerStore] = await Promise.all([
     headers(),
-    getSessionUser(),
   ]);
-  const sessionUser = user
-    ? { id: user.id, username: user.username, isAdmin: await isAdmin(user.id) }
-    : null;
+  const sessionUser = { id: user.id, username: user.username, isAdmin: userIsAdmin };
   const proto = headerStore.get("x-forwarded-proto") ?? "http";
   const host =
     headerStore.get("x-forwarded-host") ??
@@ -387,7 +396,7 @@ export default async function BranchesPage() {
       {/* Legend */}
       <div className="mt-8 border-t border-gray-800 pt-4 text-xs text-gray-600 font-mono space-y-1">
         <p>● green = preview server active · ● dim = no active session · <span className="text-purple-400">session ↗</span> = view evolve session</p>
-        <p>Development mode only</p>
+        <p>Admin only</p>
       </div>
 
       {/* Diagnostics — always visible to help debug empty/unexpected output */}

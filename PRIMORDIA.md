@@ -73,7 +73,7 @@ primordia/
 │   ├── page.tsx                   ← Landing page — marketing/feature overview; links to /chat and /evolve
 │   ├── globals.css                ← Tailwind base imports only
 │   ├── branches/
-│   │   └── page.tsx               ← Server component: git branch tree with diagnostics (dev only)
+│   │   └── page.tsx               ← Server component: git branch tree with diagnostics (admin only; all environments)
 │   ├── changelog/
 │   │   └── page.tsx               ← Server component: reads changelog/ filenames at runtime; lazy-loads body via /api/changelog
 │   ├── chat/
