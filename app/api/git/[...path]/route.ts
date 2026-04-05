@@ -14,20 +14,24 @@
 //   All git-upload-pack operations (fetch/clone) are allowed.
 
 import { execSync, spawn } from "child_process";
+import { resolve } from "path";
 import { type NextRequest } from "next/server";
 
 // ─── Git dir resolution ────────────────────────────────────────────────────────
 
 // Resolve the real git object store once at module load time.
 // In a linked worktree, .git is a file; --git-common-dir gives the shared dir.
+// Always returns an absolute path so git http-backend can find the repo
+// regardless of its working directory.
 function resolveGitDir(): string {
   try {
-    return execSync("git rev-parse --git-common-dir", {
+    const result = execSync("git rev-parse --git-common-dir", {
       cwd: process.cwd(),
       encoding: "utf8",
     }).trim();
+    return resolve(process.cwd(), result);
   } catch {
-    return `${process.cwd()}/.git`;
+    return resolve(process.cwd(), ".git");
   }
 }
 
