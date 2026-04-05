@@ -8,6 +8,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { MarkdownContent } from "./SimpleMarkdown";
 import { NavHeader } from "./NavHeader";
 import { GitSyncDialog } from "./GitSyncDialog";
+import { FloatingEvolveDialog } from "./FloatingEvolveDialog";
 import { HamburgerMenu, buildStandardMenuItems } from "./HamburgerMenu";
 import { useSessionUser } from "../lib/hooks";
 import Link from "next/link";
@@ -131,14 +132,16 @@ function LogSection({
   if (isClaudeSection || isTypeFixSection) {
     const borderClass = isTypeFixSection ? "border-orange-700/50" : "border-blue-700/50";
     const headingClass = isTypeFixSection ? "text-orange-300" : "text-blue-300";
-    const doneTitle = isTypeFixSection ? "🔧 Type errors fixed" : "🤖 Claude Code finished";
 
     // Treat the section as finished if the content already contains an end marker,
     // even if the status update hasn't arrived in the same SSE tick yet.
     const hasFinishMarker =
       content.includes("✅ **Claude Code finished.**") ||
       content.includes("✅ **Follow-up complete. Preview server will reload automatically.**");
-    const isRunning = isActive && !hasFinishMarker;
+    const hasErrorMarker =
+      content.includes("❌ **Error**:") ||
+      content.includes("❌ **Auto-fix failed");
+    const isRunning = isActive && !hasFinishMarker && !hasErrorMarker;
 
     if (isRunning) {
       return (
@@ -159,10 +162,15 @@ function LogSection({
 
     // Done — collapse tool calls into <details>, show final message outside
     const { detailsContent, finalItem, toolCallCount } = splitClaudeContent(content);
+    const doneBorderClass = hasErrorMarker ? "border-red-700/50" : borderClass;
+    const doneHeadingClass = hasErrorMarker ? "text-red-400" : headingClass;
+    const doneTitle = hasErrorMarker
+      ? (isTypeFixSection ? "❌ Auto-fix failed" : "❌ Claude Code failed")
+      : (isTypeFixSection ? "🔧 Type errors fixed" : "🤖 Claude Code finished");
     return (
-      <div className={`rounded-lg border ${borderClass} bg-gray-900 text-sm overflow-hidden`}>
+      <div className={`rounded-lg border ${doneBorderClass} bg-gray-900 text-sm overflow-hidden`}>
         <div className="px-4 py-2.5 border-b border-gray-800">
-          <span className={`font-semibold text-xs ${headingClass}`}>{doneTitle}</span>
+          <span className={`font-semibold text-xs ${doneHeadingClass}`}>{doneTitle}</span>
         </div>
         {detailsContent && (
           <details className="group border-b border-gray-800">
@@ -313,6 +321,9 @@ export default function EvolveSessionView({
   const [devServerStatus, setDevServerStatus] = useState(initialDevServerStatus);
   const [previewUrl, setPreviewUrl] = useState<string | null>(initialPreviewUrl);
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
+  const [evolveDialogOpen, setEvolveDialogOpen] = useState(false);
+  const [evolveAnchorRect, setEvolveAnchorRect] = useState<DOMRect | null>(null);
+  const hamburgerRef = useRef<HTMLDivElement>(null);
   const { sessionUser, handleLogout } = useSessionUser();
   const [followupText, setFollowupText] = useState('');
   const [followupFiles, setFollowupFiles] = useState<File[]>([]);
@@ -326,8 +337,9 @@ export default function EvolveSessionView({
   const [restartError, setRestartError] = useState<string | null>(null);
   const [isAborting, setIsAborting] = useState(false);
   const [abortError, setAbortError] = useState<string | null>(null);
+  const [isDraggingFollowup, setIsDraggingFollowup] = useState(false);
   const [remainingUpstream, setRemainingUpstream] = useState(upstreamCommitCount);
-  const [upstreamSyncLoading, setUpstreamSyncLoading] = useState<"merge" | "rebase" | null>(null);
+  const [upstreamSyncLoading, setUpstreamSyncLoading] = useState<"merge" | null>(null);
   const [upstreamSyncError, setUpstreamSyncError] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   /** Tracks how many characters of progressText the client has received, for SSE reconnection. */
@@ -439,8 +451,7 @@ export default function EvolveSessionView({
     const alreadyTerminal =
       initialStatus === "accepted" ||
       initialStatus === "rejected" ||
-      initialStatus === "error" ||
-      (initialStatus === "ready" && (initialDevServerStatus === "running" || initialDevServerStatus === "disconnected"));
+      (initialStatus === "ready" && (initialDevServerStatus === "running" || initialDevServerStatus === "disconnected" || initialDevServerStatus === "none"));
     if (alreadyTerminal) return;
 
     void startStreaming();
@@ -505,14 +516,14 @@ export default function EvolveSessionView({
     }
   }
 
-  async function handleUpstreamSync(action: "merge" | "rebase") {
-    setUpstreamSyncLoading(action);
+  async function handleUpstreamSync() {
+    setUpstreamSyncLoading("merge");
     setUpstreamSyncError(null);
     try {
       const res = await fetch('/api/evolve/upstream-sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, action }),
+        body: JSON.stringify({ sessionId, action: "merge" }),
       });
       const data = (await res.json()) as { outcome?: string; log?: string; error?: string };
       if (!res.ok) throw new Error(data.error ?? `Server error: ${res.status}`);
@@ -534,6 +545,32 @@ export default function EvolveSessionView({
 
   function handleRemoveFollowupFile(index: number) {
     setFollowupFiles(prev => prev.filter((_, i) => i !== index));
+  }
+
+  function handleFollowupDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDraggingFollowup(true);
+  }
+
+  function handleFollowupDragLeave(e: React.DragEvent) {
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setIsDraggingFollowup(false);
+    }
+  }
+
+  function handleFollowupDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDraggingFollowup(false);
+    if (e.dataTransfer.files.length > 0) {
+      handleFollowupFilesAdded(e.dataTransfer.files);
+    }
+  }
+
+  function handleFollowupPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const files = Array.from(e.clipboardData.files).filter(f => f.type.startsWith("image/"));
+    if (files.length > 0) {
+      handleFollowupFilesAdded(files);
+    }
   }
 
   async function handleFollowupSubmit() {
@@ -639,11 +676,10 @@ export default function EvolveSessionView({
   const isTerminal =
     status === "accepted" ||
     status === "rejected" ||
-    status === "error" ||
-    (status === "ready" && (devServerStatus === "running" || devServerStatus === "disconnected"));
+    (status === "ready" && (devServerStatus === "running" || devServerStatus === "disconnected" || devServerStatus === "none"));
 
   /** True while the session pipeline is actively running (not yet ready for action). */
-  const isClaudeRunning = status === "starting" || status === "running-claude";
+  const isClaudeRunning = status === "starting" || status === "running-claude" || status === "fixing-types";
 
   // Extract the branch name from the "✅ **Accepted** — merged into `foo`" decision log line.
   const mergedIntoBranch = progressText
@@ -668,13 +704,24 @@ export default function EvolveSessionView({
         <HamburgerMenu
           sessionUser={sessionUser}
           onLogout={handleLogout}
+          containerRef={hamburgerRef}
           items={buildStandardMenuItems({
             onSyncClick: () => setSyncDialogOpen(true),
+            onEvolveClick: () => {
+              setEvolveAnchorRect(hamburgerRef.current?.getBoundingClientRect() ?? null);
+              setEvolveDialogOpen(true);
+            },
             isAdmin: sessionUser?.isAdmin ?? false,
           })}
         />
         {syncDialogOpen && (
           <GitSyncDialog onClose={() => setSyncDialogOpen(false)} />
+        )}
+        {evolveDialogOpen && (
+          <FloatingEvolveDialog
+            onClose={() => setEvolveDialogOpen(false)}
+            anchorRect={evolveAnchorRect}
+          />
         )}
       </header>
 
@@ -781,19 +828,11 @@ export default function EvolveSessionView({
             <div className="flex gap-2 flex-shrink-0">
               <button
                 type="button"
-                onClick={() => handleUpstreamSync("merge")}
+                onClick={() => handleUpstreamSync()}
                 disabled={upstreamSyncLoading !== null}
                 className="px-3 py-1.5 rounded-lg bg-blue-700 hover:bg-blue-600 disabled:bg-gray-800 disabled:text-gray-600 text-white text-xs font-medium transition-colors"
               >
-                {upstreamSyncLoading === "merge" ? "Merging…" : "Merge"}
-              </button>
-              <button
-                type="button"
-                onClick={() => handleUpstreamSync("rebase")}
-                disabled={upstreamSyncLoading !== null}
-                className="px-3 py-1.5 rounded-lg bg-blue-800 hover:bg-blue-700 disabled:bg-gray-800 disabled:text-gray-600 text-blue-200 text-xs font-medium transition-colors"
-              >
-                {upstreamSyncLoading === "rebase" ? "Rebasing…" : "Rebase"}
+                {upstreamSyncLoading === "merge" ? "Applying…" : "Apply Updates"}
               </button>
             </div>
           </div>
@@ -801,7 +840,7 @@ export default function EvolveSessionView({
       )}
 
       {/* Three-action panel — shown to users with can_evolve permission; hidden for public viewers */}
-      {canEvolve && status !== "accepted" && status !== "rejected" && status !== "error" && (
+      {canEvolve && status !== "accepted" && status !== "rejected" && (
         <div className="mb-6 rounded-lg bg-gray-900 border border-gray-700 text-sm overflow-hidden">
 
           {/* ── Header ── */}
@@ -897,7 +936,12 @@ export default function EvolveSessionView({
 
           {/* ── Follow-up panel ── */}
           {activeAction === "followup" && (
-            <div className="px-4 py-4 border-t border-gray-700">
+            <div
+              className={`px-4 py-4 border-t transition-colors ${isDraggingFollowup ? "border-amber-500/70 bg-amber-950/10" : "border-gray-700"}`}
+              onDragOver={handleFollowupDragOver}
+              onDragLeave={handleFollowupDragLeave}
+              onDrop={handleFollowupDrop}
+            >
               <p className="text-gray-400 text-xs mb-3">
                 Address feedback on the changes, e.g. &quot;I got this error when using it:&quot; or
                 &quot;please change the design of the button&quot;.
@@ -907,6 +951,7 @@ export default function EvolveSessionView({
                 rows={4}
                 value={followupText}
                 onChange={(e) => setFollowupText(e.target.value)}
+                onPaste={handleFollowupPaste}
                 placeholder="Describe what to fix or improve…"
                 className="w-full bg-gray-800 text-gray-100 placeholder-gray-500 border border-gray-700 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50 mb-2"
               />
@@ -1017,77 +1062,8 @@ export default function EvolveSessionView({
         </div>
       )}
 
-      {/* Error state — allow follow-up requests to retry or recover; hidden for non-evolvers */}
-      {canEvolve && status === "error" && (
-        <div className="mb-6 rounded-lg bg-gray-900 border border-red-800/50 text-sm overflow-hidden">
-          <div className="px-4 py-3 border-b border-red-800/30">
-            <p className="text-red-400 text-xs font-medium uppercase tracking-wide">Claude encountered an error</p>
-          </div>
-          <div className="px-4 py-4">
-            <div className="mb-4 pb-4 border-b border-red-800/30">
-              <p className="text-gray-500 text-xs mb-2">You can restart the dev server to attempt recovery.</p>
-              {restartError && (
-                <p className="text-red-400 text-xs mb-2">{restartError}</p>
-              )}
-              <button
-                type="button"
-                onClick={handleRestartServer}
-                disabled={isRestartingServer}
-                className="px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 text-gray-300 text-xs font-medium transition-colors"
-              >
-                {isRestartingServer ? "Restarting…" : "↺ Restart preview"}
-              </button>
-            </div>
-            <p className="text-gray-400 text-xs mb-3">
-              You can submit a follow-up request to retry or provide additional guidance.
-            </p>
-            <textarea
-              rows={4}
-              value={followupText}
-              onChange={(e) => setFollowupText(e.target.value)}
-              placeholder="Describe what to try instead, or provide additional context…"
-              className="w-full bg-gray-800 text-gray-100 placeholder-gray-500 border border-gray-700 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50 mb-2"
-            />
-            {/* Attached file chips */}
-            {followupFiles.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-2">
-                {followupFiles.map((file, i) => (
-                  <span key={i} className="flex items-center gap-1 px-2 py-1 rounded-md bg-gray-800 border border-gray-700 text-xs text-gray-300">
-                    <span className="truncate max-w-[160px]">{file.name}</span>
-                    <button type="button" onClick={() => handleRemoveFollowupFile(i)} className="text-gray-500 hover:text-gray-200 ml-1">✕</button>
-                  </span>
-                ))}
-              </div>
-            )}
-            {followupError && (
-              <p className="text-red-400 text-xs mb-2">{followupError}</p>
-            )}
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => followupFileInputRef.current?.click()}
-                disabled={isSubmittingFollowup}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-gray-400 hover:text-gray-200 hover:bg-gray-800 border border-gray-700 transition-colors disabled:opacity-50"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
-                  <path fillRule="evenodd" d="M15.621 4.379a3 3 0 0 0-4.242 0l-7 7a1.5 1.5 0 0 0 2.122 2.121l7-7a.5.5 0 0 1 .707.708l-7 7a2.5 2.5 0 0 1-3.536-3.536l7-7a4.5 4.5 0 0 1 6.364 6.364l-7 7A6.5 6.5 0 0 1 2.45 9.955l7-7a.5.5 0 1 1 .707.708l-7 7A5.5 5.5 0 0 0 10.95 18.92l7-7a3 3 0 0 0 0-4.242Z" clipRule="evenodd" />
-                </svg>
-                Attach files
-              </button>
-              <button
-                onClick={handleFollowupSubmit}
-                disabled={isSubmittingFollowup || !followupText.trim()}
-                className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium transition-colors"
-              >
-                {isSubmittingFollowup ? "Submitting…" : "Submit follow-up"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Disconnected notice — restart action hidden for non-evolvers */}
-      {devServerStatus === "disconnected" && status !== "accepted" && status !== "rejected" && (
+      {devServerStatus === "disconnected" && status !== "accepted" && status !== "accepting" && status !== "rejected" && (
         <div className="mb-6 px-4 py-4 rounded-lg bg-yellow-900/40 border border-yellow-700/50 text-sm">
           <p className="text-yellow-300 mb-3">
             ⚠️ The preview server disconnected unexpectedly. The branch still exists.

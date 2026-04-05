@@ -62,7 +62,7 @@ primordia/
 │   ├── auth.ts                    ← Session helpers: createSession, getSessionUser, isAdmin (admin role check), hasEvolvePermission (admin or can_evolve role)
 │   ├── hooks.ts                   ← Shared React hooks: useSessionUser (fetches session on mount, provides logout)
 │   ├── evolve-sessions.ts         ← Shared session state + business logic for local evolve; persists to SQLite
-│   ├── page-title.ts              ← Utility: buildPageTitle() — formats <title> with branch/port suffix on non-main branches
+│   ├── page-title.ts              ← Utility: buildPageTitle() — formats <title> with port/branch suffix in development mode; clean title in production
 │   └── db/
 │       ├── index.ts               ← Factory: getDb() → SQLite (always)
 │       ├── types.ts               ← Shared DB types: User, Passkey, Challenge, Session, CrossDeviceToken, EvolveSession, Role; DbAdapter includes role methods
@@ -145,14 +145,17 @@ primordia/
 │               │   └── route.ts   ← POST merge or rebase parent branch into session worktree
 │               └── from-branch/
 │                   └── route.ts   ← POST start a session on an existing local branch (external contributor workflow)
+│               └── upstream-sync/
+│                   └── route.ts   ← POST merge parent branch into session worktree ("Apply Updates")
 │
 ├── components/
 │   ├── AcceptRejectBar.tsx        ← Accept/reject bar for local preview worktrees
 │   ├── AdminPermissionsClient.tsx ← Client component: grant/revoke 'can_evolve' role per user (used by /admin)
 │   ├── ForbiddenPage.tsx          ← Server component: 403 access-denied page with page description, required/met/unmet conditions, and how-to-fix
-│   ├── ChatInterface.tsx          ← Main chat UI (chat only); hamburger menu "Propose a change" links to /evolve
+│   ├── ChatInterface.tsx          ← Main chat UI (chat only); hamburger menu "Propose a change" opens FloatingEvolveDialog
 │   ├── ChangelogEntryDetails.tsx  ← Client component: single changelog <details> widget; lazy-loads body from /api/changelog on first open
-│   ├── EvolveForm.tsx             ← "Submit a request" form; POSTs then redirects to /evolve/session/{id}
+│   ├── EvolveForm.tsx             ← "Submit a request" form; POSTs then redirects to /evolve/session/{id}; used by /evolve page
+│   ├── FloatingEvolveDialog.tsx   ← Draggable, dockable floating popup with the evolve form; opened from hamburger "Propose a change" on any page
 │   ├── EvolveSessionView.tsx      ← Client component for session tracking page; streams live progress via SSE
 │   ├── GitSyncDialog.tsx          ← Modal: git pull + push via /api/git-sync (wraps StreamingDialog)
 │   ├── HamburgerMenu.tsx          ← Reusable hamburger button + dropdown; used by ChatInterface, EvolveForm, EvolveSessionView, PageNavBar
@@ -228,10 +231,9 @@ Each evolve session tracks two independent dimensions persisted to SQLite:
 | `starting` | Session created; git worktree + `bun install` in progress |
 | `running-claude` | Claude Agent SDK `query()` is streaming tool calls into the worktree |
 | `fixing-types` | TypeScript or build gate failed on Accept; Claude is auto-fixing compilation errors; session page keeps Available Actions panel visible; server retries Accept when done (client tab does not need to be open) |
-| `ready` | Claude Code finished; worktree is live and interactive |
+| `ready` | Claude Code finished (or errored); worktree is live and interactive. If an error occurred, the progress log contains an `❌ **Error**:` entry and the Claude Code section heading is styled in red. |
 | `accepted` | User clicked Accept; branch merged into parent, worktree deleted |
 | `rejected` | User clicked Reject; worktree and branch discarded without merging |
-| `error` | An exception was thrown during `starting` or `running-claude` |
 
 **Dev server status reference**
 
@@ -255,11 +257,11 @@ Each evolve session tracks two independent dimensions persisted to SQLite:
 | `running-claude` → `ready` (devServer stays `running`) | `runFollowupInWorktree()` on success |
 | `ready` → `fixing-types` (devServer stays `running`) | `POST /api/evolve/manage` when TypeScript or build gate fails |
 | `fixing-types` → `accepted` | `runFollowupInWorktree()` success + re-typecheck + re-build both pass; server merges without client |
-| `fixing-types` → `error` | `runFollowupInWorktree()` success but type/build errors persist after fix, or merge fails |
+| `fixing-types` → `ready` (with `❌` error in log) | `runFollowupInWorktree()` success but type/build errors persist after fix, or merge fails |
 | `ready` → `accepted` / `rejected` | `POST /api/evolve/manage` |
 | devServer `running` → `disconnected` | Dev server `close` event + branch still present (3 s later) |
 | devServer `disconnected` → `starting` | `POST /api/evolve/kill-restart` |
-| any → `error` | Uncaught exception inside the respective async helper |
+| any → `ready` (with `❌` error in log) | Uncaught exception inside the respective async helper |
 
 ---
 
@@ -347,12 +349,13 @@ When implementing changes, follow these principles:
 | Feature | Status | Notes |
 |---|---|---|
 | Chat interface (streaming) | ✅ Live | Streams from `claude-sonnet-4-6` via SSE |
-| Evolve mode | ✅ Live | Dedicated `/evolve` page; accessible via "Propose a change" in the hamburger menu |
+| Evolve mode | ✅ Live | "Propose a change" in the hamburger opens a draggable/dockable floating dialog; `/evolve` page still exists as standalone |
 | Local evolve pipeline | ✅ Live | git worktree → Claude Agent SDK → local preview → accept/reject |
 | Evolve follow-up requests | ✅ Live | Chain multiple Claude passes on the same branch; form appears when session is ready |
 | File attachments in evolve | ✅ Live | Attach images/files to initial and follow-up requests; files are copied into `worktree/attachments/` so Claude can read and use them |
 | Upstream changes indicator | ✅ Live | Session page shows how many commits the parent branch is ahead of the session branch, with Merge and Rebase buttons |
 | Session from existing branch | ✅ Live | Branches page shows "+ session" next to branches with no active session; evolvers can attach the full AI preview pipeline to any pre-existing local branch |
+| Upstream changes indicator | ✅ Live | Session page shows how many commits the parent branch is ahead of the session branch, with an "Apply Updates" button (merge only) |
 | exe.dev deploy | ✅ Live | One-command SSH deploy; identical to local dev flow |
 | Dark theme | ✅ Live | Default dark UI with Tailwind |
 | Passkey authentication | ✅ Live | WebAuthn passkeys via /login; sessions stored in SQLite |

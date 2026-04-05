@@ -15,8 +15,7 @@ export type LocalSessionStatus =
   | 'fixing-types'
   | 'ready'
   | 'accepted'
-  | 'rejected'
-  | 'error';
+  | 'rejected';
 
 export type DevServerStatus =
   | 'none'
@@ -102,6 +101,26 @@ export function appendProgress(session: LocalSession, text: string): void {
   if (session.progressText.length > 100_000) {
     session.progressText = '[…earlier output truncated…]\n' + session.progressText.slice(-90_000);
   }
+}
+
+// ─── Session context extractor ────────────────────────────────────────────────
+
+/**
+ * Parses accumulated progressText to extract the text of every previous
+ * follow-up request. Returned in submission order so the follow-up prompt
+ * can list them as numbered prior requests.
+ *
+ * Matches the literal format written by runFollowupInWorktree:
+ *   ### 🔄 Follow-up Request\n\n> {request}\n\n### 🤖 Claude Code
+ */
+function extractPriorFollowupRequests(progressText: string): string[] {
+  const results: string[] = [];
+  const regex = /### 🔄 Follow-up Request\n\n> ([\s\S]*?)\n\n### 🤖 Claude Code/g;
+  let match;
+  while ((match = regex.exec(progressText)) !== null) {
+    results.push(match[1].trim());
+  }
+  return results;
 }
 
 // ─── Tool use summarizer ──────────────────────────────────────────────────────
@@ -536,7 +555,7 @@ export async function startLocalEvolve(
       const { PORT, ...envWithoutPort } = process.env;
       const proc = spawn('bun', ['run', 'dev'], {
         cwd: session.worktreePath,
-        env: envWithoutPort,
+        env: { ...envWithoutPort, NODE_ENV: 'development' },
         // detached=true creates a new process group so we can kill the entire tree
         detached: true,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -619,8 +638,9 @@ export async function startLocalEvolve(
     await persist();
 
   } catch (err) {
-    // Write error state to SQLite so the session page shows the failure.
-    session.status = 'error';
+    // Mark the session ready (with an error note in the log) so the UI shows
+    // the failure and allows follow-up requests to retry or recover.
+    session.status = 'ready';
     const msg = err instanceof Error ? err.message : String(err);
     const causeMsg =
       err instanceof Error && err.cause instanceof Error
@@ -721,9 +741,55 @@ export async function runFollowupInWorktree(
         `\n\nRead and use these files as needed. If they are images or assets that should be added to the project, copy them to an appropriate location (e.g., \`public/\`) with a descriptive filename.`
       : '';
 
+    // Build a session context block so Claude knows the original request, any
+    // prior follow-ups, and what has already been committed. Without this,
+    // short follow-ups like "retry" give Claude no way to know what to retry.
+    // Skip for skipChangelog (type-fix) passes — they don't need this context.
+    let sessionContextSection = '';
+    if (!skipChangelog) {
+      const priorFollowups = extractPriorFollowupRequests(session.progressText);
+
+      // Commits made so far in this session only (exclude parent-branch history).
+      const parentConfigResult = await runGit(
+        ['config', `branch.${session.branch}.parent`],
+        session.worktreePath,
+      );
+      const parentBranch = parentConfigResult.stdout.trim();
+      const logArgs = parentBranch
+        ? ['log', '--oneline', `${parentBranch}..HEAD`]
+        : ['log', '--oneline', '-10'];
+      const logResult = await runGit(logArgs, session.worktreePath);
+      const gitLog = logResult.stdout.trim() || '(no commits yet in this session)';
+
+      const contextLines: string[] = [
+        '---',
+        '',
+        '**Context from this evolve session:**',
+        '',
+        `**Original request:** ${session.request}`,
+        '',
+      ];
+      if (priorFollowups.length > 0) {
+        contextLines.push('**Previous follow-up requests in this session:**');
+        priorFollowups.forEach((req, i) => {
+          contextLines.push(`${i + 1}. ${req}`);
+        });
+        contextLines.push('');
+      }
+      contextLines.push('**Commits made so far in this session:**');
+      contextLines.push('```');
+      contextLines.push(gitLog);
+      contextLines.push('```');
+      contextLines.push('');
+      contextLines.push('---');
+      contextLines.push('');
+      sessionContextSection = contextLines.join('\n');
+    }
+
     const prompt =
       `Read PRIMORDIA.md first for architecture context, then address the following follow-up request:\n\n` +
-      `${followupRequest}${attachmentSection}\n\n` +
+      `${sessionContextSection}` +
+      `**Follow-up request:**\n\n${followupRequest}${attachmentSection}\n\n` +
       `${changelogInstruction} Commit all changes with a descriptive message.`;
 
     const stderrLines: string[] = [];
@@ -831,7 +897,7 @@ export async function runFollowupInWorktree(
       await persist();
     }
   } catch (err) {
-    session.status = 'error';
+    session.status = 'ready';
     const msg = err instanceof Error ? err.message : String(err);
     const causeMsg =
       err instanceof Error && err.cause instanceof Error
@@ -918,15 +984,15 @@ export async function restartDevServerInWorktree(
       const { PORT: _omit, ...envWithoutPort } = process.env;
       const env =
         oldPort !== null
-          ? { ...envWithoutPort, PORT: String(oldPort) }
-          : envWithoutPort;
+          ? { ...envWithoutPort, NODE_ENV: 'development' as const, PORT: String(oldPort) }
+          : { ...envWithoutPort, NODE_ENV: 'development' as const };
 
       const proc = spawn('bun', ['run', 'dev'], {
         cwd: session.worktreePath,
         env,
         detached: true,
         stdio: ['ignore', 'pipe', 'pipe'],
-      });
+      }) as ChildProcess;
       proc.unref();
       activeDevServerProcesses.set(session.id, proc);
 
@@ -987,7 +1053,7 @@ export async function restartDevServerInWorktree(
     appendProgress(session, `\n✅ **Ready on port ${session.port}**\n`);
     await persist();
   } catch (err) {
-    session.status = 'error';
+    session.status = 'ready';
     const msg = err instanceof Error ? err.message : String(err);
     appendProgress(session, `\n\n❌ **Error**: ${msg}\n`);
     await persist().catch(() => {});
