@@ -127,8 +127,6 @@ export default function LandingPage() {
         {/* Sub-headline */}
         <p className="animate-fade-up-3 relative max-w-xl text-lg sm:text-xl text-gray-400 leading-relaxed mb-10">
           A web application that rewrites itself on demand.
-          Chat with Claude, propose a change in plain English,
-          and watch the code update live.
         </p>
 
         {/* CTAs */}
