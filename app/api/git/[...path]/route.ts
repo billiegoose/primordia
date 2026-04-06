@@ -88,7 +88,11 @@ async function handleGitRequest(req: NextRequest, pathInfo: string): Promise<Res
     ...process.env,
     GIT_DIR,
     GIT_HTTP_EXPORT_ALL: "1",
+    // git http-backend requires PATH_TRANSLATED or GIT_PROJECT_ROOT (CGI interface).
+    // We synthesise PATH_TRANSLATED by appending PATH_INFO to GIT_DIR; http-backend
+    // strips the PATH_INFO suffix to derive the repo root (GIT_DIR itself).
     PATH_INFO: pathInfo,
+    PATH_TRANSLATED: GIT_DIR + pathInfo,
     REQUEST_METHOD: req.method,
     QUERY_STRING: url.search.replace(/^\?/, ""),
     CONTENT_TYPE: req.headers.get("content-type") ?? "",
