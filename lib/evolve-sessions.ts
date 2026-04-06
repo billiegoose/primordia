@@ -574,6 +574,10 @@ export async function startLocalEvolve(
           session.devServerStatus = 'running';
           void persist();
           resolve();
+        } else if (session.devServerStatus === 'running') {
+          // Keep persisting dev server output after ready so it's visible in the
+          // session log and can help debug issues (e.g. git/request errors).
+          void persist();
         }
       };
 
@@ -1004,6 +1008,10 @@ export async function restartDevServerInWorktree(
           session.devServerStatus = 'running';
           void persist();
           resolve();
+        } else if (session.devServerStatus === 'running') {
+          // Keep persisting dev server output after ready so it's visible in the
+          // session log and can help debug issues (e.g. git/request errors).
+          void persist();
         }
       };
 
