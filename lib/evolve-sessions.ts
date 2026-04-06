@@ -152,7 +152,15 @@ function summarizeToolUse(
     case 'Glob':      return `Glob \`${pattern}\``;
     case 'Grep':      return `Grep \`${pattern}\``;
     case 'Bash':      return `Bash \`${command.replace(/\r?\n/g, ' ')}\``;
-    case 'TodoWrite': return `Update todo list`;
+    case 'TodoWrite': {
+      const todos = (input.todos as Array<{ content: string; status: string }> | undefined) ?? [];
+      if (!todos.length) return 'Update todo list';
+      const items = todos.map((t) => {
+        const icon = t.status === 'completed' ? '✅' : t.status === 'in_progress' ? '🔄' : '⬜';
+        return `${icon} ${t.content}`;
+      });
+      return `Updated todos: ${items.join(' · ')}`;
+    }
     case 'Agent':     return `Spawn sub-agent`;
     default:          return name;
   }
@@ -378,11 +386,17 @@ export async function startLocalEvolve(
       appendProgress(session, `- [x] Copied \`${dbName}\` (isolated data branch)\n`);
     }
 
-    // Step 4 — Symlink .env.local so the preview server has the same credentials
+    // Step 4 — Symlink .env.local so the preview server has the same credentials.
+    // Resolve any symlink chain on srcEnv before linking, so the session worktree
+    // points directly at the real file rather than through an intermediate symlink
+    // (e.g. current/.env.local → main/.env.local). Intermediate symlinks can be
+    // deleted when slots are cleaned up after an accept, which would leave a
+    // dangling chain.
     const srcEnv = path.join(repoRoot, '.env.local');
     const dstEnv = path.join(session.worktreePath, '.env.local');
     if (fs.existsSync(srcEnv) && !fs.existsSync(dstEnv)) {
-      fs.symlinkSync(srcEnv, dstEnv);
+      const resolvedEnv = fs.realpathSync(srcEnv);
+      fs.symlinkSync(resolvedEnv, dstEnv);
       appendProgress(session, `- [x] Symlinked \`.env.local\`\n`);
     }
 
@@ -585,6 +599,10 @@ export async function startLocalEvolve(
           session.devServerStatus = 'running';
           void persist();
           resolve();
+        } else if (session.devServerStatus === 'running') {
+          // Keep persisting dev server output after ready so it's visible in the
+          // session log and can help debug issues (e.g. git/request errors).
+          void persist();
         }
       };
 
@@ -1015,6 +1033,10 @@ export async function restartDevServerInWorktree(
           session.devServerStatus = 'running';
           void persist();
           resolve();
+        } else if (session.devServerStatus === 'running') {
+          // Keep persisting dev server output after ready so it's visible in the
+          // session log and can help debug issues (e.g. git/request errors).
+          void persist();
         }
       };
 

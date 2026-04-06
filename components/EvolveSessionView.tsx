@@ -344,6 +344,10 @@ export default function EvolveSessionView({
   const abortControllerRef = useRef<AbortController | null>(null);
   /** Tracks how many characters of progressText the client has received, for SSE reconnection. */
   const progressLengthRef = useRef(initialProgressText.length);
+  /** Mirrors current status so the visibilitychange handler can read it without a stale closure. */
+  const statusRef = useRef(initialStatus);
+  /** Mirrors current devServerStatus for the same reason. */
+  const devServerStatusRef = useRef(initialDevServerStatus);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const followupTextareaRef = useRef<HTMLTextAreaElement>(null);
   const followupFileInputRef = useRef<HTMLInputElement>(null);
@@ -386,6 +390,31 @@ export default function EvolveSessionView({
       abortControllerRef.current?.abort();
     };
   }, []);
+
+  // Keep refs in sync so the visibilitychange handler always has the latest values.
+  useEffect(() => { statusRef.current = status; }, [status]);
+  useEffect(() => { devServerStatusRef.current = devServerStatus; }, [devServerStatus]);
+
+  // Reconnect / restart streaming when the tab regains focus, in case the
+  // browser paused the SSE connection while the tab was in the background.
+  useEffect(() => {
+    function onVisibilityChange() {
+      if (document.visibilityState !== "visible") return;
+      const s = statusRef.current;
+      const ds = devServerStatusRef.current;
+      const isTerminal =
+        s === "accepted" ||
+        s === "rejected" ||
+        (s === "ready" &&
+          (ds === "running" || ds === "disconnected" || ds === "none"));
+      if (!isTerminal) {
+        void startStreaming();
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]); // startStreaming only uses sessionId + stable refs/setters
 
   // Extracted streaming logic — can be called on mount and after follow-up / restart.
   async function startStreaming() {
@@ -1059,28 +1088,6 @@ export default function EvolveSessionView({
             </div>
           )}
 
-        </div>
-      )}
-
-      {/* Disconnected notice — restart action hidden for non-evolvers */}
-      {devServerStatus === "disconnected" && status !== "accepted" && status !== "accepting" && status !== "rejected" && (
-        <div className="mb-6 px-4 py-4 rounded-lg bg-yellow-900/40 border border-yellow-700/50 text-sm">
-          <p className="text-yellow-300 mb-3">
-            ⚠️ The preview server disconnected unexpectedly. The branch still exists.
-          </p>
-          {canEvolve && restartError && (
-            <p className="text-red-400 text-xs mb-2">{restartError}</p>
-          )}
-          {canEvolve && (
-            <button
-              type="button"
-              onClick={handleRestartServer}
-              disabled={isRestartingServer}
-              className="px-4 py-2 rounded-lg bg-yellow-700 hover:bg-yellow-600 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium transition-colors"
-            >
-              {isRestartingServer ? "Restarting…" : "↺ Restart preview"}
-            </button>
-          )}
         </div>
       )}
 
