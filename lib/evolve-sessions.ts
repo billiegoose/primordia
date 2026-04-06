@@ -361,18 +361,23 @@ export async function startLocalEvolve(
     const srcDb = path.join(repoRoot, dbName);
     const dstDb = path.join(session.worktreePath, dbName);
     if (fs.existsSync(srcDb) && !fs.existsSync(dstDb)) {
-      fs.copyFileSync(srcDb, dstDb);
-      // Do NOT copy the -wal and -shm files. WAL files from an active database
-      // can cause "Compaction failed: Another write batch already active" errors
-      // when bun:sqlite tries to checkpoint on close(). The main .db file is
-      // always a consistent committed snapshot in WAL mode.
-
-      // Delete this session from the copied DB so the child worktree doesn't
-      // start with an incomplete in-progress session visible in its history.
-      // The copy was taken mid-session (after "creating worktree" and "bun install"
-      // were already logged), so the row is confusing noise in the child instance.
+      // Use VACUUM INTO to create a clean, consistent snapshot of the live DB.
+      // This is safe while the source is actively written to — it incorporates
+      // any pending WAL data and produces a WAL-free destination file, so the
+      // child worktree never sees a partial or corrupted database.
       try {
         const { Database } = await import('bun:sqlite');
+        const srcDbHandle = new Database(srcDb);
+        try {
+          srcDbHandle.prepare('VACUUM INTO ?').run(dstDb);
+        } finally {
+          srcDbHandle.close();
+        }
+
+        // Delete this session from the copied DB so the child worktree doesn't
+        // start with an incomplete in-progress session visible in its history.
+        // The copy was taken mid-session (after "creating worktree" and "bun install"
+        // were already logged), so the row is confusing noise in the child instance.
         const childDb = new Database(dstDb);
         childDb.prepare('DELETE FROM evolve_sessions WHERE id = ?').run(session.id);
         childDb.close();
