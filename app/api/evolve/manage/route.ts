@@ -369,8 +369,18 @@ function scheduleSlotActivation(
       });
     } catch { /* best-effort */ }
 
-    // Give the proxy ~500 ms to pick up the new config, then kill the old server.
-    setTimeout(() => {
+    // Explicitly tell the proxy to re-read PROD and branch ports right now via
+    // HTTP. This is more reliable than relying solely on fs.watch, which can
+    // miss inotify events on Linux. After confirming the proxy has refreshed,
+    // give it 200 ms to update its upstream and then kill the old server.
+    void (async () => {
+      try {
+        await fetch(`http://127.0.0.1:${process.env.REVERSE_PROXY_PORT}/_proxy/refresh`, {
+          method: 'POST',
+          signal: AbortSignal.timeout(2_000),
+        });
+      } catch { /* proxy may not be running; 5-second poll will catch it */ }
+      await new Promise<void>((resolve) => setTimeout(resolve, 200));
       if (oldUpstreamPort !== null) {
         try {
           const pids = execSync(`lsof -ti tcp:${oldUpstreamPort}`, { encoding: 'utf8' })
@@ -380,7 +390,7 @@ function scheduleSlotActivation(
           }
         } catch { /* no process on that port */ }
       }
-    }, 500);
+    })();
   } else {
     // Fallback: restart the proxy (brief downtime window; proxy will start new prod server).
     setTimeout(() => {
