@@ -1,4 +1,4 @@
-# Replace `current` symlink HEAD detection with PROD symbolic-ref for proxy routing
+# Remove `current` symlink; install proxy at stable location; use PROD symbolic-ref for routing
 
 ## What changed
 
@@ -40,8 +40,23 @@ The reverse proxy now watches both `.git/config` (existing) and `.git/PROD` (new
 #### 7. Deep rollback admin page (`/admin/rollback`)
 Since the PROD symbolic-ref has a git reflog and old worktrees are no longer deleted, the system now supports rolling back to any past production slot:
 - `GET /api/admin/rollback` reads the PROD reflog (ordered newest-first), matches each historical commit hash against registered git worktrees, and returns the ordered list of available rollback targets.
-- `POST /api/admin/rollback { worktreePath }` starts the target slot's server on a free port, health-checks it, atomically swaps the `current` symlink, updates `PROD`, and gracefully kills the old server — the same zero-downtime path as the forward blue/green accept.
+- `POST /api/admin/rollback { worktreePath }` starts the target slot's server on a free port, health-checks it, updates the slot tracker, updates `PROD`, and gracefully kills the old server — the same zero-downtime path as the forward blue/green accept.
 - `/admin/rollback` is a new admin page (with its own tab in the admin subnav) that displays the current production branch and all previous slots as a list with "Roll back" buttons.
+
+#### 8. Remove `current`/`previous` symlinks; install proxy at a stable location
+The `primordia-worktrees/current` and `primordia-worktrees/previous` symlinks are fully removed:
+
+**Proxy installed at `~/primordia-proxy.ts`**: `install-service.sh` now copies `scripts/reverse-proxy.ts` to `$HOME/primordia-proxy.ts` on every run. The `primordia-proxy.service` systemd unit references this stable absolute path directly (`ExecStart=/home/exedev/.bun/bin/bun /home/exedev/primordia-proxy.ts`), so the service file needs no symlink resolution or `bun run proxy` indirection.
+
+**Proxy uses the main repo as its stable git working directory**: The proxy no longer follows `current` to find the git config. It uses `$PRIMORDIA_WORKTREES_DIR/main` as a fixed cwd for all git commands (`git config`, `git symbolic-ref PROD`). Both `primordia-proxy.service` and `primordia.service` use `WorkingDirectory=/home/exedev/primordia-worktrees/main` and `EnvironmentFile=/home/exedev/primordia-worktrees/main/.env.local` as stable baselines.
+
+**Systemd drop-in tracks the current production slot**: Instead of the `current` symlink driving `WorkingDirectory` for the app service, `install-service.sh` writes a drop-in at `/etc/systemd/system/primordia.service.d/prod-slot.conf` with the actual prod worktree path. This is updated on every accept and rollback via a new argument: `bash scripts/install-service.sh /path/to/new/worktree`. A `systemctl daemon-reload` is issued so failure-recovery restarts pick up the new path immediately; no service restart is needed (the proxy handles live traffic via PROD ref).
+
+**Git config slot tracker**: The `current`/`previous` symlink swap is replaced by two git config entries — `primordia.current-slot` and `primordia.previous-slot` — written on each accept and rollback. All routes that previously read symlinks (`/api/rollback`, `/api/admin/rollback`) now read these git config entries instead. `install-service.sh` initialises `primordia.current-slot` to the main repo on first install.
+
+**Accept-into-prod calls `install-service.sh`**: The blue/green accept path (`blueGreenAccept` in `manage/route.ts`) now calls `install-service.sh <new-worktree>` after updating the slot tracker in git config. This keeps the systemd drop-in in sync with every production promotion without requiring a separate manual step.
 
 ## Why
 The `current` symlink approach had a fundamental flaw: git considers the symlink a separate entity from the worktree it points to, so `git symbolic-ref HEAD` inside `current` always returned nothing (detached). The PROD symbolic-ref lives in the shared `.git` directory and is visible from any worktree in the repo, making it the correct tool for tracking which branch is production. A natural consequence is that the git reflog for PROD provides a complete, ordered history of every production deployment — making it the ideal source of truth for rollback targets without any additional bookkeeping.
+
+Removing `current` entirely eliminates a second source of confusion: the symlink was distinct from the worktree it pointed to in git's eyes, making git operations on `current` unreliable. Replacing it with plain git config entries and a stable proxy install path gives systemd simple, static paths to work with — no symlink chasing at startup.

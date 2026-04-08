@@ -3,7 +3,7 @@
 //
 // Listens on REVERSE_PROXY_PORT (default 3000) and forwards all traffic to
 // the upstream port stored in git config as branch.{currentBranch}.port for
-// the branch checked out in the primordia-worktrees/current slot.
+// the branch pointed to by the PROD symbolic-ref in git.
 //
 // Preview server routing: requests to /preview/{sessionId}/... are routed to
 // the port associated with that session. The mapping is derived from git config:
@@ -54,7 +54,8 @@ function forwardHeaders(
 const LISTEN_PORT = parseInt(process.env.REVERSE_PROXY_PORT ?? '3000', 10);
 const WORKTREES_DIR =
   process.env.PRIMORDIA_WORKTREES_DIR ?? '/home/exedev/primordia-worktrees';
-const CURRENT_SYMLINK = path.join(WORKTREES_DIR, 'current');
+/** Stable path to the main git repo — used as cwd for all git commands. */
+const MAIN_REPO = path.join(WORKTREES_DIR, 'main');
 
 let upstreamPort = 3001;
 /** Cache of session ID → port for fast preview lookups. */
@@ -63,15 +64,6 @@ let sessionPortCache: Record<string, number> = {};
 let watchedConfigPath: string | null = null;
 /** Path to the .git/PROD symbolic-ref file being watched. */
 let watchedProdPath: string | null = null;
-
-/** Returns the resolved path of the current production worktree. */
-function getCurrentWorktreePath(): string | null {
-  try {
-    return fs.realpathSync(CURRENT_SYMLINK);
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Returns the path to the shared git config file for the repo.
@@ -95,12 +87,9 @@ function findGitConfigPath(cwd: string): string | null {
  * Also updates the upstream port based on the current branch.
  */
 function readAllPorts(): void {
-  const worktreePath = getCurrentWorktreePath();
-  if (!worktreePath) return;
-
   // Start watching the git config file if not already doing so.
   if (!watchedConfigPath) {
-    const cfgPath = findGitConfigPath(worktreePath);
+    const cfgPath = findGitConfigPath(MAIN_REPO);
     if (cfgPath) {
       watchedConfigPath = cfgPath;
       watchGitConfig(cfgPath);
@@ -113,7 +102,7 @@ function readAllPorts(): void {
   try {
     // Build branch → port map from git config.
     const portOut = execFileSync('git', ['config', '--get-regexp', 'branch\\..*\\.port'], {
-      cwd: worktreePath,
+      cwd: MAIN_REPO,
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -125,7 +114,7 @@ function readAllPorts(): void {
 
     // Build branch → sessionId map, then combine into sessionId → port.
     const sessionOut = execFileSync('git', ['config', '--get-regexp', 'branch\\..*\\.sessionid'], {
-      cwd: worktreePath,
+      cwd: MAIN_REPO,
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -149,7 +138,7 @@ function readAllPorts(): void {
   let prodBranch: string | null = null;
   try {
     const ref = execFileSync('git', ['symbolic-ref', '--short', 'PROD'], {
-      cwd: worktreePath,
+      cwd: MAIN_REPO,
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
@@ -160,7 +149,7 @@ function readAllPorts(): void {
   if (!prodBranch) {
     try {
       prodBranch = execFileSync('git', ['symbolic-ref', '--short', 'HEAD'], {
-        cwd: worktreePath,
+        cwd: MAIN_REPO,
         encoding: 'utf8',
         stdio: ['pipe', 'pipe', 'pipe'],
       }).trim() || null;

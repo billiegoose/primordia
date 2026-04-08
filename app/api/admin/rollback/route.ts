@@ -5,7 +5,7 @@
 // GET  — returns { currentBranch, targets[] } where targets are previous prod slots
 //        matched from the PROD symbolic-ref reflog against registered git worktrees.
 // POST — { worktreePath } starts a health-checked server in the target worktree,
-//        swaps the 'current' symlink, updates PROD, and gracefully kills the old server.
+//        updates git config slot tracker, updates PROD, and gracefully kills the old server.
 
 import { spawnSync, spawn, execSync } from 'child_process';
 import * as fs from 'fs';
@@ -40,15 +40,6 @@ function parseWorktreeList(output: string): WorktreeInfo[] {
   return worktrees;
 }
 
-function findCurrentSymlink(): string | null {
-  const candidate = path.join(path.dirname(process.cwd()), 'current');
-  try {
-    return fs.lstatSync(candidate).isSymbolicLink() ? candidate : null;
-  } catch {
-    return null;
-  }
-}
-
 function copyDb(srcDir: string, dstDir: string): void {
   const srcDb = path.join(srcDir, DB_NAME);
   if (!fs.existsSync(srcDb)) return;
@@ -81,11 +72,6 @@ export async function GET() {
   if (!user) return Response.json({ error: 'Authentication required' }, { status: 401 });
   if (!(await isAdmin(user.id))) return Response.json({ error: 'Admin required' }, { status: 403 });
 
-  const currentSymlink = findCurrentSymlink();
-  if (!currentSymlink) {
-    return Response.json({ currentBranch: null, targets: [] });
-  }
-
   const repoRoot = process.cwd();
 
   // Current PROD branch
@@ -115,11 +101,11 @@ export async function GET() {
     if (wt.head) hashToWorktree.set(wt.head, wt);
   }
 
-  // Current slot path
-  let currentPath: string | null = null;
-  try {
-    currentPath = path.resolve(fs.readlinkSync(currentSymlink));
-  } catch { /* not set up */ }
+  // Current slot path — stored in git config by install-service.sh and updated on each accept.
+  const currentSlotOut = spawnSync('git', ['config', '--get', 'primordia.current-slot'], {
+    cwd: repoRoot, encoding: 'utf8',
+  }).stdout.trim();
+  const currentPath = currentSlotOut ? path.resolve(currentSlotOut) : null;
 
   // Build targets from reflog entries after index 0, matched to existing worktrees
   const targets: Array<{ branch: string; worktreePath: string; reflogIndex: number }> = [];
@@ -153,11 +139,6 @@ export async function POST(req: Request) {
     return Response.json({ error: 'worktreePath is required' }, { status: 400 });
   }
 
-  const currentSymlink = findCurrentSymlink();
-  if (!currentSymlink) {
-    return Response.json({ error: 'Blue/green infrastructure not found.' }, { status: 400 });
-  }
-
   const repoRoot = process.cwd();
 
   // Security: verify the target is a registered git worktree
@@ -172,12 +153,13 @@ export async function POST(req: Request) {
   }
 
   const targetPath = targetWorktree.path;
-  let currentTarget: string;
-  try {
-    currentTarget = path.resolve(fs.readlinkSync(currentSymlink));
-  } catch {
-    return Response.json({ error: 'Could not read current slot.' }, { status: 500 });
+  const currentSlotOut = spawnSync('git', ['config', '--get', 'primordia.current-slot'], {
+    cwd: repoRoot, encoding: 'utf8',
+  }).stdout.trim();
+  if (!currentSlotOut) {
+    return Response.json({ error: 'Current production slot not found in git config.' }, { status: 400 });
   }
+  const currentTarget = path.resolve(currentSlotOut);
 
   if (targetPath === currentTarget) {
     return Response.json({ error: 'Target is already the current production slot.' }, { status: 400 });
@@ -242,16 +224,21 @@ export async function POST(req: Request) {
         return;
       }
 
-      // Swap 'current' → target
-      const tmpCurrent = currentSymlink + '.tmp';
-      fs.symlinkSync(targetPath, tmpCurrent);
-      fs.renameSync(tmpCurrent, currentSymlink);
+      // Update git config slot tracker (replaces the old current/previous symlinks).
+      spawnSync('git', ['config', 'primordia.previous-slot', currentTarget], { cwd: repoRoot });
+      spawnSync('git', ['config', 'primordia.current-slot', targetPath], { cwd: repoRoot });
 
-      // Update 'previous' → old current
-      const previousSymlink = path.join(path.dirname(currentSymlink), 'previous');
-      const tmpPrev = previousSymlink + '.tmp';
-      fs.symlinkSync(currentTarget, tmpPrev);
-      fs.renameSync(tmpPrev, previousSymlink);
+      // Update the systemd drop-in to the rolled-back slot.
+      const gitCommonResult = spawnSync('git', ['rev-parse', '--git-common-dir'], {
+        cwd: repoRoot, encoding: 'utf8',
+      });
+      const mainRepoRoot = gitCommonResult.status === 0
+        ? path.dirname(path.resolve(repoRoot, gitCommonResult.stdout.trim()))
+        : path.dirname(repoRoot);
+      try {
+        const installScript = path.join(mainRepoRoot, 'scripts', 'install-service.sh');
+        spawnSync('bash', [installScript, targetPath], { stdio: 'ignore' });
+      } catch { /* best-effort */ }
 
       // Update PROD symbolic-ref and branch port → proxy picks up instantly
       try {
@@ -273,15 +260,20 @@ export async function POST(req: Request) {
       }, 500);
     })();
   } else {
-    // Brief-downtime path: swap symlinks then restart
-    const tmpCurrent = currentSymlink + '.tmp';
-    fs.symlinkSync(targetPath, tmpCurrent);
-    fs.renameSync(tmpCurrent, currentSymlink);
+    // Brief-downtime path: update slot tracker then restart.
+    spawnSync('git', ['config', 'primordia.previous-slot', currentTarget], { cwd: repoRoot });
+    spawnSync('git', ['config', 'primordia.current-slot', targetPath], { cwd: repoRoot });
 
-    const previousSymlink = path.join(path.dirname(currentSymlink), 'previous');
-    const tmpPrev = previousSymlink + '.tmp';
-    fs.symlinkSync(currentTarget, tmpPrev);
-    fs.renameSync(tmpPrev, previousSymlink);
+    const gitCommonResult2 = spawnSync('git', ['rev-parse', '--git-common-dir'], {
+      cwd: repoRoot, encoding: 'utf8',
+    });
+    const mainRepoRoot2 = gitCommonResult2.status === 0
+      ? path.dirname(path.resolve(repoRoot, gitCommonResult2.stdout.trim()))
+      : path.dirname(repoRoot);
+    try {
+      const installScript2 = path.join(mainRepoRoot2, 'scripts', 'install-service.sh');
+      spawnSync('bash', [installScript2, targetPath], { stdio: 'ignore' });
+    } catch { /* best-effort */ }
 
     setTimeout(() => {
       try { execSync('sudo systemctl restart primordia', { stdio: 'ignore' }); } catch {}
