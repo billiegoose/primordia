@@ -26,4 +26,8 @@ Note: HMR (hot module replacement) WebSocket connections are not proxied (route 
 
 ## Fix: Content-encoding error on preview load
 
-The proxy now strips the `Accept-Encoding` header before forwarding requests to the upstream dev server. Previously, the browser's `Accept-Encoding: gzip, br` was forwarded verbatim, causing the upstream to compress its response. Bun's `fetch()` transparently decompresses the response body but still passes the `Content-Encoding` header through, so the browser received a decoded body labelled as encoded — triggering a content encoding error. Stripping `Accept-Encoding` from the forwarded request ensures the upstream always returns uncompressed content.
+The proxy strips `Content-Encoding` and `Transfer-Encoding` from upstream response headers before forwarding them to the browser.
+
+Root cause: Bun's `fetch()` automatically adds `Accept-Encoding: gzip` to all outgoing requests regardless of what headers are passed, causing the upstream Next.js dev server to respond with a compressed body. Bun then transparently decompresses the body — but still passes the original `Content-Encoding: gzip` header through to the caller. When the proxy forwarded this header, the browser tried to decompress an already-decoded body and threw a content encoding error.
+
+Stripping `Content-Encoding` and `Transfer-Encoding` from the upstream response headers ensures the browser treats the (already decoded by Bun) body correctly.

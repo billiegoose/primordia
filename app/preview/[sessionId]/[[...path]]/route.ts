@@ -60,10 +60,19 @@ async function proxy(
     return new Response('Preview server unreachable.', { status: 502 });
   }
 
+  // Strip content-encoding and transfer-encoding from the upstream response.
+  // Bun's fetch() transparently decompresses gzip/br/deflate responses and
+  // unchunks transfer-encoded bodies, but still passes the original headers
+  // through. If we forward them, the browser tries to decode an already-decoded
+  // body and throws a content encoding error.
+  const responseHeaders = new Headers(upstream.headers);
+  responseHeaders.delete('content-encoding');
+  responseHeaders.delete('transfer-encoding');
+
   return new Response(upstream.body, {
     status: upstream.status,
     statusText: upstream.statusText,
-    headers: new Headers(upstream.headers),
+    headers: responseHeaders,
   });
 }
 
