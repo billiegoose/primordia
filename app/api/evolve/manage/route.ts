@@ -14,7 +14,7 @@
 //              3. Start new prod server on branch's pre-assigned port (git config); health-check it
 //              4. Copy production DB into new slot (VACUUM INTO — atomic snapshot)
 //              5. Atomically swap the 'current' symlink to the session worktree
-//              6. Retire old slot as 'previous'; remove slot from two accepts ago + its session branch
+//              6. Retire old slot as 'previous' (kept indefinitely for deep rollback via /admin/rollback)
 //              7. Session worktree stays checked out on the session branch; old slot keeps its branch
 //              8. Persist "accepted" status + final progress log to DB
 //              9. Final VACUUM INTO new slot DB (captures complete accepted state)
@@ -299,41 +299,14 @@ async function blueGreenAccept(
   fs.symlinkSync(path.resolve(worktreePath), tmpLink);
   fs.renameSync(tmpLink, currentSymlink);
 
-  // Step 6: Preserve the old slot as 'previous' for fast rollback, and clean up
-  // whatever was 'previous' before (two accepts ago).
+  // Step 6: Move 'previous' to point at the slot we just retired.
+  // Old slots are kept indefinitely to support deep rollback via /admin/rollback.
   const previousSymlink = path.join(path.dirname(currentSymlink), 'previous');
-
-  // Read the slot that was 'previous' before this accept so we can remove it.
-  let veryOldSlot: string | null = null;
-  try {
-    const prevTarget = fs.readlinkSync(previousSymlink);
-    veryOldSlot = path.resolve(prevTarget);
-  } catch { /* no previous slot yet — first or second accept */ }
-
-  // Atomically move 'previous' to point at the slot we just retired.
   const tmpPrev = previousSymlink + '.tmp';
   if (oldSlot !== mainRepoRoot) {
-    // Only create a 'previous' symlink when the old slot is a worktree (not main).
-    // If old slot IS the main repo it will stick around forever anyway.
+    // Only update 'previous' when the old slot is a worktree (not main).
     fs.symlinkSync(oldSlot, tmpPrev);
     fs.renameSync(tmpPrev, previousSymlink);
-  }
-
-  // Remove the slot that was 'previous' before this accept (two accepts ago),
-  // unless it is the main git repository, which must never be removed.
-  if (veryOldSlot && veryOldSlot !== mainRepoRoot) {
-    // Read the session branch checked out there before removing the worktree.
-    let veryOldBranch: string | null = null;
-    const veryOldBranchRes = await runGit(['symbolic-ref', '--short', 'HEAD'], veryOldSlot);
-    if (veryOldBranchRes.code === 0) veryOldBranch = veryOldBranchRes.stdout.trim() || null;
-
-    await runGit(['worktree', 'remove', '--force', veryOldSlot], repoRoot);
-
-    // Clean up the retired session branch and its git config section.
-    if (veryOldBranch) {
-      await runGit(['branch', '-D', veryOldBranch], repoRoot);
-      await runGit(['config', '--remove-section', `branch.${veryOldBranch}`], repoRoot);
-    }
   }
 
   // The session worktree remains checked out on the session branch (now fast-

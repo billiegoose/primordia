@@ -17,8 +17,8 @@ Instead of detaching HEAD and deleting the session branch, the blue/green accept
 - Keeps the session branch alive — the new production worktree stays checked out on it.
 - Leaves the old production worktree on whatever branch it had before (no detach needed since both slots are on distinct branches).
 
-#### 2. Clean up retired branches on the two-accepts-ago slot
-When the very-old slot (two accepts ago) is removed, its session branch ref and git config section are now also deleted.
+#### 2. Keep all old production slots for deep rollback
+Old production slots are **no longer deleted** after two accepts. They accumulate indefinitely as registered git worktrees, which enables rolling back to any past production state. The veryOldSlot cleanup code has been removed from the blue/green accept path.
 
 #### 3. PROD symbolic-ref as the authoritative production pointer
 A new git symbolic-ref called `PROD` (`refs/heads/{session-branch}`) is written after each successful accept and rollback. The reverse proxy now reads `git symbolic-ref --short PROD` to determine which branch is production, then looks up `branch.{name}.port` in git config. This:
@@ -37,5 +37,11 @@ The reverse proxy now watches both `.git/config` (existing) and `.git/PROD` (new
 - Rollback now reads the old production port from `PROD` (with fallback to HEAD for pre-PROD deployments) rather than the post-swap `current` slot (which was reading the wrong slot's port).
 - After a successful rollback, `PROD` is updated to point to the rolled-back slot's branch.
 
+#### 7. Deep rollback admin page (`/admin/rollback`)
+Since the PROD symbolic-ref has a git reflog and old worktrees are no longer deleted, the system now supports rolling back to any past production slot:
+- `GET /api/admin/rollback` reads the PROD reflog (ordered newest-first), matches each historical commit hash against registered git worktrees, and returns the ordered list of available rollback targets.
+- `POST /api/admin/rollback { worktreePath }` starts the target slot's server on a free port, health-checks it, atomically swaps the `current` symlink, updates `PROD`, and gracefully kills the old server — the same zero-downtime path as the forward blue/green accept.
+- `/admin/rollback` is a new admin page (with its own tab in the admin subnav) that displays the current production branch and all previous slots as a list with "Roll back" buttons.
+
 ## Why
-The `current` symlink approach had a fundamental flaw: git considers the symlink a separate entity from the worktree it points to, so `git symbolic-ref HEAD` inside `current` always returned nothing (detached). The PROD symbolic-ref lives in the shared `.git` directory and is visible from any worktree in the repo, making it the correct tool for tracking which branch is production.
+The `current` symlink approach had a fundamental flaw: git considers the symlink a separate entity from the worktree it points to, so `git symbolic-ref HEAD` inside `current` always returned nothing (detached). The PROD symbolic-ref lives in the shared `.git` directory and is visible from any worktree in the repo, making it the correct tool for tracking which branch is production. A natural consequence is that the git reflog for PROD provides a complete, ordered history of every production deployment — making it the ideal source of truth for rollback targets without any additional bookkeeping.
