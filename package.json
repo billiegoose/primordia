@@ -4,7 +4,7 @@
   "private": true,
   "packageManager": "bun@1.2.0",
   "scripts": {
-    "dev": "bun run --bun next dev --turbopack",
+    "dev": "bun server.ts",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",

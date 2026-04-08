@@ -22,7 +22,17 @@ By proxying through the main server:
 - All cookies from the main app are sent transparently with every proxied request.
 - The preview server's `NEXT_BASE_PATH` matches its proxied path, so all internal Next.js links, API calls, and client-side fetches work correctly within the preview.
 
-Note: HMR (hot module replacement) WebSocket connections are not proxied (route handlers cannot upgrade WebSocket connections). This is acceptable since previews are for reviewing changes, not live development.
+## Fix: Preview page loads but buttons are unresponsive
+
+Added a custom Next.js dev server (`server.ts`) that proxies WebSocket upgrade requests for preview sessions, replacing the simple `next dev --turbopack` CLI invocation.
+
+**Root cause:** Next.js route handlers are HTTP-only — they cannot upgrade a connection to WebSocket. The HMR client injected by Next.js dev mode tries to open a WebSocket at `ws://{host}/preview/{sessionId}/_next/webpack-hmr`. With the HTTP-only proxy, this upgrade request failed silently. In Next.js dev mode, a failed HMR WebSocket connection prevents React from fully hydrating client components, so interactive elements (buttons, forms, etc.) had no event handlers attached.
+
+**Fix:** `server.ts` is a custom HTTP server that wraps Next.js. It attaches an `upgrade` event listener and inspects each WebSocket upgrade request:
+- If the URL starts with `/preview/{sessionId}/`, it looks up the session's port from the database and pipes the WebSocket tunnel directly to the preview dev server via a raw TCP connection (`net.connect`). No WebSocket framing is parsed — both sockets are piped bidirectionally as a transparent tunnel.
+- All other upgrade requests (including the main app's own HMR) are forwarded to Next.js's built-in `getUpgradeHandler()`.
+
+The `dev` script in `package.json` now runs `bun server.ts` instead of `bun run --bun next dev --turbopack`. Turbopack is still requested via `{ turbopack: true }` in the `next()` constructor call. Production (`next build` / `next start`) is unaffected.
 
 ## Fix: Content-encoding error on preview load
 
