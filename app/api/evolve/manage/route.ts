@@ -13,8 +13,8 @@
 //                 the session branch ref to the same merge commit (no working-tree writes)
 //              3. Start new prod server on branch's pre-assigned port (git config); health-check it
 //              4. Copy production DB into new slot (VACUUM INTO — atomic snapshot)
-//              5. Update git config slot tracker; run install-service.sh (daemon-reload)
-//              6. Retire old slot as 'previous' (kept indefinitely for deep rollback via /admin/rollback)
+//              5. Set PROD symbolic-ref → session branch; proxy switches instantly
+//              6. Old slot kept indefinitely as registered git worktree (enables deep rollback via /admin/rollback)
 //              7. Session worktree stays checked out on the session branch; old slot keeps its branch
 //              8. Persist "accepted" status + final progress log to DB
 //              9. Final VACUUM INTO new slot DB (captures complete accepted state)
@@ -173,19 +173,33 @@ async function blueGreenAccept(
     ? path.dirname(path.resolve(worktreePath, gitCommonResult.stdout.trim()))
     : path.resolve(repoRoot); // fallback: assume repoRoot is the main repo
 
-  // Read the current prod slot from git config (written by install-service.sh
-  // and updated on each accept). Falls back to the main repo on the very first accept.
-  let oldSlot: string;
+  // Find the current production slot via the PROD symbolic-ref.
+  // Falls back to the main repo on the very first accept (before PROD is set).
+  let oldSlot: string = mainRepoRoot;
   try {
-    const slotOut = execFileSync('git', ['config', '--get', 'primordia.current-slot'], {
+    const prodBranch = execFileSync('git', ['symbolic-ref', '--short', 'PROD'], {
       cwd: repoRoot,
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
-    oldSlot = path.resolve(slotOut);
+    if (prodBranch) {
+      const wtOut = execFileSync('git', ['worktree', 'list', '--porcelain'], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      let curPath: string | undefined;
+      let curBranch: string | null = null;
+      for (const line of wtOut.split('\n')) {
+        if (line.startsWith('worktree ')) { curPath = line.slice(9); curBranch = null; }
+        else if (line.startsWith('branch ')) { curBranch = line.slice(7).replace('refs/heads/', ''); }
+        else if (line === '' && curPath && curBranch === prodBranch) { oldSlot = curPath; break; }
+      }
+      // Handle last entry (no trailing blank line)
+      if (oldSlot === mainRepoRoot && curPath && curBranch === prodBranch) oldSlot = curPath;
+    }
   } catch {
-    // First accept before git config entry is set: old slot is the main repo.
-    oldSlot = mainRepoRoot;
+    // PROD not yet set — fall through to mainRepoRoot default
   }
 
   // Step 1: ensure node_modules are up to date in the session worktree.
@@ -301,36 +315,7 @@ async function blueGreenAccept(
     fs.symlinkSync(mainEnvPath, worktreeEnvPath);
   }
 
-  // Step 5: Update the production slot tracker in git config and update the
-  // systemd service drop-in to point to the new production worktree.
-  // The PROD symbolic-ref (updated in scheduleSlotActivation) and this git
-  // config entry together replace the old 'current'/'previous' symlinks.
   await onStep('- Activating new slot…\n');
-  try {
-    if (oldSlot !== mainRepoRoot) {
-      execFileSync('git', ['config', 'primordia.previous-slot', oldSlot], {
-        cwd: repoRoot,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-    }
-    execFileSync('git', ['config', 'primordia.current-slot', path.resolve(worktreePath)], {
-      cwd: repoRoot,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-  } catch { /* best-effort */ }
-
-  // Run install-service.sh to update the systemd drop-in with the new prod
-  // worktree path. This ensures that if the app server fails and systemd
-  // restarts it, it starts from the correct worktree. The proxy handles the
-  // live traffic cutover via PROD symbolic-ref; this is a safety-net update.
-  try {
-    const installScript = path.join(mainRepoRoot, 'scripts', 'install-service.sh');
-    execFileSync('bash', [installScript, path.resolve(worktreePath)], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-  } catch (err) {
-    console.warn('[blueGreenAccept] install-service.sh failed (non-fatal):', String(err));
-  }
 
   // The session worktree remains checked out on the session branch (now fast-
   // forwarded to the merge commit). The old slot retains whatever branch it had
@@ -351,7 +336,7 @@ async function blueGreenAccept(
  * the session branch so the reverse proxy routes to the new server, then
  * gracefully kills the old server via lsof on its former port.
  *
- * Falls back to `sudo systemctl restart primordia` when the proxy is not
+ * Falls back to `sudo systemctl restart primordia-proxy` when the proxy is not
  * configured (e.g. initial setup or local dev accidentally running in
  * production mode).
  */
@@ -397,9 +382,9 @@ function scheduleSlotActivation(
       }
     }, 500);
   } else {
-    // Fallback: systemctl restart (brief downtime window).
+    // Fallback: restart the proxy (brief downtime window; proxy will start new prod server).
     setTimeout(() => {
-      try { execSync('sudo systemctl restart primordia', { stdio: 'ignore' }); } catch { /* best-effort */ }
+      try { execSync('sudo systemctl restart primordia-proxy', { stdio: 'ignore' }); } catch { /* best-effort */ }
     }, 500);
   }
 }

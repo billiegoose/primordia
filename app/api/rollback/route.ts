@@ -1,6 +1,6 @@
 // app/api/rollback/route.ts
-// Fast rollback for the blue/green deploy: swaps the production slot back to the
-// previous slot and zero-downtime-restarts via the reverse proxy. Admin-only.
+// Fast rollback for the blue/green deploy: swaps production back to the previous
+// slot (PROD@{1}) with zero downtime via the reverse proxy. Admin-only.
 //
 // GET  — returns { hasPrevious: boolean } so the UI can show/hide the rollback option.
 // POST — performs the rollback; returns { outcome: 'rolled-back' } or { error }.
@@ -8,10 +8,35 @@
 import { execSync, spawn, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as net from 'net';
 import { Database } from 'bun:sqlite';
 import { getSessionUser, isAdmin } from '../../../lib/auth';
 
 const DB_NAME = '.primordia-auth.db';
+
+interface WorktreeInfo {
+  path: string;
+  head: string;
+  branch: string | null;
+}
+
+function parseWorktreeList(output: string): WorktreeInfo[] {
+  const worktrees: WorktreeInfo[] = [];
+  let current: Partial<WorktreeInfo> = {};
+  for (const line of output.split('\n')) {
+    if (line.startsWith('worktree ')) {
+      if (current.path) worktrees.push({ branch: null, head: '', ...current } as WorktreeInfo);
+      current = { path: line.slice('worktree '.length), head: '', branch: null };
+    } else if (line.startsWith('HEAD ')) {
+      current.head = line.slice('HEAD '.length);
+    } else if (line.startsWith('branch ')) {
+      current.branch = line.slice('branch '.length).replace('refs/heads/', '');
+    }
+    // 'detached' line: branch stays null
+  }
+  if (current.path) worktrees.push({ branch: null, head: '', ...current } as WorktreeInfo);
+  return worktrees;
+}
 
 /**
  * Creates a consistent point-in-time snapshot of the SQLite DB using
@@ -33,17 +58,53 @@ function copyDb(srcDir: string, dstDir: string): void {
   }
 }
 
+function findCurrentAndPrevious(repoRoot: string): {
+  currentTarget: string;
+  previousTarget: string;
+  previousBranch: string;
+  prodBranch: string;
+} | { error: string } {
+  // Current prod branch from PROD symbolic-ref.
+  const prodBranch = spawnSync('git', ['symbolic-ref', '--short', 'PROD'], {
+    cwd: repoRoot, encoding: 'utf8',
+  }).stdout.trim();
+  if (!prodBranch) return { error: 'PROD symbolic-ref is not set.' };
+
+  // Previous production commit from PROD@{1}.
+  const prevCommit = spawnSync('git', ['rev-parse', 'PROD@{1}'], {
+    cwd: repoRoot, encoding: 'utf8',
+  }).stdout.trim();
+  if (!prevCommit) return { error: 'No previous slot in PROD reflog (PROD@{1} does not exist).' };
+
+  const worktrees = parseWorktreeList(
+    spawnSync('git', ['worktree', 'list', '--porcelain'], { cwd: repoRoot, encoding: 'utf8' }).stdout,
+  );
+
+  const currentWorktree = worktrees.find(wt => wt.branch === prodBranch);
+  if (!currentWorktree) return { error: `No worktree found for production branch '${prodBranch}'.` };
+
+  const previousWorktree = worktrees.find(
+    wt => wt.head === prevCommit && wt.path !== currentWorktree.path,
+  );
+  if (!previousWorktree?.branch) {
+    return { error: 'No worktree found for previous production slot (may have been pruned).' };
+  }
+
+  return {
+    currentTarget: currentWorktree.path,
+    previousTarget: previousWorktree.path,
+    previousBranch: previousWorktree.branch,
+    prodBranch,
+  };
+}
+
 export async function GET() {
   const user = await getSessionUser();
   if (!user) return Response.json({ error: 'Authentication required' }, { status: 401 });
   if (!(await isAdmin(user.id))) return Response.json({ error: 'Admin required' }, { status: 403 });
 
-  const previousSlot = spawnSync('git', ['config', '--get', 'primordia.previous-slot'], {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-  }).stdout.trim();
-
-  const hasPrevious = !!previousSlot && fs.existsSync(previousSlot);
+  const result = findCurrentAndPrevious(process.cwd());
+  const hasPrevious = !('error' in result);
   return Response.json({ hasPrevious });
 }
 
@@ -52,26 +113,12 @@ export async function POST() {
   if (!user) return Response.json({ error: 'Authentication required' }, { status: 401 });
   if (!(await isAdmin(user.id))) return Response.json({ error: 'Admin required' }, { status: 403 });
 
-  const currentSlot = spawnSync('git', ['config', '--get', 'primordia.current-slot'], {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-  }).stdout.trim();
-
-  const previousSlot = spawnSync('git', ['config', '--get', 'primordia.previous-slot'], {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-  }).stdout.trim();
-
-  if (!previousSlot || !fs.existsSync(previousSlot)) {
-    return Response.json({ error: 'No previous slot available for rollback.' }, { status: 400 });
+  const repoRoot = process.cwd();
+  const slots = findCurrentAndPrevious(repoRoot);
+  if ('error' in slots) {
+    return Response.json({ error: slots.error }, { status: 400 });
   }
-
-  if (!currentSlot) {
-    return Response.json({ error: 'Current production slot not found in git config.' }, { status: 400 });
-  }
-
-  const currentTarget = path.resolve(currentSlot);
-  const previousTarget = path.resolve(previousSlot);
+  const { currentTarget, previousTarget, previousBranch, prodBranch } = slots;
 
   // Copy the production DB from the current slot into the previous slot so auth
   // data and user sessions are preserved after rolling back.
@@ -81,29 +128,20 @@ export async function POST() {
     // Non-fatal: proceed with the rollback even if the DB copy fails.
   }
 
-  // Swap slot tracker entries in git config.
-  spawnSync('git', ['config', 'primordia.current-slot', previousTarget], { cwd: process.cwd() });
-  spawnSync('git', ['config', 'primordia.previous-slot', currentTarget], { cwd: process.cwd() });
-
-  // Both slots remain on their own session branches after the swap —
-  // no HEAD-reattachment needed. The proxy is updated via PROD symbolic-ref below.
-
-  // Compute the main repo root for install-service.sh path.
-  const gitCommonResult = spawnSync('git', ['rev-parse', '--git-common-dir'], {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-  });
-  const mainRepoRoot = gitCommonResult.status === 0
-    ? path.dirname(path.resolve(process.cwd(), gitCommonResult.stdout.trim()))
-    : path.dirname(process.cwd());
+  // Read the old upstream port (current production).
+  let oldUpstreamPort: number | null = null;
+  try {
+    const portOut = spawnSync('git', ['config', '--get', `branch.${prodBranch}.port`], {
+      cwd: repoRoot, encoding: 'utf8',
+    }).stdout.trim();
+    if (portOut) oldUpstreamPort = parseInt(portOut, 10);
+  } catch { /* best-effort */ }
 
   // Zero-downtime restart when the proxy is configured.
   const reverseProxyPort = process.env.REVERSE_PROXY_PORT;
   if (reverseProxyPort) {
     // Start the rolled-back slot on a free port, wait for health, then cut over.
     void (async () => {
-      const net = await import('net');
-
       const freePort: number = await new Promise((resolve, reject) => {
         const s = net.createServer();
         s.listen(0, '127.0.0.1', () => {
@@ -113,29 +151,6 @@ export async function POST() {
         });
         s.on('error', reject);
       });
-
-      // Read the old production port from PROD symbolic-ref (the slot we're
-      // rolling back away from). currentTarget is the OLD production slot.
-      let oldUpstreamPort: number | null = null;
-      try {
-        let prodBranch = spawnSync('git', ['symbolic-ref', '--short', 'PROD'], {
-          cwd: currentTarget,
-          encoding: 'utf8',
-        }).stdout.trim();
-        if (!prodBranch) {
-          prodBranch = spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], {
-            cwd: currentTarget,
-            encoding: 'utf8',
-          }).stdout.trim();
-        }
-        if (prodBranch) {
-          const portOut = spawnSync('git', ['config', '--get', `branch.${prodBranch}.port`], {
-            cwd: currentTarget,
-            encoding: 'utf8',
-          }).stdout.trim();
-          if (portOut) oldUpstreamPort = parseInt(portOut, 10);
-        }
-      } catch { /* best-effort */ }
 
       const newServer = spawn('bun', ['run', 'start'], {
         cwd: previousTarget,
@@ -161,33 +176,15 @@ export async function POST() {
       }
 
       if (!healthy) {
-        // Fall back to systemctl restart on health-check failure
+        // Fall back to proxy restart on health-check failure
         try { newServer.kill('SIGTERM'); } catch {}
-        try { execSync('sudo systemctl restart primordia', { stdio: 'ignore' }); } catch {}
+        try { execSync('sudo systemctl restart primordia-proxy', { stdio: 'ignore' }); } catch {}
         return;
       }
 
-      // Set PROD → rolled-back branch and update its port in git config.
-      // The port write touches .git/config and fires the proxy's fs.watch so
-      // it reads the updated PROD ref immediately.
-      const rolledBackBranch = spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], {
-        cwd: previousTarget,
-        encoding: 'utf8',
-      }).stdout.trim();
-      if (rolledBackBranch) {
-        spawnSync('git', ['symbolic-ref', 'PROD', `refs/heads/${rolledBackBranch}`], {
-          cwd: previousTarget,
-        });
-        spawnSync('git', ['config', `branch.${rolledBackBranch}.port`, String(freePort)], {
-          cwd: previousTarget,
-        });
-      }
-
-      // Update the systemd drop-in to the rolled-back slot.
-      try {
-        const installScript = path.join(mainRepoRoot, 'scripts', 'install-service.sh');
-        spawnSync('bash', [installScript, previousTarget], { stdio: 'ignore' });
-      } catch { /* best-effort */ }
+      // Update PROD → previous branch; touch port in git config to fire proxy's fs.watch.
+      spawnSync('git', ['symbolic-ref', 'PROD', `refs/heads/${previousBranch}`], { cwd: repoRoot });
+      spawnSync('git', ['config', `branch.${previousBranch}.port`, String(freePort)], { cwd: repoRoot });
 
       // Give the proxy ~500 ms to pick up the config, then kill the old server
       setTimeout(() => {
@@ -203,9 +200,10 @@ export async function POST() {
       }, 500);
     })();
   } else {
-    // Fallback: brief-downtime systemctl restart
+    // Fallback: update PROD then restart the proxy (brief downtime).
+    spawnSync('git', ['symbolic-ref', 'PROD', `refs/heads/${previousBranch}`], { cwd: repoRoot });
     setTimeout(() => {
-      try { execSync('sudo systemctl restart primordia', { stdio: 'ignore' }); } catch {}
+      try { execSync('sudo systemctl restart primordia-proxy', { stdio: 'ignore' }); } catch {}
     }, 500);
   }
 

@@ -26,7 +26,7 @@ The core idea: **the app becomes whatever its users need it to be**, with no cod
 | Styling | Tailwind CSS | AI models write Tailwind well; no CSS files to manage |
 | Language | TypeScript | Catches mistakes; Claude Code understands it well |
 | AI API | Anthropic SDK (`@anthropic-ai/sdk`) | Streaming chat via `claude-sonnet-4-6`; prefers exe.dev LLM gateway, falls back to `ANTHROPIC_API_KEY` |
-| Hosting | exe.dev | Production builds via `bun run build && bun run start`; systemd service; blue/green slot swap on accept |
+| Hosting | exe.dev | Production builds via `bun run build && bun run start`; single systemd service (`primordia-proxy`) manages both proxy and production app; blue/green slot swap on accept |
 | AI code gen | `@anthropic-ai/claude-agent-sdk` | `query()` runs Claude Code in git worktrees for evolve requests |
 | Database | bun:sqlite | Local SQLite for passkey auth **and evolve session persistence**; same adapter on exe.dev and local dev |
 
@@ -51,11 +51,11 @@ primordia/
 │
 ├── scripts/
 │   ├── deploy-to-exe-dev.sh      ← `bun run deploy-to-exe.dev <server>`: SSH deploy to <server>.exe.xyz
-│   ├── install-service.sh        ← Installs/re-installs the systemd services; copies reverse-proxy.ts to ~/primordia-proxy.ts; writes /etc/systemd/system/primordia.service.d/prod-slot.conf drop-in with the current prod worktree path; called by the accept-into-prod flow with the new worktree path to update the drop-in without a service restart
-│   ├── primordia.service         ← systemd service unit file; WorkingDirectory defaults to primordia-worktrees/main (overridden by the prod-slot.conf drop-in on each accept); reads PORT from git config (branch.{name}.port) at startup via HEAD
-│   ├── reverse-proxy.ts          ← HTTP reverse proxy for zero-downtime blue/green AND preview servers; listens on REVERSE_PROXY_PORT; reads production branch from git PROD symbolic-ref, then looks up branch.{name}.port; uses primordia-worktrees/main as stable git cwd (no symlink needed); watches both .git/config and .git/PROD for instant cutover; routes /preview/{sessionId} paths to session preview servers; installed to ~/primordia-proxy.ts by install-service.sh
+│   ├── install-service.sh        ← Installs/re-installs the proxy systemd service; copies reverse-proxy.ts to ~/primordia-proxy.ts; initialises PROD symbolic-ref on first install
+│   ├── reverse-proxy.ts          ← HTTP reverse proxy for zero-downtime blue/green AND preview servers; listens on REVERSE_PROXY_PORT; reads production branch from git PROD symbolic-ref, then looks up branch.{name}.port; discovers main repo from any worktree in PRIMORDIA_WORKTREES_DIR; on startup spawns the production Next.js server if not already running; watches both .git/config and .git/PROD for instant cutover; routes /preview/{sessionId} paths to session preview servers; installed to ~/primordia-proxy.ts by install-service.sh
 │   ├── assign-branch-ports.sh    ← Idempotent migration script: assigns ephemeral ports to all local branches in git config (branch.{name}.port); main gets 3001, others get 3002+
-│   └── primordia-proxy.service   ← systemd service unit for the reverse proxy; WorkingDirectory and ExecStart reference stable paths (primordia-worktrees/main and ~/primordia-proxy.ts); no symlink resolution needed
+│   ├── rollback.ts               ← Standalone CLI rollback script: updates PROD to previous slot (PROD@{1}) and restarts primordia-proxy; use when the server itself is broken and /api/rollback is unreachable
+│   └── primordia-proxy.service   ← systemd service unit for the reverse proxy; WorkingDirectory=/home/exedev/primordia; is the sole long-running service — responsible for starting the production Next.js server on boot and routing all traffic
 │
 ├── public/
 │   (no generated files)
@@ -231,8 +231,6 @@ User types change request on /evolve page
           → copy prod DB from old slot into new slot (preserves auth data)
           → fix .env.local symlink in new slot to point to main repo (prevents dangling link)
           → start new prod server on the branch's pre-assigned port (from git config); run health checks
-          → update git config: primordia.current-slot → session worktree; primordia.previous-slot → old slot
-          → run install-service.sh with new worktree path → updates /etc/systemd/system/primordia.service.d/prod-slot.conf + systemctl daemon-reload (no restart; proxy handles live traffic)
           → old slots accumulate indefinitely as registered git worktrees (enables deep rollback via /admin/rollback)
           → set git PROD symbolic-ref → session branch; touch git config → reverse proxy picks up new branch/port instantly via fs.watch
           → gracefully shutdown the old prod server (SIGTERM via lsof)

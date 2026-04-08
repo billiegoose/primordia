@@ -101,11 +101,13 @@ export async function GET() {
     if (wt.head) hashToWorktree.set(wt.head, wt);
   }
 
-  // Current slot path — stored in git config by install-service.sh and updated on each accept.
-  const currentSlotOut = spawnSync('git', ['config', '--get', 'primordia.current-slot'], {
-    cwd: repoRoot, encoding: 'utf8',
-  }).stdout.trim();
-  const currentPath = currentSlotOut ? path.resolve(currentSlotOut) : null;
+  // Current prod path — the worktree on the PROD branch.
+  const currentPath = (() => {
+    for (const wt of worktrees) {
+      if (wt.branch === currentBranch) return wt.path;
+    }
+    return null;
+  })();
 
   // Build targets from reflog entries after index 0, matched to existing worktrees
   const targets: Array<{ branch: string; worktreePath: string; reflogIndex: number }> = [];
@@ -153,13 +155,19 @@ export async function POST(req: Request) {
   }
 
   const targetPath = targetWorktree.path;
-  const currentSlotOut = spawnSync('git', ['config', '--get', 'primordia.current-slot'], {
+
+  // Current prod slot = worktree on the PROD branch.
+  const currentProdBranch = spawnSync('git', ['symbolic-ref', '--short', 'PROD'], {
     cwd: repoRoot, encoding: 'utf8',
   }).stdout.trim();
-  if (!currentSlotOut) {
-    return Response.json({ error: 'Current production slot not found in git config.' }, { status: 400 });
+  if (!currentProdBranch) {
+    return Response.json({ error: 'PROD symbolic-ref is not set.' }, { status: 400 });
   }
-  const currentTarget = path.resolve(currentSlotOut);
+  const currentProdWorktree = worktrees.find(wt => wt.branch === currentProdBranch);
+  if (!currentProdWorktree) {
+    return Response.json({ error: 'Current production worktree not found.' }, { status: 400 });
+  }
+  const currentTarget = currentProdWorktree.path;
 
   if (targetPath === currentTarget) {
     return Response.json({ error: 'Target is already the current production slot.' }, { status: 400 });
@@ -220,25 +228,9 @@ export async function POST(req: Request) {
 
       if (!healthy) {
         try { newServer.kill('SIGTERM'); } catch {}
-        try { execSync('sudo systemctl restart primordia', { stdio: 'ignore' }); } catch {}
+        try { execSync('sudo systemctl restart primordia-proxy', { stdio: 'ignore' }); } catch {}
         return;
       }
-
-      // Update git config slot tracker (replaces the old current/previous symlinks).
-      spawnSync('git', ['config', 'primordia.previous-slot', currentTarget], { cwd: repoRoot });
-      spawnSync('git', ['config', 'primordia.current-slot', targetPath], { cwd: repoRoot });
-
-      // Update the systemd drop-in to the rolled-back slot.
-      const gitCommonResult = spawnSync('git', ['rev-parse', '--git-common-dir'], {
-        cwd: repoRoot, encoding: 'utf8',
-      });
-      const mainRepoRoot = gitCommonResult.status === 0
-        ? path.dirname(path.resolve(repoRoot, gitCommonResult.stdout.trim()))
-        : path.dirname(repoRoot);
-      try {
-        const installScript = path.join(mainRepoRoot, 'scripts', 'install-service.sh');
-        spawnSync('bash', [installScript, targetPath], { stdio: 'ignore' });
-      } catch { /* best-effort */ }
 
       // Update PROD symbolic-ref and branch port → proxy picks up instantly
       try {
@@ -261,22 +253,9 @@ export async function POST(req: Request) {
     })();
   } else {
     // Brief-downtime path: update slot tracker then restart.
-    spawnSync('git', ['config', 'primordia.previous-slot', currentTarget], { cwd: repoRoot });
-    spawnSync('git', ['config', 'primordia.current-slot', targetPath], { cwd: repoRoot });
-
-    const gitCommonResult2 = spawnSync('git', ['rev-parse', '--git-common-dir'], {
-      cwd: repoRoot, encoding: 'utf8',
-    });
-    const mainRepoRoot2 = gitCommonResult2.status === 0
-      ? path.dirname(path.resolve(repoRoot, gitCommonResult2.stdout.trim()))
-      : path.dirname(repoRoot);
-    try {
-      const installScript2 = path.join(mainRepoRoot2, 'scripts', 'install-service.sh');
-      spawnSync('bash', [installScript2, targetPath], { stdio: 'ignore' });
-    } catch { /* best-effort */ }
-
+    spawnSync('git', ['symbolic-ref', 'PROD', `refs/heads/${targetWorktree.branch}`], { cwd: repoRoot });
     setTimeout(() => {
-      try { execSync('sudo systemctl restart primordia', { stdio: 'ignore' }); } catch {}
+      try { execSync('sudo systemctl restart primordia-proxy', { stdio: 'ignore' }); } catch {}
     }, 500);
   }
 
