@@ -1147,12 +1147,9 @@ export default function EvolveSessionView({
                       <>
                         Accepting will make{" "}
                         <code className="bg-gray-800 px-1 rounded">{sessionBranch}</code>{" "}
-                        the new live production instance. A merge commit will be created that
-                        advances both{" "}
+                        the new live production instance. No merge commit is created —{" "}
                         <code className="bg-gray-800 px-1 rounded">{branch ?? "main"}</code>{" "}
-                        and{" "}
-                        <code className="bg-gray-800 px-1 rounded">{sessionBranch}</code>{" "}
-                        to the same point. The{" "}
+                        stays at its current commit so the previous slot can be rolled back to. The{" "}
                         <code className="bg-gray-800 px-1 rounded">PROD</code>{" "}
                         symbolic-ref will switch to{" "}
                         <code className="bg-gray-800 px-1 rounded">refs/heads/{sessionBranch}</code>
