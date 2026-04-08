@@ -32,10 +32,16 @@ async function proxy(
   const { search } = new URL(request.url);
   const targetUrl = `http://localhost:${session.port}/preview/${sessionId}${pathSuffix}${search}`;
 
-  // Forward all headers except host (fetch sets it automatically for the target).
+  // Forward all headers except host and accept-encoding.
+  // Stripping accept-encoding prevents the upstream from compressing its response.
+  // If we forwarded it, the upstream would compress the body, but Bun's fetch()
+  // transparently decompresses it while still passing the Content-Encoding header
+  // through — the browser then tries to decompress an already-decoded body and
+  // throws a content encoding error.
   const headers = new Headers();
   for (const [key, value] of request.headers.entries()) {
-    if (key.toLowerCase() !== 'host') headers.append(key, value);
+    const lk = key.toLowerCase();
+    if (lk !== 'host' && lk !== 'accept-encoding') headers.append(key, value);
   }
 
   const isBodyMethod = request.method !== 'GET' && request.method !== 'HEAD';

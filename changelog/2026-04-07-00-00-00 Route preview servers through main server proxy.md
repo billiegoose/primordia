@@ -23,3 +23,7 @@ By proxying through the main server:
 - The preview server's `NEXT_BASE_PATH` matches its proxied path, so all internal Next.js links, API calls, and client-side fetches work correctly within the preview.
 
 Note: HMR (hot module replacement) WebSocket connections are not proxied (route handlers cannot upgrade WebSocket connections). This is acceptable since previews are for reviewing changes, not live development.
+
+## Fix: Content-encoding error on preview load
+
+The proxy now strips the `Accept-Encoding` header before forwarding requests to the upstream dev server. Previously, the browser's `Accept-Encoding: gzip, br` was forwarded verbatim, causing the upstream to compress its response. Bun's `fetch()` transparently decompresses the response body but still passes the `Content-Encoding` header through, so the browser received a decoded body labelled as encoded — triggering a content encoding error. Stripping `Accept-Encoding` from the forwarded request ensures the upstream always returns uncompressed content.
