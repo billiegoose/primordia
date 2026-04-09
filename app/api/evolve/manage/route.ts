@@ -13,15 +13,12 @@
 //                 parentBranch is NOT advanced (old slot stays at its original commit for rollback).
 //                 Sibling sessions whose git config parent = parentBranch are reparented to session
 //                 branch so "Apply Updates" picks up the new production code going forward.
-//              3. Start new prod server on branch's pre-assigned port (git config); health-check it
-//              4. Copy production DB into new slot (VACUUM INTO — atomic snapshot)
-//              5. Set primordia.productionBranch in git config → session branch; proxy switches instantly
-//              6. Old slot kept indefinitely as registered git worktree (enables deep rollback via /admin/rollback)
-//              7. Session worktree stays checked out on the session branch; old slot retains its branch
-//                 at the pre-accept commit — rollback can match it via primordia.productionHistory
-//              8. Persist "accepted" status + final progress log to DB
-//              9. Final VACUUM INTO new slot DB (captures complete accepted state)
-//             10. Set primordia.productionBranch in git config → session branch + touch port → proxy switches; SIGTERM old server
+//              3. Copy production DB into new slot (VACUUM INTO — atomic snapshot); fix .env.local symlink
+//              4. Persist "accepted" status + final progress log to DB
+//              5. Final VACUUM INTO new slot DB (captures complete accepted state)
+//              6. POST /_proxy/prod/spawn → proxy spawns new prod server, health-checks, sets
+//                 primordia.productionBranch in git config, switches traffic, SIGTERMs old server
+//              7. Old slot kept indefinitely as registered git worktree (enables deep rollback via /admin/rollback)
 //
 //            LEGACY (local dev, NODE_ENV !== 'production'):
 //              git checkout → stash → merge → stash-pop → bun install → worktree remove
@@ -145,7 +142,7 @@ function findFreePort(): Promise<number> {
 
 type BlueGreenAcceptResult =
   | { ok: false; error: string }
-  | { ok: true; branch: string; newProdPort: number | null; oldUpstreamPort: number | null };
+  | { ok: true; branch: string; newProdPort: number };
 
 /**
  * Blue/green accept path.
@@ -218,10 +215,7 @@ async function blueGreenAccept(
   // pull in the new production code going forward.
   reparentSiblings(repoRoot, parentBranch, branch);
 
-  // Step 4a: Start the new prod server on the branch's pre-assigned port.
-  // The preview dev server was already killed in the POST handler before
-  // runAcceptAsync was called, so this port is free by the time we reach here.
-  await onStep('- Health-checking new slot…\n');
+  // Read the branch's pre-assigned port from git config (assigned by assign-branch-ports.sh).
   let newProdPort: number;
   try {
     const portOut = execFileSync('git', ['config', '--get', `branch.${branch}.port`], {
@@ -235,65 +229,19 @@ async function blueGreenAccept(
     // Fallback: find a free port (e.g. migration script hasn't run yet)
     newProdPort = await findFreePort();
   }
-  const newServer = spawn('bun', ['run', 'start'], {
-    cwd: path.resolve(worktreePath),
-    env: { ...process.env, PORT: String(newProdPort), HOSTNAME: '0.0.0.0' },
-    stdio: 'ignore',
-    detached: true,
-  });
-  newServer.unref();
 
-  let spawnError: string | undefined;
-  let exitCode: number | null = null;
-  newServer.on('error', (err: Error) => { spawnError = err.message; });
-  newServer.on('exit', (code) => { exitCode = code ?? 1; });
-
-  let healthOk = false;
-  let healthError: string | undefined;
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    await new Promise(resolve => setTimeout(resolve, 1_000));
-    if (spawnError) { healthError = `Server process error: ${spawnError}`; break; }
-    if (exitCode !== null) { healthError = `Server exited early with code ${exitCode}`; break; }
-    try {
-      await fetch(`http://localhost:${newProdPort}/`, {
-        signal: AbortSignal.timeout(3_000),
-        redirect: 'manual',
-      });
-      healthOk = true;
-      break;
-    } catch {
-      // Not ready yet — keep polling
-    }
-  }
-  if (!healthOk) {
-    try { newServer.kill('SIGTERM'); } catch { /* already gone */ }
-    return { ok: false, error: `New slot failed health check: ${healthError ?? 'server did not respond'}` };
-  }
-
-  // Read the old upstream port from git config (the parent branch's current port).
-  let oldUpstreamPort: number | null = null;
-  try {
-    const portOut = execFileSync('git', ['config', '--get', `branch.${parentBranch}.port`], {
-      cwd: repoRoot,
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
-    if (portOut) oldUpstreamPort = parseInt(portOut, 10);
-  } catch { /* branch port not yet assigned */ }
-
-  // Step 4b: Copy the production database into the new slot via VACUUM INTO —
-  // an atomic, consistent snapshot safe to take while the live server writes.
+  // Copy the production database into the new slot via VACUUM INTO — an atomic,
+  // consistent snapshot safe to take while the live server writes.
   try {
     copyDb(oldSlot, path.resolve(worktreePath));
   } catch {
     // Non-fatal: the worktree's existing DB snapshot from session creation is still usable.
   }
 
-  // Step 4c: Fix the .env.local symlink in the new slot so it always points
-  // directly to the main repo's copy — which is never deleted. Without this,
-  // the symlink would point to the old slot's .env.local, which gets cleaned up
-  // on the next accept, leaving a dangling link.
+  // Fix the .env.local symlink in the new slot so it always points directly to
+  // the main repo's copy — which is never deleted. Without this, the symlink
+  // would point to the old slot's .env.local, which gets cleaned up on the next
+  // accept, leaving a dangling link.
   const mainEnvPath = path.join(mainRepoRoot, '.env.local');
   const worktreeEnvPath = path.join(path.resolve(worktreePath), '.env.local');
   if (fs.existsSync(mainEnvPath)) {
@@ -301,92 +249,69 @@ async function blueGreenAccept(
     fs.symlinkSync(mainEnvPath, worktreeEnvPath);
   }
 
-  await onStep('- Activating new slot…\n');
-
-  // The session worktree remains checked out on the session branch at its own
-  // tip commit. The old slot retains its branch ref at the pre-accept commit —
-  // this is deliberate: the rollback mechanism matches branch names against
-  // registered worktrees, so the old slot must stay on its original branch.
-  // primordia.productionBranch is updated in scheduleSlotActivation after the
-  // DB is fully written, so the proxy switches atomically.
-
-  // The caller schedules the final VACUUM INTO + production branch update AFTER
-  // persisting the "accepted" state to the DB, so the new slot's DB contains the
-  // complete progress log and is not truncated on refresh.
-  return { ok: true, branch, newProdPort, oldUpstreamPort };
+  // Spawning the new prod server, health-checking it, and switching traffic are
+  // handled by the proxy (POST /_proxy/prod/spawn) after the final DB writes.
+  return { ok: true, branch, newProdPort };
 }
 
 /**
- * Activates the new production slot after all DB writes are complete.
+ * Asks the reverse proxy to spawn the new production server, health-check it,
+ * update primordia.productionBranch in git config, and kill the old server.
+ * Streams SSE events from the proxy and pipes each log line through onStep.
  *
- * If REVERSE_PROXY_PORT is set (proxy in use): sets primordia.productionBranch
- * in git config so the reverse proxy routes to the new server, then gracefully
- * kills the old server via lsof on its former port.
- *
- * Falls back to `sudo systemctl restart primordia-proxy` when the proxy is not
- * configured (e.g. initial setup or local dev accidentally running in
- * production mode).
+ * Falls back to `sudo systemctl restart primordia-proxy` when REVERSE_PROXY_PORT
+ * is not set (e.g. local dev accidentally running in production mode).
  */
-function scheduleSlotActivation(
+async function spawnProdViaProxy(
   worktreePath: string,
   branch: string,
-  newProdPort: number | null,
-  oldUpstreamPort: number | null,
-  parentBranch: string,
-  repoRoot: string,
-): void {
-  const useProxy = !!process.env.REVERSE_PROXY_PORT && newProdPort !== null;
+  newProdPort: number,
+  onStep: (text: string) => Promise<void>,
+): Promise<void> {
+  const proxyPort = process.env.REVERSE_PROXY_PORT;
 
-  if (useProxy) {
-    // Set primordia.productionBranch in git config so the proxy routes to the new branch.
-    try {
-      execFileSync('git', ['config', 'primordia.productionBranch', branch], {
-        cwd: repoRoot,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-      execFileSync('git', ['config', '--add', 'primordia.productionHistory', branch], {
-        cwd: repoRoot,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-    } catch { /* best-effort */ }
-
-    // Re-write the session branch port in git config (same value, but the write
-    // touches .git/config and fires the proxy's fs.watch so it reads the updated
-    // production branch immediately rather than waiting for the 5 s safety-net poll).
-    try {
-      execFileSync('git', ['config', `branch.${branch}.port`, String(newProdPort)], {
-        cwd: repoRoot,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-    } catch { /* best-effort */ }
-
-    // Explicitly tell the proxy to re-read PROD and branch ports right now via
-    // HTTP. This is more reliable than relying solely on fs.watch, which can
-    // miss inotify events on Linux. After confirming the proxy has refreshed,
-    // give it 200 ms to update its upstream and then kill the old server.
-    void (async () => {
-      try {
-        await fetch(`http://127.0.0.1:${process.env.REVERSE_PROXY_PORT}/_proxy/refresh`, {
-          method: 'POST',
-          signal: AbortSignal.timeout(2_000),
-        });
-      } catch { /* proxy may not be running; 5-second poll will catch it */ }
-      await new Promise<void>((resolve) => setTimeout(resolve, 200));
-      if (oldUpstreamPort !== null) {
-        try {
-          const pids = execSync(`lsof -ti tcp:${oldUpstreamPort}`, { encoding: 'utf8' })
-            .trim().split('\n').filter(Boolean).map(Number).filter(Boolean);
-          for (const pid of pids) {
-            try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
-          }
-        } catch { /* no process on that port */ }
-      }
-    })();
-  } else {
-    // Fallback: restart the proxy (brief downtime window; proxy will start new prod server).
+  if (!proxyPort) {
+    // Fallback: restart the proxy (brief downtime; proxy will start new prod server on boot).
     setTimeout(() => {
       try { execSync('sudo systemctl restart primordia-proxy', { stdio: 'ignore' }); } catch { /* best-effort */ }
     }, 500);
+    return;
+  }
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/_proxy/prod/spawn`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ branch, worktreePath: path.resolve(worktreePath), port: newProdPort }),
+    });
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      await onStep('⚠️ No response stream from proxy\n');
+      return;
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop() ?? '';
+      for (const part of parts) {
+        const dataLine = part.split('\n').find((l) => l.startsWith('data: '));
+        if (!dataLine) continue;
+        try {
+          const data = JSON.parse(dataLine.slice(6)) as { type: string; text?: string; ok?: boolean; error?: string };
+          if (data.type === 'log' && data.text) await onStep(data.text);
+          else if (data.type === 'done' && !data.ok) await onStep(`❌ Proxy spawn failed: ${data.error ?? 'unknown error'}\n`);
+        } catch { /* ignore malformed SSE events */ }
+      }
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await onStep(`⚠️ Could not reach proxy for prod spawn: ${msg}\n`);
   }
 }
 
@@ -562,11 +487,11 @@ async function retryAcceptAfterFix(
   await appendToProgress(sessionId, `\n\n---\n\n✅ **Accepted** — ${isProduction ? 'deployed to production' : `merged into \`${parentBranch}\``}\n`);
   await db.updateEvolveSession(sessionId, { status: 'accepted' });
 
-  // (Production only) Final VACUUM INTO + slot activation — same as runAcceptAsync.
+  // (Production only) Final VACUUM INTO + proxy spawn + slot activation.
   if (isProduction && bgAcceptResult && bgAcceptResult.ok) {
-    await appendToProgress(sessionId, '- Switching traffic to new slot…\n');
     try { copyDb(process.cwd(), path.resolve(worktreePath)); } catch { /* best-effort */ }
-    scheduleSlotActivation(worktreePath, bgAcceptResult.branch, bgAcceptResult.newProdPort, bgAcceptResult.oldUpstreamPort, parentBranch, repoRoot);
+    await spawnProdViaProxy(worktreePath, bgAcceptResult.branch, bgAcceptResult.newProdPort,
+      (text) => appendToProgress(sessionId, text));
   }
 }
 
@@ -754,15 +679,14 @@ async function runAcceptAsync(
     await appendToProgress(sessionId, `\n\n---\n\n✅ **Accepted** — ${isProduction ? 'deployed to production' : `merged into \`${parentBranch}\``}\n`);
     await db.updateEvolveSession(sessionId, { status: 'accepted' });
 
-    // (Production only) Final VACUUM INTO + slot activation.
+    // (Production only) Final VACUUM INTO + proxy spawn + slot activation.
     // Done here — after the session is fully written — so the new slot's DB
     // contains the complete "accepted" progress log and status. Without this,
-    // the DB copied in blueGreenAccept (Step 4b) would be missing the final
-    // entries, leaving the session stuck in "Accepting changes" on refresh.
+    // the DB copied in blueGreenAccept would be missing the final entries,
+    // leaving the session stuck in "Accepting changes" on refresh.
     if (isProduction && bgAcceptResult && bgAcceptResult.ok) {
-      await step('- Switching traffic to new slot…\n');
       try { copyDb(process.cwd(), path.resolve(worktreePath)); } catch { /* best-effort */ }
-      scheduleSlotActivation(worktreePath, bgAcceptResult.branch, bgAcceptResult.newProdPort, bgAcceptResult.oldUpstreamPort, parentBranch, repoRoot);
+      await spawnProdViaProxy(worktreePath, bgAcceptResult.branch, bgAcceptResult.newProdPort, step);
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

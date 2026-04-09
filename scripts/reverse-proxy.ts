@@ -17,6 +17,7 @@
 // servers are automatically stopped after 30 minutes of inactivity.
 //
 // Proxy management API (all under /_proxy/):
+//   POST /_proxy/prod/spawn          — spawn new prod server, health check, activate (SSE stream)
 //   GET  /_proxy/preview/:id/status  — { devServerStatus }
 //   POST /_proxy/preview/:id/restart — kill + restart
 //   DELETE /_proxy/preview/:id       — kill
@@ -113,6 +114,8 @@ let sessionPortCache: Record<string, number> = {};
 let sessionWorktreeCache: Record<string, { worktreePath: string; port: number }> = {};
 /** Path to the git config file being watched. */
 let watchedConfigPath: string | null = null;
+/** Tracked production server process (proxy-owned). Null until first spawn or boot start. */
+let prodServerEntry: { process: ChildProcess; port: number; branch: string } | null = null;
 
 // ─── Preview server registry ─────────────────────────────────────────────────
 
@@ -461,6 +464,167 @@ async function startProdServerIfNeeded(): Promise<void> {
     detached: true,
   });
   server.unref();
+  const startBranch = currentProdBranch;
+  const startPort = upstreamPort;
+  prodServerEntry = { process: server, port: startPort, branch: startBranch };
+  server.on('exit', (code) => {
+    if (prodServerEntry?.process === server) {
+      console.log(`[proxy] production server exited (code ${code ?? 'unknown'})`);
+      prodServerEntry = null;
+    }
+  });
+}
+
+/**
+ * Handles POST /_proxy/prod/spawn — spawns the new production server in the given
+ * worktree, health-checks it, updates primordia.productionBranch in git config,
+ * and gracefully kills the old production server.  Streams SSE events back:
+ *   { type: 'log', text }  — progress message
+ *   { type: 'done', ok: true }           — success
+ *   { type: 'done', ok: false, error }   — failure
+ */
+async function handleProdSpawn(
+  clientReq: http.IncomingMessage,
+  clientRes: http.ServerResponse,
+): Promise<void> {
+  // Read request body.
+  const chunks: Buffer[] = [];
+  for await (const chunk of clientReq as AsyncIterable<Buffer>) chunks.push(chunk);
+  let body: { branch?: string; worktreePath?: string; port?: number };
+  try {
+    body = JSON.parse(Buffer.concat(chunks).toString()) as typeof body;
+  } catch {
+    clientRes.writeHead(400, { 'content-type': 'application/json' });
+    clientRes.end(JSON.stringify({ error: 'Invalid JSON body' }));
+    return;
+  }
+
+  const { branch, worktreePath, port } = body;
+  if (!branch || !worktreePath || !port) {
+    clientRes.writeHead(400, { 'content-type': 'application/json' });
+    clientRes.end(JSON.stringify({ error: 'branch, worktreePath, and port are required' }));
+    return;
+  }
+
+  clientRes.writeHead(200, {
+    'content-type': 'text/event-stream',
+    'cache-control': 'no-cache',
+    'connection': 'keep-alive',
+  });
+
+  const send = (data: object): void => {
+    if (!clientRes.writableEnded) clientRes.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+  const sendLog = (text: string): void => send({ type: 'log', text });
+  const sendDone = (ok: boolean, error?: string): void => {
+    send({ type: 'done', ok, ...(error ? { error } : {}) });
+    if (!clientRes.writableEnded) clientRes.end();
+  };
+
+  try {
+    // Snapshot the old upstream port before we change anything.
+    const oldPort = upstreamPort;
+    const oldEntry = prodServerEntry;
+
+    sendLog('- Starting new production server…\n');
+
+    // Spawn new prod server — proxy owns this process.
+    const newServer = spawn('bun', ['run', 'start'], {
+      cwd: path.resolve(worktreePath),
+      env: { ...process.env, PORT: String(port), HOSTNAME: '0.0.0.0' },
+      stdio: 'ignore',
+      detached: true,
+    });
+    newServer.unref();
+
+    let spawnError: string | undefined;
+    let exitedEarly = false;
+    newServer.on('error', (err: Error) => { spawnError = err.message; });
+    newServer.on('exit', (code) => {
+      // Track for health-check loop
+      exitedEarly = true;
+      // Clean up prodServerEntry if this is still the current server
+      if (prodServerEntry?.process === newServer) {
+        console.log(`[proxy] production server exited (code ${code ?? 'unknown'})`);
+        prodServerEntry = null;
+      }
+    });
+
+    // Health check — poll until the server responds or 30 s elapses.
+    sendLog('- Health-checking new slot…\n');
+    let healthOk = false;
+    let healthError: string | undefined;
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 1_000));
+      if (spawnError) { healthError = `Server process error: ${spawnError}`; break; }
+      if (exitedEarly) { healthError = 'Server exited before becoming ready'; break; }
+      try {
+        await fetch(`http://localhost:${port}/`, {
+          signal: AbortSignal.timeout(3_000),
+          redirect: 'manual',
+        });
+        healthOk = true;
+        break;
+      } catch { /* not ready yet */ }
+    }
+
+    if (!healthOk) {
+      try { newServer.kill('SIGTERM'); } catch { /* already gone */ }
+      sendDone(false, `New slot failed health check: ${healthError ?? 'server did not respond'}`);
+      return;
+    }
+
+    // Register the new server as the tracked prod process.
+    prodServerEntry = { process: newServer, port, branch };
+
+    sendLog('- Activating new slot…\n');
+
+    // Update git config: primordia.productionBranch + history.
+    try {
+      execFileSync('git', ['config', 'primordia.productionBranch', branch], {
+        cwd: MAIN_REPO,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      execFileSync('git', ['config', '--add', 'primordia.productionHistory', branch], {
+        cwd: MAIN_REPO,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch { /* best-effort */ }
+
+    // Re-write the port to touch .git/config and fire the fs.watch handler immediately.
+    try {
+      execFileSync('git', ['config', `branch.${branch}.port`, String(port)], {
+        cwd: MAIN_REPO,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch { /* best-effort */ }
+
+    // Update internal state immediately (don't wait for 5 s poll).
+    readAllPorts();
+
+    // Gracefully kill the old production server.
+    if (oldEntry && oldEntry.process.pid !== undefined) {
+      try { process.kill(-oldEntry.process.pid, 'SIGTERM'); } catch { /* already gone */ }
+      try { oldEntry.process.kill('SIGTERM'); } catch { /* already gone */ }
+    } else if (oldPort && oldPort !== port) {
+      // Fallback: lsof on the old port (e.g. server was started before tracking was added).
+      try {
+        const pids = execFileSync('lsof', ['-ti', `tcp:${oldPort}`], { encoding: 'utf8' })
+          .trim().split('\n').filter(Boolean).map(Number).filter(Boolean);
+        for (const pid of pids) {
+          try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+        }
+      } catch { /* no process on that port */ }
+    }
+
+    console.log(`[proxy] prod slot activated: ${branch} on :${port} (old :${oldPort})`);
+    sendDone(true);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[proxy] handleProdSpawn error:', msg);
+    sendDone(false, msg);
+  }
 }
 
 readAllPorts();
@@ -724,6 +888,10 @@ async function handleRequest(
 
   // Proxy management API
   if (url.startsWith('/_proxy/')) {
+    if (url === '/_proxy/prod/spawn' && clientReq.method === 'POST') {
+      await handleProdSpawn(clientReq, clientRes);
+      return;
+    }
     handleProxyApi(clientReq, clientRes);
     return;
   }
