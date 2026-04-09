@@ -293,6 +293,26 @@ function watchGitConfig(configPath: string): void {
   }
 }
 
+// ─── Port management ──────────────────────────────────────────────────────────
+
+/**
+ * Kills any process currently listening on the given TCP port.
+ * Uses lsof to find the PID(s) and SIGTERMs them. Best-effort — errors are
+ * silently ignored (lsof unavailable, no process on port, etc.).
+ */
+function killPortOwner(port: number): void {
+  try {
+    const pids = execFileSync('lsof', ['-ti', `tcp:${port}`], { encoding: 'utf8' })
+      .trim().split('\n').filter(Boolean).map(Number).filter(Boolean);
+    for (const pid of pids) {
+      try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+    }
+    if (pids.length > 0) {
+      console.log(`[proxy] killed ${pids.length} stale process(es) on :${port} before spawn`);
+    }
+  } catch { /* lsof unavailable or no process on port — normal */ }
+}
+
 // ─── Preview server management ───────────────────────────────────────────────
 
 /**
@@ -316,6 +336,7 @@ function startPreviewServer(
   previewProcesses.set(sessionId, entry);
 
   console.log(`[proxy] starting preview server for session ${sessionId} on :${info.port} in ${info.worktreePath}`);
+  killPortOwner(info.port);
 
   const proc = spawn('bun', ['run', 'dev'], {
     cwd: info.worktreePath,
@@ -457,6 +478,7 @@ async function startProdServerIfNeeded(): Promise<void> {
   }
 
   console.log(`[proxy] starting production server (${currentProdBranch}) on :${upstreamPort} in ${prodPath}`);
+  killPortOwner(upstreamPort);
   const server = spawn('bun', ['run', 'start'], {
     cwd: prodPath,
     env: { ...process.env, PORT: String(upstreamPort), HOSTNAME: '0.0.0.0' },
@@ -567,6 +589,7 @@ async function handleProdSpawn(
     const oldEntry = prodServerEntry;
 
     sendLog('- Starting new production server…\n');
+    killPortOwner(port);
 
     // Spawn new prod server — proxy owns this process.
     const newServer = spawn('bun', ['run', 'start'], {

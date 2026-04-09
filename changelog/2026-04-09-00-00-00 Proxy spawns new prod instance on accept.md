@@ -29,3 +29,13 @@ The proxy also now tracks the production server started at boot via `prodServerE
 ## Why
 
 The old prod server was spawning the new prod server as a detached child. Even though `unref()` should prevent the parent's death from killing the child, having no handle meant the proxy couldn't manage, log, or recover the new process. By having the proxy own the lifecycle end-to-end, the new prod server is always tracked and the transition is fully under proxy control.
+
+## Additional fix: kill stale port owners before spawn (EADDRINUSE resilience)
+
+Added a `killPortOwner(port)` helper to `reverse-proxy.ts` that uses `lsof -ti tcp:<port>` to find and SIGTERM any process already listening on a port before spawning a new server there. Called before every spawn:
+
+- `startPreviewServer` — kills stale dev servers on the preview port before starting a new one
+- `handleProdSpawn` — kills any stale process on the new prod port before spawning the new prod server
+- `startProdServerIfNeeded` — kills any non-HTTP process squatting the prod port at boot
+
+This prevents `EADDRINUSE` errors when a previous dev or prod server process hasn't fully released its port yet (e.g. after a crash, a SIGTERM race, or a manual restart).
