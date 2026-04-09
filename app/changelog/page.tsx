@@ -7,6 +7,7 @@
 
 import fs from "fs";
 import path from "path";
+import { execSync } from "child_process";
 import type { Metadata } from "next";
 import { ChangelogEntryDetails } from "@/components/ChangelogEntryDetails";
 import { PageNavBar } from "@/components/PageNavBar";
@@ -29,14 +30,46 @@ interface ChangelogSummary {
   title: string;
 }
 
+// Returns a map of changelog filename → unix timestamp of the commit that first added it.
+// Used to sort entries correctly even when filenames use a placeholder 00-00-00 time.
+function getGitAddedTimestamps(changelogDir: string): Map<string, number> {
+  const map = new Map<string, number>();
+  try {
+    const output = execSync(
+      "git log --diff-filter=A --format=COMMIT:%ct --name-only -- changelog/",
+      { cwd: path.dirname(changelogDir), encoding: "utf8" }
+    );
+    let currentTs = 0;
+    for (const line of output.split("\n")) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("COMMIT:")) {
+        currentTs = parseInt(trimmed.slice(7), 10);
+      } else if (trimmed.startsWith("changelog/")) {
+        const filename = trimmed.slice("changelog/".length);
+        if (filename && !map.has(filename)) {
+          map.set(filename, currentTs);
+        }
+      }
+    }
+  } catch {
+    // git not available or not a git repo — callers fall back to filename order
+  }
+  return map;
+}
+
 function loadSummaries(): ChangelogSummary[] {
   try {
     const changelogDir = path.join(process.cwd(), "changelog");
+    const commitTimes = getGitAddedTimestamps(changelogDir);
     const files = fs
       .readdirSync(changelogDir)
       .filter((f) => FILENAME_RE.test(f))
-      .sort()
-      .reverse(); // newest first
+      .sort((a, b) => {
+        const tsA = commitTimes.get(a) ?? 0;
+        const tsB = commitTimes.get(b) ?? 0;
+        if (tsB !== tsA) return tsB - tsA; // newer commit first
+        return a < b ? 1 : a > b ? -1 : 0; // same commit: reverse filename order
+      });
 
     return files.map((file) => {
       const m = file.match(FILENAME_RE)!;

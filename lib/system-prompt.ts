@@ -6,6 +6,7 @@
 
 import { readFileSync, readdirSync } from "fs";
 import { join } from "path";
+import { execSync } from "child_process";
 
 const repoRoot = join(process.cwd());
 const changelogDir = join(repoRoot, "changelog");
@@ -23,10 +24,34 @@ export function buildSystemPrompt(): string {
 
   let filenames: string[] = [];
   try {
+    // Sort by git commit timestamp so entries with placeholder 00-00-00 times still
+    // appear in the correct order. Falls back to reverse-filename order if git is unavailable.
+    const commitTimes = new Map<string, number>();
+    try {
+      const out = execSync(
+        "git log --diff-filter=A --format=COMMIT:%ct --name-only -- changelog/",
+        { cwd: repoRoot, encoding: "utf8" }
+      );
+      let ts = 0;
+      for (const line of out.split("\n")) {
+        const t = line.trim();
+        if (t.startsWith("COMMIT:")) {
+          ts = parseInt(t.slice(7), 10);
+        } else if (t.startsWith("changelog/")) {
+          const f = t.slice("changelog/".length);
+          if (f && !commitTimes.has(f)) commitTimes.set(f, ts);
+        }
+      }
+    } catch { /* git unavailable */ }
+
     filenames = readdirSync(changelogDir)
       .filter((f) => FILENAME_RE.test(f))
-      .sort()
-      .reverse(); // newest first
+      .sort((a, b) => {
+        const tsA = commitTimes.get(a) ?? 0;
+        const tsB = commitTimes.get(b) ?? 0;
+        if (tsB !== tsA) return tsB - tsA;
+        return a < b ? 1 : a > b ? -1 : 0;
+      });
   } catch {
     // Non-fatal: no changelog directory yet
   }
