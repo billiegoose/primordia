@@ -237,7 +237,9 @@ User types change request on /evolve page
           → session worktree stays checked out on the session branch; no detached HEAD
           → copy prod DB from old slot into new slot (preserves auth data)
           → fix .env.local symlink in new slot to point to main repo (prevents dangling link)
-          → POST /_proxy/prod/spawn to the reverse proxy (SSE stream): proxy spawns new prod server, health-checks it, sets primordia.productionBranch + productionHistory in git config, SIGTERMs old prod server; proxy owns the new server process
+          → POST /_proxy/prod/spawn to the reverse proxy (SSE stream): proxy spawns new prod server, health-checks it, sets primordia.productionBranch + productionHistory in git config, and switches traffic; proxy does NOT kill the old prod server
+          → run scripts/update-service.sh in the new worktree: daemon-reload if service unit changed; systemctl restart primordia-proxy if reverse-proxy.ts changed
+          → old prod server self-terminates (process.exit) after update-service.sh completes; proxy owns the new server process
           → old slots accumulate indefinitely as registered git worktrees (enables deep rollback via /admin/rollback)
       → legacy deploy (local dev, no systemd): git merge in production dir → bun install → worktree remove
   → User clicks Reject → POST /api/evolve/manage { action: "reject" }

@@ -17,12 +17,13 @@
 //              4. Persist "accepted" status + final progress log to DB
 //              5. Final VACUUM INTO new slot DB (captures complete accepted state)
 //              6. POST /_proxy/prod/spawn → proxy spawns new prod server, health-checks, sets
-//                 primordia.productionBranch in git config, switches traffic, SIGTERMs old server
+//                 primordia.productionBranch in git config, and switches traffic (does NOT kill old server)
 //              7. Run scripts/update-service.sh — daemon-reload if service unit changed;
 //                 restart primordia-proxy if reverse-proxy.ts changed (non-fatal on error).
 //                 Must run AFTER step 6: if the proxy script changed, restarting before spawn
 //                 would kill the proxy before it handles the spawn request.
-//              8. Old slot kept indefinitely as registered git worktree (enables deep rollback via /admin/rollback)
+//              8. Old prod server self-terminates (process.exit) after update-service.sh completes.
+//              9. Old slot kept indefinitely as registered git worktree (enables deep rollback via /admin/rollback)
 //
 //            LEGACY (local dev, NODE_ENV !== 'production'):
 //              git checkout → stash → merge → stash-pop → bun install → worktree remove
@@ -464,9 +465,9 @@ async function retryAcceptAfterFix(
   // (Production only) Final VACUUM INTO + proxy spawn + slot activation.
   if (isProduction && bgAcceptResult && bgAcceptResult.ok) {
     // Before the DB snapshot and proxy spawn, mark any sessions that are still
-    // running as interrupted. The old prod server is about to be SIGTERMed by
-    // the proxy, which will kill those Claude Code processes (exit 143). Without
-    // this step the new slot's DB would show them stuck in "running-claude" forever.
+    // running as interrupted. This server will self-terminate below, which will
+    // kill those Claude Code processes (exit 143). Without this step the new
+    // slot's DB would show them stuck in "running-claude" forever.
     await markInterruptedSessions(db, sessionId);
     try { copyDb(process.cwd(), path.resolve(worktreePath)); } catch { /* best-effort */ }
     await spawnProdViaProxy(bgAcceptResult.branch,
@@ -481,6 +482,10 @@ async function retryAcceptAfterFix(
     if (retryUpdateResult.code !== 0) {
       await appendToProgress(sessionId, `  ⚠ update-service.sh exited ${retryUpdateResult.code}: ${(retryUpdateResult.stdout + retryUpdateResult.stderr).trim()}\n`);
     }
+    // Self-terminate: the proxy has switched traffic to the new slot. This old
+    // production server's work is done. Delay briefly so the final log write
+    // can flush to SQLite before the process exits.
+    setTimeout(() => process.exit(0), 1000);
   }
 }
 
@@ -699,9 +704,9 @@ async function runAcceptAsync(
     // leaving the session stuck in "Accepting changes" on refresh.
     if (isProduction && bgAcceptResult && bgAcceptResult.ok) {
       // Before the DB snapshot and proxy spawn, mark any sessions that are still
-      // running as interrupted. The old prod server is about to be SIGTERMed by
-      // the proxy, which will kill those Claude Code processes (exit 143). Without
-      // this step the new slot's DB would show them stuck in "running-claude" forever.
+      // running as interrupted. This server will self-terminate below, which will
+      // kill those Claude Code processes (exit 143). Without this step the new
+      // slot's DB would show them stuck in "running-claude" forever.
       await markInterruptedSessions(db, sessionId);
       try { copyDb(process.cwd(), path.resolve(worktreePath)); } catch { /* best-effort */ }
       await spawnProdViaProxy(bgAcceptResult.branch, step);
@@ -715,6 +720,10 @@ async function runAcceptAsync(
       if (updateServiceResult.code !== 0) {
         await step(`  ⚠ update-service.sh exited ${updateServiceResult.code}: ${(updateServiceResult.stdout + updateServiceResult.stderr).trim()}\n`);
       }
+      // Self-terminate: the proxy has switched traffic to the new slot. This old
+      // production server's work is done. Delay briefly so the final log write
+      // can flush to SQLite before the process exits.
+      setTimeout(() => process.exit(0), 1000);
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
