@@ -226,8 +226,8 @@ export async function POST(req: Request) {
 
       // Update production branch in git config + branch port → proxy picks up instantly
       try {
-        spawnSync('git', ['config', 'primordia.productionBranch', targetWorktree.branch], { cwd: repoRoot });
-        spawnSync('git', ['config', '--add', 'primordia.productionHistory', targetWorktree.branch], { cwd: repoRoot });
+        spawnSync('git', ['config', 'primordia.productionBranch', targetWorktree.branch!], { cwd: repoRoot });
+        spawnSync('git', ['config', '--add', 'primordia.productionHistory', targetWorktree.branch!], { cwd: repoRoot });
         spawnSync('git', ['config', `branch.${targetWorktree.branch}.port`, String(freePort)], { cwd: repoRoot });
       } catch { /* best-effort */ }
 
