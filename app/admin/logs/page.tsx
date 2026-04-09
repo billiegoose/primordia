@@ -1,9 +1,8 @@
 // app/admin/logs/page.tsx — Server logs viewer.
-// Tails the primordia systemd service journal in real time.
+// Streams production server logs in real time.
 // Admin only.
 
 import type { Metadata } from "next";
-import { spawnSync } from "child_process";
 import { redirect } from "next/navigation";
 import { getSessionUser, isAdmin } from "@/lib/auth";
 import { getDb } from "@/lib/db";
@@ -48,13 +47,15 @@ export default async function AdminLogsPage() {
 
   const sessionUser = { id: user.id, username: user.username, isAdmin: true };
 
-  // Fetch the first batch of log lines server-side so the page is readable
-  // even when client-side JavaScript hasn't connected yet (e.g. broken HMR).
-  const initialLogs = spawnSync(
-    "journalctl",
-    ["-u", "primordia", "-n", "100", "--no-pager"],
-    { encoding: "utf8" },
-  ).stdout ?? "";
+  // In production (REVERSE_PROXY_PORT set), the prod server logs come from the
+  // reverse proxy via SSE — journalctl -u primordia returns nothing because there
+  // is no separate primordia unit. Skip the server-side prefetch; the SSE
+  // connection will deliver the buffered log on connect.
+  // In local dev (no proxy), pre-fetch via journalctl for a faster first paint.
+  const { spawnSync } = await import("child_process");
+  const initialLogs = process.env.REVERSE_PROXY_PORT
+    ? ""
+    : (spawnSync("journalctl", ["-u", "primordia", "-n", "100", "--no-pager"], { encoding: "utf8" }).stdout ?? "");
 
   return (
     <main className="flex flex-col w-full max-w-3xl mx-auto px-4 py-6 min-h-dvh">
