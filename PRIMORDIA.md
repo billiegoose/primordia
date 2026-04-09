@@ -259,7 +259,8 @@ Each evolve session tracks two independent dimensions persisted to SQLite:
 | `running-claude` | Claude Agent SDK `query()` is streaming tool calls into the worktree |
 | `fixing-types` | TypeScript or build gate failed on Accept; Claude is auto-fixing compilation errors; session page keeps Available Actions panel visible; server retries Accept when done (client tab does not need to be open) |
 | `ready` | Claude Code finished (or errored); worktree is live and interactive. If an error occurred, the progress log contains an `❌ **Error**:` entry and the Claude Code section heading is styled in red. |
-| `accepted` | User clicked Accept; branch merged into parent, worktree deleted |
+| `accepting` | User clicked Accept; typecheck/build/deploy pipeline is running asynchronously. No other session can enter `accepting` while this status is set — the manage route returns 409 if a concurrent deploy is attempted (prevents two deploys racing and the second overwriting the first). |
+| `accepted` | Deploy complete; branch is live in production (blue/green) or merged into parent (legacy). |
 | `rejected` | User clicked Reject; worktree and branch discarded without merging |
 
 **Dev server status reference**
@@ -285,7 +286,10 @@ Each evolve session tracks two independent dimensions persisted to SQLite:
 | `ready` → `fixing-types` (devServer stays `running`) | `POST /api/evolve/manage` when TypeScript or build gate fails |
 | `fixing-types` → `accepted` | `runFollowupInWorktree()` success + re-typecheck + re-build both pass; server merges without client |
 | `fixing-types` → `ready` (with `❌` error in log) | `runFollowupInWorktree()` success but type/build errors persist after fix, or merge fails |
-| `ready` → `accepted` / `rejected` | `POST /api/evolve/manage` |
+| `ready` → `accepting` | `POST /api/evolve/manage` (Gates 1–3 pass; async pipeline begins) |
+| `accepting` → `accepted` | `runAcceptAsync()` completes successfully |
+| `accepting` → `ready` (with `❌` error) | `runAcceptAsync()` fails at any step |
+| `ready` → `rejected` | `POST /api/evolve/manage` { action: "reject" } |
 | devServer `running` → `disconnected` | Dev server `close` event + branch still present (3 s later) |
 | devServer `disconnected` → `starting` | `POST /api/evolve/kill-restart` |
 | any → `ready` (with `❌` error in log) | Uncaught exception inside the respective async helper |
