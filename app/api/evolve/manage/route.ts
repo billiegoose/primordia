@@ -777,10 +777,30 @@ export async function POST(request: Request) {
         );
       }
 
+      // ── Gate 3: no concurrent deploy ──────────────────────────────────────
+      // Reject if another session is already mid-deploy. Two concurrent accepts
+      // would both call spawnProdViaProxy; the second one would overwrite the
+      // first deploy with code that was built from the old production branch,
+      // effectively rolling back the first deploy's changes.
+      const allSessions = await db.listEvolveSessions();
+      const concurrentDeploy = allSessions.find(
+        (s) => s.status === 'accepting' && s.id !== body.sessionId,
+      );
+      if (concurrentDeploy) {
+        return Response.json(
+          {
+            error:
+              `A deploy is already in progress (session "${concurrentDeploy.branch}"). ` +
+              `Please wait for it to finish, then try again.`,
+          },
+          { status: 409 },
+        );
+      }
+
       // ── Kick off async accept ──────────────────────────────────────────────
-      // Gates 1+2 pass synchronously. The remaining work (type-check, build,
-      // merge) runs fire-and-forget so the client receives a response immediately
-      // and can stream progress via SSE.
+      // Gates 1+2+3 pass. The remaining work (type-check, build, merge) runs
+      // fire-and-forget so the client receives a response immediately and can
+      // stream progress via SSE.
       const isProduction = process.env.NODE_ENV === 'production';
       const acceptingRow = await db.getEvolveSession(body.sessionId);
       if (acceptingRow) {
