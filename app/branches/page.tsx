@@ -1,10 +1,10 @@
 // app/branches/page.tsx
-// Shows all local git branches as a tree rooted at the current branch, with
-// links to active preview servers. Admin-only; available in all environments.
-//
-// Implemented as a React Server Component — data is fetched directly on the
-// server, no separate API route needed. This also makes diagnostics trivial
-// since all git output and process state are available inline.
+// Shows branches in two sections:
+//   1. Active — the production branch and any non-terminal (not accepted/rejected)
+//      children/grandchildren. This is the "live" work in progress.
+//   2. Past Sessions — the chain of past production slots (blue-green ancestry),
+//      most recent first, each with any accepted/rejected sibling branches nested
+//      beneath them.
 
 import { spawnSync } from "child_process";
 import { headers } from "next/headers";
@@ -30,6 +30,8 @@ interface BranchData {
   name: string;
   /** True if this branch is currently checked out in the main repo. */
   isCurrent: boolean;
+  /** True if this branch is the configured production branch. */
+  isProduction: boolean;
   /** Value of git config branch.<name>.parent — set by the local evolve flow. */
   parent: string | null;
   /** Preview server URL if a session is active, null otherwise. */
@@ -59,6 +61,12 @@ interface DiagnosticInfo {
   currentBranch: GitResult;
   activeSessions: number;
   sessions: EvolveSession[];
+}
+
+interface PastSlot {
+  branch: BranchData;
+  /** Non-chain branches that had this slot as their parent. */
+  children: BranchNode[];
 }
 
 // ─── Git helpers ───────────────────────────────────────────────────────────────
@@ -91,6 +99,7 @@ function gitConfigValue(key: string, cwd: string): string | null {
 
 async function getBranchData(): Promise<{
   branches: BranchData[];
+  productionBranch: string;
   diag: DiagnosticInfo;
 }> {
   const cwd = process.cwd();
@@ -103,6 +112,9 @@ async function getBranchData(): Promise<{
     ? branchList.stdout.split("\n").filter(Boolean)
     : [];
   const current = currentBranchResult.stdout || "main";
+
+  const productionBranch =
+    gitConfigValue("primordia.productionBranch", cwd) ?? "main";
 
   // Load all evolve sessions from SQLite and build a lookup by branch name.
   const db = await getDb();
@@ -125,6 +137,7 @@ async function getBranchData(): Promise<{
     return {
       name,
       isCurrent: name === current,
+      isProduction: name === productionBranch,
       parent,
       previewUrl: session?.previewUrl ?? null,
       sessionStatus: session?.status ?? null,
@@ -132,47 +145,135 @@ async function getBranchData(): Promise<{
     };
   });
 
-  // Sort: main first, evolve/* alphabetically, then any other branches
-  branches.sort((a, b) => {
-    if (a.name === "main") return -1;
-    if (b.name === "main") return 1;
-    const aE = a.name.startsWith("evolve/");
-    const bE = b.name.startsWith("evolve/");
-    if (aE && !bE) return -1;
-    if (!aE && bE) return 1;
-    return a.name.localeCompare(b.name);
-  });
-
-  return { branches, diag };
+  return { branches, productionBranch, diag };
 }
 
-// ─── Tree builder ───────────────────────────────────────────────────────────────
+// ─── Section builder ────────────────────────────────────────────────────────────
 
-function buildTree(branches: BranchData[]): BranchNode[] {
-  const byName = new Map<string, BranchNode>(
-    branches.map((b) => [b.name, { ...b, children: [] }]),
+const TERMINAL_STATUSES = new Set(["accepted", "rejected"]);
+
+/**
+ * Builds two sections from the flat branch list:
+ *
+ * - `activeProd`: the production branch as a tree root, with only non-terminal
+ *   (not accepted/rejected) children/grandchildren nested under it.
+ *
+ * - `pastSlots`: the chain of past production slots (parent → grandparent → …),
+ *   ordered most-recent-first. Each slot includes its non-chain sibling branches
+ *   (any branch whose parent was that slot, excluding the branch that was
+ *   blue-green-promoted to the next slot).
+ */
+function buildSections(
+  branches: BranchData[],
+  productionBranchName: string,
+): {
+  activeProd: BranchNode | null;
+  pastSlots: PastSlot[];
+} {
+  const byName = new Map<string, BranchData>(
+    branches.map((b) => [b.name, b]),
   );
-  const roots: BranchNode[] = [];
 
-  for (const node of byName.values()) {
-    if (node.name === "main") {
-      roots.unshift(node);
-    } else if (node.parent && byName.has(node.parent)) {
-      byName.get(node.parent)!.children.push(node);
-    } else if (node.parent && !byName.has(node.parent)) {
-      const main = byName.get("main");
-      if (main) main.children.push(node);
-      else roots.push(node);
-    } else {
-      roots.push(node);
+  // Walk the parent chain from the production branch to discover past slots.
+  // Result: [parent-of-prod, grandparent-of-prod, …] — most-recent first.
+  const productionChain: string[] = [];
+  const productionChainSet = new Set<string>([productionBranchName]);
+  {
+    const walkVisited = new Set<string>();
+    let cursor = byName.get(productionBranchName);
+    while (
+      cursor?.parent &&
+      byName.has(cursor.parent) &&
+      !walkVisited.has(cursor.parent)
+    ) {
+      walkVisited.add(cursor.parent);
+      productionChain.push(cursor.parent);
+      productionChainSet.add(cursor.parent);
+      cursor = byName.get(cursor.parent);
     }
   }
 
-  for (const node of byName.values()) {
-    node.children.sort((a, b) => a.name.localeCompare(b.name));
+  // Recursively build non-terminal children for the active tree.
+  function buildActiveChildren(
+    parentName: string,
+    visited: Set<string>,
+  ): BranchNode[] {
+    const children: BranchNode[] = [];
+    for (const b of branches) {
+      if (
+        b.parent !== parentName ||
+        visited.has(b.name) ||
+        TERMINAL_STATUSES.has(b.sessionStatus ?? "")
+      )
+        continue;
+      const node: BranchNode = {
+        ...b,
+        children: buildActiveChildren(
+          b.name,
+          new Set([...visited, b.name]),
+        ),
+      };
+      children.push(node);
+    }
+    children.sort((a, b) => a.name.localeCompare(b.name));
+    return children;
   }
 
-  return roots;
+  // Recursively build all children for past-slot descendants (no terminal filter).
+  function buildPastChildren(
+    parentName: string,
+    excludeName: string | null,
+    visited: Set<string>,
+  ): BranchNode[] {
+    const children: BranchNode[] = [];
+    for (const b of branches) {
+      if (
+        b.parent !== parentName ||
+        b.name === excludeName ||
+        visited.has(b.name)
+      )
+        continue;
+      const node: BranchNode = {
+        ...b,
+        children: buildPastChildren(
+          b.name,
+          null,
+          new Set([...visited, b.name]),
+        ),
+      };
+      children.push(node);
+    }
+    children.sort((a, b) => a.name.localeCompare(b.name));
+    return children;
+  }
+
+  // Active production subtree.
+  const prodData = byName.get(productionBranchName);
+  const activeProd: BranchNode | null = prodData
+    ? {
+        ...prodData,
+        children: buildActiveChildren(
+          productionBranchName,
+          new Set([productionBranchName]),
+        ),
+      }
+    : null;
+
+  // Past slots — each ancestor with its non-chain sibling children.
+  const pastSlots: PastSlot[] = productionChain.map((slotName, i) => {
+    const slotData = byName.get(slotName)!;
+    // The child of this slot that was promoted to the next production slot.
+    const promotedChild =
+      i === 0 ? productionBranchName : productionChain[i - 1];
+    const children = buildPastChildren(
+      slotName,
+      promotedChild,
+      new Set([slotName]),
+    );
+    return { branch: slotData, children };
+  });
+
+  return { activeProd, pastSlots };
 }
 
 // ─── Status display helpers ──────────────────────────────────────────────────────
@@ -183,6 +284,8 @@ const STATUS_COLOR: Record<string, string> = {
   "starting-server": "text-yellow-400",
   starting: "text-gray-400",
   error: "text-red-400",
+  accepted: "text-gray-600",
+  rejected: "text-gray-600",
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -191,6 +294,8 @@ const STATUS_LABEL: Record<string, string> = {
   "starting-server": "starting server…",
   starting: "starting…",
   error: "error",
+  accepted: "accepted",
+  rejected: "rejected",
 };
 
 // ─── Recursive branch row ───────────────────────────────────────────────────────
@@ -217,8 +322,6 @@ function BranchRow({
     ? ""
     : linePrefix + (isLast ? "    " : "│   ");
 
-  // This server instance only knows about sessions it spawned (its own children).
-  // The current branch of this server is shown with the server's own URL.
   const url = node.isCurrent ? currentServerUrl : node.previewUrl;
   const statusColor = node.sessionStatus
     ? (STATUS_COLOR[node.sessionStatus] ?? "text-gray-400")
@@ -226,6 +329,8 @@ function BranchRow({
   const statusLabel = node.sessionStatus
     ? (STATUS_LABEL[node.sessionStatus] ?? node.sessionStatus)
     : null;
+
+  const isTerminal = TERMINAL_STATUSES.has(node.sessionStatus ?? "");
 
   return (
     <>
@@ -238,13 +343,26 @@ function BranchRow({
         <span className={url ? "text-green-400 shrink-0" : "text-gray-600 shrink-0"}>
           ●
         </span>
-        <span className={node.isCurrent ? "text-white font-bold" : "text-gray-300"}>
+        <span
+          className={
+            node.isProduction
+              ? "text-white font-bold"
+              : node.isCurrent
+                ? "text-white font-bold"
+                : isTerminal
+                  ? "text-gray-600"
+                  : "text-gray-300"
+          }
+        >
           {node.name}
-          {node.isCurrent && (
+          {node.isProduction && (
+            <span className="text-blue-400 font-normal ml-1">(production)</span>
+          )}
+          {node.isCurrent && !node.isProduction && (
             <span className="text-gray-500 font-normal ml-1">(current)</span>
           )}
         </span>
-        {statusLabel && !node.isCurrent && (
+        {statusLabel && !node.isProduction && (
           <span className={`text-xs shrink-0 ${statusColor}`}>
             [{statusLabel}]
           </span>
@@ -257,11 +375,14 @@ function BranchRow({
             session ↗
           </Link>
         )}
-        {/* Show "+ session" for branches that have no session and are not the
-            current branch or main — only visible to users with evolve permission. */}
-        {canCreateSession && !node.sessionId && !node.isCurrent && node.name !== "main" && (
-          <CreateSessionFromBranchButton branchName={node.name} />
-        )}
+        {/* Show "+ session" only for active (non-terminal) branches without a session */}
+        {canCreateSession &&
+          !node.sessionId &&
+          !node.isCurrent &&
+          !node.isProduction &&
+          !isTerminal && (
+            <CreateSessionFromBranchButton branchName={node.name} />
+          )}
         {url && (
           <a
             href={url}
@@ -337,17 +458,13 @@ export default async function BranchesPage() {
     ? await Promise.all([isAdmin(user.id), hasEvolvePermission(user.id)])
     : [false, false];
 
-  const { branches, diag } = await getBranchData();
-  const tree = buildTree(branches);
+  const { branches, productionBranch, diag } = await getBranchData();
+  const { activeProd, pastSlots } = buildSections(branches, productionBranch);
 
-  // Compute the public-facing URL for this server instance using forwarded headers,
-  // matching the pattern used in app/api/auth/exe-dev/route.ts (getPublicOrigin).
-  // When running behind exe.dev's proxy, x-forwarded-proto/host give the real URL.
-  // Falls back to http://localhost:PORT for plain local dev.
-  const [headerStore] = await Promise.all([
-    headers(),
-  ]);
-  const sessionUser = user ? { id: user.id, username: user.username, isAdmin: userIsAdmin } : null;
+  const [headerStore] = await Promise.all([headers()]);
+  const sessionUser = user
+    ? { id: user.id, username: user.username, isAdmin: userIsAdmin }
+    : null;
   const proto = headerStore.get("x-forwarded-proto") ?? "http";
   const host =
     headerStore.get("x-forwarded-host") ??
@@ -358,8 +475,12 @@ export default async function BranchesPage() {
   return (
     <main className="flex flex-col w-full max-w-3xl mx-auto px-4 py-6 min-h-screen">
 
-      {/* Header — session resolved server-side so the hamburger is instant */}
-      <PageNavBar subtitle="Local Branches" currentPage="branches" initialSession={sessionUser} />
+      {/* Header */}
+      <PageNavBar
+        subtitle="Local Branches"
+        currentPage="branches"
+        initialSession={sessionUser}
+      />
 
       {/* Actions row — only shown to admins */}
       {userIsAdmin && (
@@ -368,101 +489,148 @@ export default async function BranchesPage() {
         </div>
       )}
 
-      {/* Branch tree or empty state */}
-      {tree.length === 0 ? (
-        <p className="text-gray-500 text-sm font-mono">
-          No local branches found.
+      {/* ── Active section ── */}
+      <div className="mt-2">
+        <p className="text-xs text-gray-500 font-mono uppercase tracking-widest mb-2">
+          Active
         </p>
-      ) : (
-        <div className="space-y-0">
-          {tree.map((node, i) => (
+        {activeProd ? (
+          <div className="space-y-0">
             <BranchRow
-              key={node.name}
-              node={node}
+              node={activeProd}
               depth={0}
               linePrefix=""
-              isLast={i === tree.length - 1}
+              isLast={true}
               currentServerUrl={currentServerUrl}
               canCreateSession={userCanEvolve}
             />
-          ))}
+          </div>
+        ) : (
+          <p className="text-gray-500 text-sm font-mono">
+            No production branch found.
+          </p>
+        )}
+      </div>
+
+      {/* ── Past Sessions section ── */}
+      {pastSlots.length > 0 && (
+        <div className="mt-8">
+          <p className="text-xs text-gray-500 font-mono uppercase tracking-widest mb-2">
+            Past Sessions
+          </p>
+          <div className="space-y-0">
+            {pastSlots.map((slot) => {
+              const slotNode: BranchNode = {
+                ...slot.branch,
+                children: slot.children,
+              };
+              return (
+                <BranchRow
+                  key={slot.branch.name}
+                  node={slotNode}
+                  depth={0}
+                  linePrefix=""
+                  isLast={true}
+                  currentServerUrl={currentServerUrl}
+                  canCreateSession={false}
+                />
+              );
+            })}
+          </div>
         </div>
       )}
 
       {/* Legend */}
       <div className="mt-8 border-t border-gray-800 pt-4 text-xs text-gray-600 font-mono space-y-1">
-        <p>● green = preview server active · ● dim = no active session · <span className="text-purple-400">session ↗</span> = view evolve session · <span className="text-purple-500">+ session</span> = start session on existing branch</p>
-        <p>Clone: <span className="text-gray-400 select-all">{currentServerUrl}/api/git</span></p>
+        <p>
+          ● green = preview server active · ● dim = no active session ·{" "}
+          <span className="text-purple-400">session ↗</span> = view evolve
+          session · <span className="text-purple-500">+ session</span> = start
+          session on existing branch
+        </p>
+        <p>
+          Clone:{" "}
+          <span className="text-gray-400 select-all">
+            {currentServerUrl}/api/git
+          </span>
+        </p>
       </div>
 
       {/* Diagnostics — only shown to admins */}
       {userIsAdmin && (
-      <details className="mt-6 text-xs font-mono open:ring-1 open:ring-gray-800 open:rounded open:p-3">
-        <summary className="text-gray-600 cursor-pointer hover:text-gray-400 select-none py-1">
-          Diagnostics ({branches.length} branch
-          {branches.length === 1 ? "" : "es"} found,{" "}
-          {diag.activeSessions} active session
-          {diag.activeSessions === 1 ? "" : "s"})
-        </summary>
-        <div className="mt-3 space-y-3 text-gray-500">
-          <p>
-            <span className="text-gray-400">cwd:</span> {diag.cwd}
-          </p>
-          <p>
-            <span className="text-gray-400">NODE_ENV:</span> {diag.nodeEnv}
-          </p>
-          <GitResultRow
-            label="git --version"
-            result={diag.gitVersion}
-          />
-          <GitResultRow
-            label="git branch --format=%(refname:short)"
-            result={diag.branchList}
-          />
-          <GitResultRow
-            label="git branch --show-current"
-            result={diag.currentBranch}
-          />
-          <div>
-            <p className="text-gray-400">
-              evolve sessions ({diag.sessions.length})
+        <details className="mt-6 text-xs font-mono open:ring-1 open:ring-gray-800 open:rounded open:p-3">
+          <summary className="text-gray-600 cursor-pointer hover:text-gray-400 select-none py-1">
+            Diagnostics ({branches.length} branch
+            {branches.length === 1 ? "" : "es"} found,{" "}
+            {diag.activeSessions} active session
+            {diag.activeSessions === 1 ? "" : "s"})
+          </summary>
+          <div className="mt-3 space-y-3 text-gray-500">
+            <p>
+              <span className="text-gray-400">cwd:</span> {diag.cwd}
             </p>
-            {diag.sessions.length === 0 ? (
-              <pre className="text-gray-700 pl-2">(none)</pre>
-            ) : (
-              <table className="mt-1 pl-2 w-full border-collapse">
-                <thead>
-                  <tr className="text-gray-500">
-                    <th className="text-left pr-4 font-normal">id</th>
-                    <th className="text-left pr-4 font-normal">branch</th>
-                    <th className="text-left pr-4 font-normal">status</th>
-                    <th className="text-left font-normal">port</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {diag.sessions.map((s) => (
-                    <tr key={s.id} className="text-gray-400">
-                      <td className="pr-4">
-                        <Link
-                          href={`/evolve/session/${s.id}`}
-                          className="text-purple-400 hover:text-purple-300"
-                        >
-                          {s.id.slice(0, 8)}…
-                        </Link>
-                      </td>
-                      <td className="pr-4">{s.branch}</td>
-                      <td className={`pr-4 ${STATUS_COLOR[s.status] ?? "text-gray-400"}`}>
-                        {s.status}
-                      </td>
-                      <td>{s.port ?? <span className="text-gray-700">—</span>}</td>
+            <p>
+              <span className="text-gray-400">NODE_ENV:</span> {diag.nodeEnv}
+            </p>
+            <p>
+              <span className="text-gray-400">production branch:</span>{" "}
+              <span className="text-blue-400">{productionBranch}</span>
+            </p>
+            <GitResultRow label="git --version" result={diag.gitVersion} />
+            <GitResultRow
+              label="git branch --format=%(refname:short)"
+              result={diag.branchList}
+            />
+            <GitResultRow
+              label="git branch --show-current"
+              result={diag.currentBranch}
+            />
+            <div>
+              <p className="text-gray-400">
+                evolve sessions ({diag.sessions.length})
+              </p>
+              {diag.sessions.length === 0 ? (
+                <pre className="text-gray-700 pl-2">(none)</pre>
+              ) : (
+                <table className="mt-1 pl-2 w-full border-collapse">
+                  <thead>
+                    <tr className="text-gray-500">
+                      <th className="text-left pr-4 font-normal">id</th>
+                      <th className="text-left pr-4 font-normal">branch</th>
+                      <th className="text-left pr-4 font-normal">status</th>
+                      <th className="text-left font-normal">port</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+                  </thead>
+                  <tbody>
+                    {diag.sessions.map((s) => (
+                      <tr key={s.id} className="text-gray-400">
+                        <td className="pr-4">
+                          <Link
+                            href={`/evolve/session/${s.id}`}
+                            className="text-purple-400 hover:text-purple-300"
+                          >
+                            {s.id.slice(0, 8)}…
+                          </Link>
+                        </td>
+                        <td className="pr-4">{s.branch}</td>
+                        <td
+                          className={`pr-4 ${STATUS_COLOR[s.status] ?? "text-gray-400"}`}
+                        >
+                          {s.status}
+                        </td>
+                        <td>
+                          {s.port ?? (
+                            <span className="text-gray-700">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
           </div>
-        </div>
-      </details>
+        </details>
       )}
     </main>
   );
