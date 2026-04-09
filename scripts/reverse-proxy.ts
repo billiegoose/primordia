@@ -1147,5 +1147,11 @@ process.on('SIGTERM', () => {
   for (const sessionId of previewProcesses.keys()) {
     stopPreviewServer(sessionId);
   }
+  // closeAllConnections() forces idle keep-alive connections to close immediately
+  // so that server.close() can call its callback without hanging indefinitely.
+  // Without this, systemd's TimeoutStopSec (90 s) fires and the process gets SIGKILL.
+  server.closeAllConnections();
   server.close(() => process.exit(0));
+  // Belt-and-suspenders: force exit after 5 s if the server still won't drain.
+  setTimeout(() => process.exit(0), 5_000).unref();
 });
