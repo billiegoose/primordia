@@ -39,3 +39,5 @@ Added a `killPortOwner(port)` helper to `reverse-proxy.ts` that uses `lsof -ti t
 - `startProdServerIfNeeded` — kills any non-HTTP process squatting the prod port at boot
 
 This prevents `EADDRINUSE` errors when a previous dev or prod server process hasn't fully released its port yet (e.g. after a crash, a SIGTERM race, or a manual restart).
+
+`killPortOwner` is now async: after sending SIGTERM it polls every 500 ms for up to 60 seconds waiting for the port to become free. If the process is still alive after 60 s, it escalates to SIGKILL. This ensures the port is actually available before the new server spawns, rather than just firing SIGTERM and hoping for the best.

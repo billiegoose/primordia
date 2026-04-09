@@ -297,20 +297,58 @@ function watchGitConfig(configPath: string): void {
 
 /**
  * Kills any process currently listening on the given TCP port.
- * Uses lsof to find the PID(s) and SIGTERMs them. Best-effort — errors are
+ * Sends SIGTERM, waits up to 60 seconds for the port to become free, then
+ * escalates to SIGKILL if the process is still alive. Best-effort — errors are
  * silently ignored (lsof unavailable, no process on port, etc.).
  */
-function killPortOwner(port: number): void {
+async function killPortOwner(port: number): Promise<void> {
+  let pids: number[];
   try {
-    const pids = execFileSync('lsof', ['-ti', `tcp:${port}`], { encoding: 'utf8' })
-      .trim().split('\n').filter(Boolean).map(Number).filter(Boolean);
-    for (const pid of pids) {
-      try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+    pids = execFileSync('lsof', ['-ti', `tcp:${port}`], {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim().split('\n').filter(Boolean).map(Number).filter(Boolean);
+  } catch {
+    return; // lsof unavailable or no process on port — normal
+  }
+  if (pids.length === 0) return;
+
+  for (const pid of pids) {
+    try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+  }
+  console.log(`[proxy] sent SIGTERM to ${pids.length} process(es) on :${port}`);
+
+  // Poll every 500 ms until the port is free (up to 60 s), then escalate.
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    await new Promise<void>(r => setTimeout(r, 500));
+    let stillInUse = false;
+    try {
+      execFileSync('lsof', ['-ti', `tcp:${port}`], {
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      stillInUse = true;
+    } catch { /* port is free */ }
+    if (!stillInUse) {
+      console.log(`[proxy] port :${port} is now free`);
+      return;
     }
-    if (pids.length > 0) {
-      console.log(`[proxy] killed ${pids.length} stale process(es) on :${port} before spawn`);
+  }
+
+  // 60 s elapsed — escalate to SIGKILL.
+  try {
+    const remainingPids = execFileSync('lsof', ['-ti', `tcp:${port}`], {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim().split('\n').filter(Boolean).map(Number).filter(Boolean);
+    for (const pid of remainingPids) {
+      try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
     }
-  } catch { /* lsof unavailable or no process on port — normal */ }
+    if (remainingPids.length > 0) {
+      console.log(`[proxy] sent SIGKILL to ${remainingPids.length} process(es) on :${port} after timeout`);
+    }
+  } catch { /* lsof unavailable or port already free */ }
 }
 
 // ─── Preview server management ───────────────────────────────────────────────
@@ -319,10 +357,10 @@ function killPortOwner(port: number): void {
  * Spawns `bun run dev` in the session's worktree and tracks the process.
  * Incoming requests are queued in entry.startWaiters until 'Ready' is detected.
  */
-function startPreviewServer(
+async function startPreviewServer(
   sessionId: string,
   info: { worktreePath: string; port: number },
-): PreviewEntry {
+): Promise<PreviewEntry> {
   const entry: PreviewEntry = {
     process: null as unknown as ChildProcess, // assigned below
     port: info.port,
@@ -336,7 +374,7 @@ function startPreviewServer(
   previewProcesses.set(sessionId, entry);
 
   console.log(`[proxy] starting preview server for session ${sessionId} on :${info.port} in ${info.worktreePath}`);
-  killPortOwner(info.port);
+  await killPortOwner(info.port);
 
   const proc = spawn('bun', ['run', 'dev'], {
     cwd: info.worktreePath,
@@ -478,7 +516,7 @@ async function startProdServerIfNeeded(): Promise<void> {
   }
 
   console.log(`[proxy] starting production server (${currentProdBranch}) on :${upstreamPort} in ${prodPath}`);
-  killPortOwner(upstreamPort);
+  await killPortOwner(upstreamPort);
   const server = spawn('bun', ['run', 'start'], {
     cwd: prodPath,
     env: { ...process.env, PORT: String(upstreamPort), HOSTNAME: '0.0.0.0' },
@@ -589,7 +627,7 @@ async function handleProdSpawn(
     const oldEntry = prodServerEntry;
 
     sendLog('- Starting new production server…\n');
-    killPortOwner(port);
+    await killPortOwner(port);
 
     // Spawn new prod server — proxy owns this process.
     const newServer = spawn('bun', ['run', 'start'], {
@@ -776,7 +814,7 @@ async function handlePreviewRequest(
       forwardToPort(upstreamPort, clientReq, clientRes);
       return;
     }
-    entry = startPreviewServer(sessionId, info);
+    entry = await startPreviewServer(sessionId, info);
   }
 
   // Server is 'starting' — buffer the request body and wait.
@@ -872,7 +910,7 @@ function handleProxyApi(
       clientRes.end(JSON.stringify({ error: 'Session worktree not found in cache' }));
       return;
     }
-    startPreviewServer(sessionId, info);
+    void startPreviewServer(sessionId, info);
     clientRes.writeHead(200, { 'content-type': 'application/json' });
     clientRes.end(JSON.stringify({ ok: true }));
     return;
