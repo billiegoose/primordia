@@ -717,22 +717,11 @@ async function handleProdSpawn(
     // Update internal state immediately (don't wait for 5 s poll).
     readAllPorts();
 
-    // Gracefully kill the old production server.
-    if (oldEntry && oldEntry.process.pid !== undefined) {
-      try { process.kill(-oldEntry.process.pid, 'SIGTERM'); } catch { /* already gone */ }
-      try { oldEntry.process.kill('SIGTERM'); } catch { /* already gone */ }
-    } else if (oldPort && oldPort !== port) {
-      // Fallback: lsof on the old port (e.g. server was started before tracking was added).
-      try {
-        const pids = execFileSync('lsof', ['-ti', `tcp:${oldPort}`], { encoding: 'utf8' })
-          .trim().split('\n').filter(Boolean).map(Number).filter(Boolean);
-        for (const pid of pids) {
-          try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
-        }
-      } catch { /* no process on that port */ }
-    }
-
-    console.log(`[proxy] prod slot activated: ${branch} on :${port} (old :${oldPort})`);
+    // Do NOT kill the old production server here. The old server is the one that
+    // called this endpoint — it will self-terminate after running update-service.sh.
+    // Killing it from the proxy would race with (and likely win against) the old
+    // server's remaining work, causing update-service.sh to never run.
+    console.log(`[proxy] prod slot activated: ${branch} on :${port} (old :${oldPort}; old server will self-terminate)`);
     sendDone(true);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

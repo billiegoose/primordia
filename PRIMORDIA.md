@@ -51,11 +51,9 @@ primordia/
 │
 ├── scripts/
 │   ├── deploy-to-exe-dev.sh      ← `bun run deploy-to-exe.dev <server>`: SSH deploy to <server>.exe.xyz
-│   ├── install-service.sh        ← Installs/re-installs the proxy systemd service; copies reverse-proxy.ts to ~/primordia-proxy.ts; initialises primordia.productionBranch in git config on first install
-│   ├── reverse-proxy.ts          ← HTTP reverse proxy for zero-downtime blue/green AND preview servers; listens on REVERSE_PROXY_PORT; reads production branch from git config (primordia.productionBranch), then looks up branch.{name}.port; discovers main repo from any worktree in PRIMORDIA_WORKTREES_DIR; on startup spawns the production Next.js server if not already running and tracks the process; captures prod server stdout/stderr in a 50 KB ring buffer; exposes POST /_proxy/prod/spawn (SSE, body: { branch }) — looks up port and worktree path from git config/worktree list, then spawns, health-checks, updates git config, and SIGTERMs old server; exposes GET /_proxy/prod/logs (SSE) — streams prod server log buffer + live output; watches .git/config for instant cutover; routes /preview/{sessionId} paths to session preview servers; installed to ~/primordia-proxy.ts by install-service.sh
 │   ├── install-service.sh        ← First-time install of the proxy systemd service; copies reverse-proxy.ts to ~/primordia-proxy.ts; initialises primordia.productionBranch in git config; enables and starts the service
 │   ├── update-service.sh         ← Run automatically on every blue-green prod deploy; updates ~/primordia-proxy.ts and the systemd symlink only when they changed; runs daemon-reload only if the service unit changed; runs systemctl restart primordia-proxy only if the proxy script changed
-│   ├── reverse-proxy.ts          ← HTTP reverse proxy for zero-downtime blue/green AND preview servers; listens on REVERSE_PROXY_PORT; reads production branch from git config (primordia.productionBranch), then looks up branch.{name}.port; discovers main repo from any worktree in PRIMORDIA_WORKTREES_DIR; on startup spawns the production Next.js server if not already running; captures prod server stdout/stderr in a 50 KB ring buffer; exposes GET /_proxy/prod/logs (SSE) — streams prod server log buffer + live output; watches .git/config for instant cutover; routes /preview/{sessionId} paths to session preview servers; installed to ~/primordia-proxy.ts by install-service.sh
+│   ├── reverse-proxy.ts          ← HTTP reverse proxy for zero-downtime blue/green AND preview servers; listens on REVERSE_PROXY_PORT; reads production branch from git config (primordia.productionBranch), then looks up branch.{name}.port; discovers main repo from any worktree in PRIMORDIA_WORKTREES_DIR; on startup spawns the production Next.js server if not already running and tracks the process; captures prod server stdout/stderr in a 50 KB ring buffer; exposes POST /_proxy/prod/spawn (SSE, body: { branch }) — looks up port and worktree path from git config/worktree list, then spawns, health-checks, updates git config, and SIGTERMs old server; exposes GET /_proxy/prod/logs (SSE) — streams prod server log buffer + live output; watches .git/config for instant cutover; routes /preview/{sessionId} paths to session preview servers; installed to ~/primordia-proxy.ts by install-service.sh
 │   ├── assign-branch-ports.sh    ← Idempotent migration script: assigns ephemeral ports to all local branches in git config (branch.{name}.port); main gets 3001, others get 3002+
 │   ├── rollback.ts               ← Standalone CLI rollback script: updates primordia.productionBranch to the previous slot (second entry in primordia.productionHistory) and restarts primordia-proxy; use when the server itself is broken and /api/rollback is unreachable
 │   └── primordia-proxy.service   ← systemd service unit for the reverse proxy; WorkingDirectory=/home/exedev/primordia; is the sole long-running service — responsible for starting the production Next.js server on boot and routing all traffic
@@ -88,9 +86,9 @@ primordia/
 │   ├── admin/
 │   │   ├── page.tsx               ← Admin panel: owner-only; grant/revoke evolve access per user; tab subnav (Manage Users / Server Logs / Proxy Logs / Rollback)
 │   │   ├── logs/
-│   │   │   └── page.tsx           ← Server logs: streams primordia systemd journal via SSE; admin only
+│   │   │   └── page.tsx           ← Server logs: pre-fetches initial log buffer from /_proxy/prod/logs on server render; delegates live tail to ServerLogsClient; admin only
 │   │   ├── proxy-logs/
-│   │   │   └── page.tsx           ← Proxy logs: streams primordia-proxy systemd journal via SSE; admin only
+│   │   │   └── page.tsx           ← Proxy logs: pre-fetches first 100 journalctl lines server-side (Linux only; skipped on macOS); delegates live tail to ServerLogsClient; admin only
 │   │   └── rollback/
 │   │       └── page.tsx           ← Deep rollback: lists previous prod slots from primordia.productionHistory; admin only
 │   ├── oops/
@@ -115,14 +113,14 @@ primordia/
 │       ├── git-sync/
 │       │   └── route.ts           ← POST pull + push the current branch (used by GitSyncDialog)
 │       ├── rollback/
-│       │   └── route.ts           ← GET hasPrevious check; POST swap current↔previous + systemd restart (admin only)
+│       │   └── route.ts           ← GET hasPrevious check; POST zero-downtime swap to previous slot via lsof kill + bun start health-check (admin only)
 │       ├── admin/
 │       │   ├── permissions/
 │       │   │   └── route.ts       ← POST grant/revoke grantable roles (can_evolve); admin only
 │       │   ├── logs/
-│       │   │   └── route.ts       ← GET SSE stream of production server logs; proxies /_proxy/prod/logs when REVERSE_PROXY_PORT is set, else falls back to journalctl -u primordia; admin only
+│       │   │   └── route.ts       ← GET SSE stream of production server logs; always proxies /_proxy/prod/logs (REVERSE_PROXY_PORT required); admin only
 │       │   ├── proxy-logs/
-│       │   │   └── route.ts       ← GET SSE stream of `journalctl -u primordia-proxy -f -n 100`; admin only
+│       │   │   └── route.ts       ← GET SSE stream of `journalctl -u primordia-proxy -f -n 100`; returns informational message on non-Linux platforms (macOS guard); admin only
 │       │   └── rollback/
 │       │       └── route.ts       ← GET list previous prod slots from primordia.productionHistory; POST apply deep rollback to any slot; admin only
 │       ├── prune-branches/
@@ -173,7 +171,7 @@ primordia/
 ├── components/
 │   ├── AcceptRejectBar.tsx        ← Accept/reject bar for local preview worktrees
 │   ├── AdminPermissionsClient.tsx ← Client component: grant/revoke 'can_evolve' role per user (used by /admin)
-│   ├── AdminRollbackClient.tsx    ← Client component: deep rollback UI; lists PROD reflog targets with roll-back buttons (used by /admin/rollback)
+│   ├── AdminRollbackClient.tsx    ← Client component: deep rollback UI; lists previous production slots from primordia.productionHistory with roll-back buttons (used by /admin/rollback)
 │   ├── AdminSubNav.tsx            ← Tab subnav for admin pages: "Manage Users" (/admin), "Server Logs" (/admin/logs), "Proxy Logs" (/admin/proxy-logs), "Rollback" (/admin/rollback)
 │   ├── ForbiddenPage.tsx          ← Server component: 403 access-denied page with page description, required/met/unmet conditions, and how-to-fix
 │   ├── ChatInterface.tsx          ← Main chat UI (chat only); hamburger menu "Propose a change" opens FloatingEvolveDialog
@@ -225,9 +223,8 @@ User types change request on /evolve page
       → streams SDKMessage events → formatted progressText appended in memory
       → progressText flushed to SQLite (throttled, ≤1 write/2s per session)
   → assigns ephemeral port to branch in git config (branch.{branch}.port) — idempotent, stable for branch lifetime
-  → spawn: bun run dev in worktree with PORT=branch port and NEXT_BASE_PATH=/preview/{sessionId} (when REVERSE_PROXY_PORT is set)
+  → spawn: bun run dev in worktree with PORT=branch port and NEXT_BASE_PATH=/preview/{sessionId}
       → on ready: previewUrl = http://{host}:{REVERSE_PROXY_PORT}/preview/{sessionId} (proxy routes by session ID via git config)
-      → fallback when no proxy: NEXT_BASE_PATH unset; previewUrl = http://{host}:{port} (direct)
   → EvolveSessionView opens SSE stream to /api/evolve/stream?sessionId=...
       → GET streams delta progressText + state every 500 ms from SQLite until terminal
   → Preview link shown when status becomes "ready"
@@ -239,9 +236,11 @@ User types change request on /evolve page
           → session worktree stays checked out on the session branch; no detached HEAD
           → copy prod DB from old slot into new slot (preserves auth data)
           → fix .env.local symlink in new slot to point to main repo (prevents dangling link)
-          → POST /_proxy/prod/spawn to the reverse proxy (SSE stream): proxy spawns new prod server, health-checks it, sets primordia.productionBranch + productionHistory in git config, SIGTERMs old prod server; proxy owns the new server process
+          → POST /_proxy/prod/spawn to the reverse proxy (SSE stream): proxy spawns new prod server, health-checks it, sets primordia.productionBranch + productionHistory in git config, and switches traffic; proxy does NOT kill the old prod server
+          → run scripts/update-service.sh in the new worktree: daemon-reload if service unit changed; systemctl restart primordia-proxy if reverse-proxy.ts changed
+          → old prod server self-terminates (process.exit) after update-service.sh completes; proxy owns the new server process
           → old slots accumulate indefinitely as registered git worktrees (enables deep rollback via /admin/rollback)
-      → legacy deploy (local dev, no systemd): git merge in production dir → bun install → worktree remove
+      → legacy deploy (local dev, NODE_ENV !== 'production'): git merge in production dir → bun install → worktree remove
   → User clicks Reject → POST /api/evolve/manage { action: "reject" }
       → kill dev server, git worktree remove, git branch -D
 ```
@@ -261,7 +260,8 @@ Each evolve session tracks two independent dimensions persisted to SQLite:
 | `running-claude` | Claude Agent SDK `query()` is streaming tool calls into the worktree |
 | `fixing-types` | TypeScript or build gate failed on Accept; Claude is auto-fixing compilation errors; session page keeps Available Actions panel visible; server retries Accept when done (client tab does not need to be open) |
 | `ready` | Claude Code finished (or errored); worktree is live and interactive. If an error occurred, the progress log contains an `❌ **Error**:` entry and the Claude Code section heading is styled in red. |
-| `accepted` | User clicked Accept; branch merged into parent, worktree deleted |
+| `accepting` | User clicked Accept; typecheck/build/deploy pipeline is running asynchronously. No other session can enter `accepting` while this status is set — the manage route returns 409 if a concurrent deploy is attempted (prevents two deploys racing and the second overwriting the first). |
+| `accepted` | Deploy complete; branch is live in production (blue/green) or merged into parent (legacy). |
 | `rejected` | User clicked Reject; worktree and branch discarded without merging |
 
 **Dev server status reference**
@@ -287,7 +287,10 @@ Each evolve session tracks two independent dimensions persisted to SQLite:
 | `ready` → `fixing-types` (devServer stays `running`) | `POST /api/evolve/manage` when TypeScript or build gate fails |
 | `fixing-types` → `accepted` | `runFollowupInWorktree()` success + re-typecheck + re-build both pass; server merges without client |
 | `fixing-types` → `ready` (with `❌` error in log) | `runFollowupInWorktree()` success but type/build errors persist after fix, or merge fails |
-| `ready` → `accepted` / `rejected` | `POST /api/evolve/manage` |
+| `ready` → `accepting` | `POST /api/evolve/manage` (Gates 1–3 pass; async pipeline begins) |
+| `accepting` → `accepted` | `runAcceptAsync()` completes successfully |
+| `accepting` → `ready` (with `❌` error) | `runAcceptAsync()` fails at any step |
+| `ready` → `rejected` | `POST /api/evolve/manage` { action: "reject" } |
 | devServer `running` → `disconnected` | Dev server `close` event + branch still present (3 s later) |
 | devServer `disconnected` → `starting` | `POST /api/evolve/kill-restart` |
 | any → `ready` (with `❌` error in log) | Uncaught exception inside the respective async helper |
@@ -343,7 +346,7 @@ These must be set in:
 | `ANTHROPIC_API_KEY` | Required for evolve | Required for the evolve pipeline (`@anthropic-ai/claude-agent-sdk`) in **all environments**. Not required for chat on exe.dev — the built-in LLM gateway is used instead. Required for chat outside exe.dev. |
 | `GITHUB_TOKEN` | No | Personal access token (repo scope) — enables authenticated git pull/push in GitSyncDialog; falls back to `origin` remote if unset |
 | `GITHUB_REPO` | No | `owner/repo` slug (e.g. `primordia-org/primordia`) — used alongside `GITHUB_TOKEN` to build the authenticated remote URL |
-| `REVERSE_PROXY_PORT` | No | Port the reverse proxy listens on (e.g. `3000`). When set, blue/green accepts use zero-downtime cutover instead of `systemctl restart`. |
+| `REVERSE_PROXY_PORT` | Yes | Port the reverse proxy listens on (e.g. `3000`). Blue/green accepts and rollbacks use zero-downtime cutover via the proxy. |
 | `PRIMORDIA_WORKTREES_DIR` | No | Path to the worktrees directory (default `/home/exedev/primordia-worktrees`). Set automatically by the systemd service files. |
 | `NEXT_BASE_PATH` | No | URL sub-path prefix (e.g. `/primordia`) for hosting the app at a non-root path. Leave unset to serve from `/` (default). Sets both Next.js `basePath` config and `NEXT_PUBLIC_BASE_PATH` for client-side `fetch()` calls. Also set automatically on preview dev servers to `/preview/{sessionId}` when `REVERSE_PROXY_PORT` is active. |
 
