@@ -3,7 +3,7 @@
 //
 // Listens on REVERSE_PROXY_PORT (default 3000) and forwards all traffic to
 // the upstream port stored in git config as branch.{currentBranch}.port for
-// the branch pointed to by the PROD symbolic-ref in git.
+// the branch stored in git config as primordia.productionBranch.
 //
 // On startup, if the production Next.js server is not already running, the
 // proxy spawns it automatically (bun run start in the production worktree).
@@ -105,7 +105,7 @@ function discoverMainRepo(): string {
 const MAIN_REPO = discoverMainRepo();
 
 let upstreamPort = 3001;
-/** The branch name currently pointed to by PROD. */
+/** The branch name currently set as primordia.productionBranch. */
 let currentProdBranch: string | null = null;
 /** Cache of session ID → port for fast preview lookups. */
 let sessionPortCache: Record<string, number> = {};
@@ -113,8 +113,6 @@ let sessionPortCache: Record<string, number> = {};
 let sessionWorktreeCache: Record<string, { worktreePath: string; port: number }> = {};
 /** Path to the git config file being watched. */
 let watchedConfigPath: string | null = null;
-/** Path to the .git/PROD symbolic-ref file being watched. */
-let watchedProdPath: string | null = null;
 
 // ─── Preview server registry ─────────────────────────────────────────────────
 
@@ -178,8 +176,6 @@ function readAllPorts(): void {
     if (cfgPath) {
       watchedConfigPath = cfgPath;
       watchGitConfig(cfgPath);
-      // Also watch .git/PROD; it may not exist until the first accept.
-      setupProdWatch(path.dirname(cfgPath));
     }
   }
 
@@ -251,19 +247,19 @@ function readAllPorts(): void {
   }
   sessionWorktreeCache = newWorktreeCache;
 
-  // Determine production branch: prefer the PROD symbolic-ref (set on each
-  // accept), fall back to HEAD of the current worktree (initial bootstrap
-  // before the first accept or on pre-PROD deployments).
+  // Determine production branch from git config primordia.productionBranch (set on
+  // each accept), falling back to HEAD of the current worktree (initial bootstrap
+  // before the first accept or on deployments not yet migrated to git config).
   let prodBranch: string | null = null;
   try {
-    const ref = execFileSync('git', ['symbolic-ref', '--short', 'PROD'], {
+    const ref = execFileSync('git', ['config', '--get', 'primordia.productionBranch'], {
       cwd: MAIN_REPO,
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
     if (ref) prodBranch = ref;
   } catch {
-    // PROD not yet initialised — fall through to HEAD fallback
+    // primordia.productionBranch not yet set — fall through to HEAD fallback
   }
   if (!prodBranch) {
     try {
@@ -291,23 +287,6 @@ function watchGitConfig(configPath: string): void {
     fs.watch(configPath, () => setTimeout(readAllPorts, 50));
   } catch {
     setTimeout(() => watchGitConfig(configPath), 1000);
-  }
-}
-
-/**
- * Sets up a fs.watch on .git/PROD so the proxy reacts instantly when the
- * production branch changes. PROD is created on the first accept, so this
- * retries every 5 s until the file appears.
- */
-function setupProdWatch(gitDir: string): void {
-  if (watchedProdPath) return;
-  const prodRefPath = path.join(gitDir, 'PROD');
-  if (fs.existsSync(prodRefPath)) {
-    watchedProdPath = prodRefPath;
-    fs.watch(prodRefPath, () => setTimeout(readAllPorts, 50));
-  } else {
-    // PROD is created on the first accept — retry until it appears.
-    setTimeout(() => setupProdWatch(gitDir), 5_000);
   }
 }
 
@@ -629,9 +608,9 @@ function handleProxyApi(
 ): void {
   const url = clientReq.url ?? '';
 
-  // POST /_proxy/refresh — force-read PROD ref and all branch ports immediately.
+  // POST /_proxy/refresh — force-read primordia.productionBranch and all branch ports immediately.
   // Called by the production server after an accept to guarantee the proxy picks
-  // up the new PROD symbolic-ref even if the fs.watch inotify event was missed.
+  // up the new production branch even if the fs.watch inotify event was missed.
   if (url === '/_proxy/refresh' && clientReq.method === 'POST') {
     readAllPorts();
     clientRes.writeHead(200, { 'content-type': 'application/json' });

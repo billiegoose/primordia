@@ -51,10 +51,10 @@ primordia/
 │
 ├── scripts/
 │   ├── deploy-to-exe-dev.sh      ← `bun run deploy-to-exe.dev <server>`: SSH deploy to <server>.exe.xyz
-│   ├── install-service.sh        ← Installs/re-installs the proxy systemd service; copies reverse-proxy.ts to ~/primordia-proxy.ts; initialises PROD symbolic-ref on first install
-│   ├── reverse-proxy.ts          ← HTTP reverse proxy for zero-downtime blue/green AND preview servers; listens on REVERSE_PROXY_PORT; reads production branch from git PROD symbolic-ref, then looks up branch.{name}.port; discovers main repo from any worktree in PRIMORDIA_WORKTREES_DIR; on startup spawns the production Next.js server if not already running; watches both .git/config and .git/PROD for instant cutover; routes /preview/{sessionId} paths to session preview servers; installed to ~/primordia-proxy.ts by install-service.sh
+│   ├── install-service.sh        ← Installs/re-installs the proxy systemd service; copies reverse-proxy.ts to ~/primordia-proxy.ts; initialises primordia.productionBranch in git config on first install
+│   ├── reverse-proxy.ts          ← HTTP reverse proxy for zero-downtime blue/green AND preview servers; listens on REVERSE_PROXY_PORT; reads production branch from git config (primordia.productionBranch), then looks up branch.{name}.port; discovers main repo from any worktree in PRIMORDIA_WORKTREES_DIR; on startup spawns the production Next.js server if not already running; watches .git/config for instant cutover; routes /preview/{sessionId} paths to session preview servers; installed to ~/primordia-proxy.ts by install-service.sh
 │   ├── assign-branch-ports.sh    ← Idempotent migration script: assigns ephemeral ports to all local branches in git config (branch.{name}.port); main gets 3001, others get 3002+
-│   ├── rollback.ts               ← Standalone CLI rollback script: updates PROD to previous slot (PROD@{1}) and restarts primordia-proxy; use when the server itself is broken and /api/rollback is unreachable
+│   ├── rollback.ts               ← Standalone CLI rollback script: updates primordia.productionBranch to the previous slot (second entry in primordia.productionHistory) and restarts primordia-proxy; use when the server itself is broken and /api/rollback is unreachable
 │   └── primordia-proxy.service   ← systemd service unit for the reverse proxy; WorkingDirectory=/home/exedev/primordia; is the sole long-running service — responsible for starting the production Next.js server on boot and routing all traffic
 │
 ├── public/
@@ -87,7 +87,7 @@ primordia/
 │   │   ├── logs/
 │   │   │   └── page.tsx           ← Server logs: streams primordia systemd journal via SSE; admin only
 │   │   └── rollback/
-│   │       └── page.tsx           ← Deep rollback: lists previous prod slots from PROD git reflog; admin only
+│   │       └── page.tsx           ← Deep rollback: lists previous prod slots from primordia.productionHistory; admin only
 │   ├── oops/
 │   │   └── page.tsx               ← Owner-only mobile shell: run occasional system commands without SSH
 │   ├── evolve/
@@ -117,7 +117,7 @@ primordia/
 │       │   ├── logs/
 │       │   │   └── route.ts       ← GET SSE stream of `journalctl -u primordia -f -n 100`; admin only
 │       │   └── rollback/
-│       │       └── route.ts       ← GET list previous prod slots from PROD reflog; POST apply deep rollback to any slot; admin only
+│       │       └── route.ts       ← GET list previous prod slots from primordia.productionHistory; POST apply deep rollback to any slot; admin only
 │       ├── prune-branches/
 │       │   └── route.ts           ← POST delete all local branches merged into main; streams SSE progress
 │       ├── auth/
@@ -227,14 +227,14 @@ User types change request on /evolve page
   → User clicks Accept → POST /api/evolve/manage { action: "accept" }
       → pre-accept gates: ancestor check, clean worktree, bun run typecheck, bun run build (all in session worktree)
       → blue/green deploy (production): bun install in worktree → session branch becomes new prod as-is (no merge commit; Gate 1 guarantees it already contains parentBranch)
-          → parentBranch ref NOT advanced — old slot stays at pre-accept commit so PROD reflog rollback can match it by hash
+          → parentBranch ref NOT advanced — old slot stays at pre-accept commit so rollback can match it by branch name
           → sibling sessions whose git config parent = parentBranch are reparented to session branch (so "Apply Updates" picks up new prod)
           → session worktree stays checked out on the session branch; no detached HEAD
           → copy prod DB from old slot into new slot (preserves auth data)
           → fix .env.local symlink in new slot to point to main repo (prevents dangling link)
           → start new prod server on the branch's pre-assigned port (from git config); run health checks
           → old slots accumulate indefinitely as registered git worktrees (enables deep rollback via /admin/rollback)
-          → set git PROD symbolic-ref → session branch; touch git config → reverse proxy picks up new branch/port instantly via fs.watch
+          → set primordia.productionBranch in git config → session branch; append to primordia.productionHistory; touch port → reverse proxy picks up new branch instantly via fs.watch
           → gracefully shutdown the old prod server (SIGTERM via lsof)
       → legacy deploy (local dev, no systemd): git merge in production dir → bun install → worktree remove
   → User clicks Reject → POST /api/evolve/manage { action: "reject" }
@@ -390,7 +390,7 @@ When implementing changes, follow these principles:
 | RBAC (roles) | ✅ Live | Simple role system: `admin` (auto-granted to first user) and `can_evolve`; /admin page lets admin grant/revoke roles; protected pages show informative 403 instead of redirecting |
 | Owner shell (/oops) | ✅ Live | Mobile-friendly shell at `/oops`; admin-only; run system commands (e.g. `sudo systemctl restart primordia`) without SSH; streams stdout+stderr via SSE |
 | Server logs (/admin/logs) | ✅ Live | Admin-only; live tail of `journalctl -u primordia -f -n 100` via SSE; accessible from the admin subnav |
-| Deep rollback (/admin/rollback) | ✅ Live | Admin-only; lists all previous production slots from the PROD git reflog; "Roll back" button for each target; zero-downtime cutover via reverse proxy |
+| Deep rollback (/admin/rollback) | ✅ Live | Admin-only; lists all previous production slots from primordia.productionHistory in git config; "Roll back" button for each target; zero-downtime cutover via reverse proxy |
 | Read-only git HTTP | ✅ Live | Clone/fetch via `git clone http[s]://<host>/api/git`; proxied through `git http-backend`; push permanently blocked (403) |
 
 ---
@@ -401,7 +401,7 @@ These were noted at project inception but are explicitly out of scope for the MV
 
 - **Fork flow**: one-click fork to user's own instance
 - **Voting**: upvote proposed evolve requests before they get built
-- **Rollback UI / Deep rollback**: Implemented — `/admin/rollback` lists all previous slots from the PROD git reflog with one-click rollback buttons
+- **Rollback UI / Deep rollback**: Implemented — `/admin/rollback` lists all previous slots from `primordia.productionHistory` in git config with one-click rollback buttons
 - **Multi-tenant**: each user gets their own Primordia instance
 
 ## Changelog

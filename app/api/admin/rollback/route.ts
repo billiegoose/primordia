@@ -1,11 +1,11 @@
 // app/api/admin/rollback/route.ts
-// Deep rollback: list available production slots from PROD git reflog and apply one.
+// Deep rollback: list available production slots from primordia.productionHistory and apply one.
 // Admin-only.
 //
 // GET  — returns { currentBranch, targets[] } where targets are previous prod slots
-//        matched from the PROD symbolic-ref reflog against registered git worktrees.
+//        matched from primordia.productionHistory against registered git worktrees.
 // POST — { worktreePath } starts a health-checked server in the target worktree,
-//        updates git config slot tracker, updates PROD, and gracefully kills the old server.
+//        updates git config slot tracker, updates primordia.productionBranch, and gracefully kills the old server.
 
 import { spawnSync, spawn, execSync } from 'child_process';
 import * as fs from 'fs';
@@ -74,19 +74,19 @@ export async function GET() {
 
   const repoRoot = process.cwd();
 
-  // Current PROD branch
-  const prodResult = spawnSync('git', ['symbolic-ref', '--short', 'PROD'], {
+  // Current production branch from git config.
+  const prodResult = spawnSync('git', ['config', '--get', 'primordia.productionBranch'], {
     cwd: repoRoot,
     encoding: 'utf8',
   });
   const currentBranch = prodResult.stdout.trim() || null;
 
-  // PROD reflog OIDs (newest-first; index 0 = current production)
-  const reflogResult = spawnSync('git', ['log', '-g', '--format=%H', 'PROD'], {
+  // Production history (oldest-first from git config --get-all; reverse for newest-first).
+  const historyResult = spawnSync('git', ['config', '--get-all', 'primordia.productionHistory'], {
     cwd: repoRoot,
     encoding: 'utf8',
   });
-  const reflogHashes = reflogResult.stdout.trim().split('\n').filter(Boolean);
+  const historyBranches = historyResult.stdout.trim().split('\n').filter(Boolean).reverse();
 
   // All registered worktrees
   const wtListResult = spawnSync('git', ['worktree', 'list', '--porcelain'], {
@@ -95,13 +95,13 @@ export async function GET() {
   });
   const worktrees = parseWorktreeList(wtListResult.stdout);
 
-  // HEAD hash → worktree
-  const hashToWorktree = new Map<string, WorktreeInfo>();
+  // branch name → worktree
+  const branchToWorktree = new Map<string, WorktreeInfo>();
   for (const wt of worktrees) {
-    if (wt.head) hashToWorktree.set(wt.head, wt);
+    if (wt.branch) branchToWorktree.set(wt.branch, wt);
   }
 
-  // Current prod path — the worktree on the PROD branch.
+  // Current prod path — the worktree on the current production branch.
   const currentPath = (() => {
     for (const wt of worktrees) {
       if (wt.branch === currentBranch) return wt.path;
@@ -109,11 +109,11 @@ export async function GET() {
     return null;
   })();
 
-  // Build targets from reflog entries after index 0, matched to existing worktrees
+  // Build targets from history entries after index 0, matched to existing worktrees.
   const targets: Array<{ branch: string; worktreePath: string; reflogIndex: number }> = [];
   const seenPaths = new Set<string>();
-  for (let i = 1; i < reflogHashes.length; i++) {
-    const wt = hashToWorktree.get(reflogHashes[i]);
+  for (let i = 1; i < historyBranches.length; i++) {
+    const wt = branchToWorktree.get(historyBranches[i]);
     if (!wt || !wt.branch) continue;
     if (wt.path === currentPath) continue;
     if (seenPaths.has(wt.path)) continue;
@@ -156,12 +156,12 @@ export async function POST(req: Request) {
 
   const targetPath = targetWorktree.path;
 
-  // Current prod slot = worktree on the PROD branch.
-  const currentProdBranch = spawnSync('git', ['symbolic-ref', '--short', 'PROD'], {
+  // Current prod slot = worktree on the current production branch.
+  const currentProdBranch = spawnSync('git', ['config', '--get', 'primordia.productionBranch'], {
     cwd: repoRoot, encoding: 'utf8',
   }).stdout.trim();
   if (!currentProdBranch) {
-    return Response.json({ error: 'PROD symbolic-ref is not set.' }, { status: 400 });
+    return Response.json({ error: 'primordia.productionBranch is not set in git config.' }, { status: 400 });
   }
   const currentProdWorktree = worktrees.find(wt => wt.branch === currentProdBranch);
   if (!currentProdWorktree) {
@@ -176,16 +176,8 @@ export async function POST(req: Request) {
   // Read old upstream port before doing anything
   let oldUpstreamPort: number | null = null;
   try {
-    let prodBranch = spawnSync('git', ['symbolic-ref', '--short', 'PROD'], {
-      cwd: repoRoot, encoding: 'utf8',
-    }).stdout.trim();
-    if (!prodBranch) {
-      prodBranch = spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], {
-        cwd: currentTarget, encoding: 'utf8',
-      }).stdout.trim();
-    }
-    if (prodBranch) {
-      const portOut = spawnSync('git', ['config', '--get', `branch.${prodBranch}.port`], {
+    if (currentProdBranch) {
+      const portOut = spawnSync('git', ['config', '--get', `branch.${currentProdBranch}.port`], {
         cwd: repoRoot, encoding: 'utf8',
       }).stdout.trim();
       if (portOut) oldUpstreamPort = parseInt(portOut, 10);
@@ -232,9 +224,10 @@ export async function POST(req: Request) {
         return;
       }
 
-      // Update PROD symbolic-ref and branch port → proxy picks up instantly
+      // Update production branch in git config + branch port → proxy picks up instantly
       try {
-        spawnSync('git', ['symbolic-ref', 'PROD', `refs/heads/${targetWorktree.branch}`], { cwd: repoRoot });
+        spawnSync('git', ['config', 'primordia.productionBranch', targetWorktree.branch], { cwd: repoRoot });
+        spawnSync('git', ['config', '--add', 'primordia.productionHistory', targetWorktree.branch], { cwd: repoRoot });
         spawnSync('git', ['config', `branch.${targetWorktree.branch}.port`, String(freePort)], { cwd: repoRoot });
       } catch { /* best-effort */ }
 
@@ -252,8 +245,9 @@ export async function POST(req: Request) {
       }, 500);
     })();
   } else {
-    // Brief-downtime path: update slot tracker then restart.
-    spawnSync('git', ['symbolic-ref', 'PROD', `refs/heads/${targetWorktree.branch}`], { cwd: repoRoot });
+    // Brief-downtime path: update production branch in git config then restart.
+    spawnSync('git', ['config', 'primordia.productionBranch', targetWorktree.branch], { cwd: repoRoot });
+    spawnSync('git', ['config', '--add', 'primordia.productionHistory', targetWorktree.branch], { cwd: repoRoot });
     setTimeout(() => {
       try { execSync('sudo systemctl restart primordia-proxy', { stdio: 'ignore' }); } catch {}
     }, 500);

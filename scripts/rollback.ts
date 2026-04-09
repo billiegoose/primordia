@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // scripts/rollback.ts
-// Standalone fast rollback: updates PROD to the previous slot (PROD@{1}) and
-// restarts the proxy service (which will start the rolled-back server).
+// Standalone fast rollback: updates primordia.productionBranch to the previous
+// slot and restarts the proxy service (which will start the rolled-back server).
 // Equivalent to POST /api/rollback but runs directly via bun — use this when
 // the server itself is broken or unresponsive.
 //
@@ -56,25 +56,26 @@ function copyDb(srcDir: string, dstDir: string): void {
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 
-// Get current production branch from PROD symbolic-ref.
-const prodResult = spawnSync('git', ['symbolic-ref', '--short', 'PROD'], {
+// Get current production branch from git config.
+const prodResult = spawnSync('git', ['config', '--get', 'primordia.productionBranch'], {
   cwd: repoRoot, encoding: 'utf8',
 });
 if (prodResult.status !== 0 || !prodResult.stdout.trim()) {
-  console.error('Error: PROD symbolic-ref is not set.');
+  console.error('Error: primordia.productionBranch is not set in git config.');
   process.exit(1);
 }
 const prodBranch = prodResult.stdout.trim();
 
-// Get previous production commit from PROD@{1}.
-const prevCommitResult = spawnSync('git', ['rev-parse', 'PROD@{1}'], {
+// Get production history (oldest-first from git config --get-all; reverse for newest-first).
+const historyResult = spawnSync('git', ['config', '--get-all', 'primordia.productionHistory'], {
   cwd: repoRoot, encoding: 'utf8',
 });
-if (prevCommitResult.status !== 0 || !prevCommitResult.stdout.trim()) {
-  console.error('Error: no previous slot in PROD reflog (PROD@{1} does not exist).');
+const historyBranches = (historyResult.stdout || '').trim().split('\n').filter(Boolean).reverse();
+if (historyBranches.length < 2) {
+  console.error('Error: no previous slot in production history (primordia.productionHistory has fewer than 2 entries).');
   process.exit(1);
 }
-const prevCommit = prevCommitResult.stdout.trim();
+const previousBranchFromHistory = historyBranches[1];
 
 // List all registered worktrees.
 const wtResult = spawnSync('git', ['worktree', 'list', '--porcelain'], {
@@ -82,7 +83,7 @@ const wtResult = spawnSync('git', ['worktree', 'list', '--porcelain'], {
 });
 const worktrees = parseWorktreeList(wtResult.stdout);
 
-// Current slot = worktree on the PROD branch.
+// Current slot = worktree on the production branch.
 const currentWorktree = worktrees.find(wt => wt.branch === prodBranch);
 if (!currentWorktree) {
   console.error(`Error: no worktree found for current production branch '${prodBranch}'.`);
@@ -90,10 +91,10 @@ if (!currentWorktree) {
 }
 const currentTarget = currentWorktree.path;
 
-// Previous slot = worktree whose HEAD commit matches PROD@{1}.
-const previousWorktree = worktrees.find(wt => wt.head === prevCommit && wt.path !== currentTarget);
+// Previous slot = worktree on the previously-current production branch.
+const previousWorktree = worktrees.find(wt => wt.branch === previousBranchFromHistory && wt.path !== currentTarget);
 if (!previousWorktree?.branch) {
-  console.error(`Error: no worktree found for previous production commit ${prevCommit.slice(0, 8)}.`);
+  console.error(`Error: no worktree found for previous production branch '${previousBranchFromHistory}'.`);
   console.error('  The previous slot may have been pruned.');
   process.exit(1);
 }
@@ -114,13 +115,14 @@ try {
   console.warn(`  Warning: DB copy failed (proceeding anyway): ${err}`);
 }
 
-// Update PROD symbolic-ref to point to the previous branch.
-console.log(`Updating PROD → ${previousBranch}...`);
-spawnSync('git', ['symbolic-ref', 'PROD', `refs/heads/${previousBranch}`], { cwd: repoRoot });
+// Update git config to point to the previous branch.
+console.log(`Updating production branch → ${previousBranch}...`);
+spawnSync('git', ['config', 'primordia.productionBranch', previousBranch], { cwd: repoRoot });
+spawnSync('git', ['config', '--add', 'primordia.productionHistory', previousBranch], { cwd: repoRoot });
 console.log('  Done.');
 console.log('');
 
-// Restart the proxy service. The proxy will read the updated PROD ref and
+// Restart the proxy service. The proxy will read the updated git config and
 // start the production server on the previous slot's pre-assigned port.
 console.log('Restarting proxy service...');
 try {

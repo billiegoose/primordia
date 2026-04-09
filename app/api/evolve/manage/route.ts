@@ -15,13 +15,13 @@
 //                 branch so "Apply Updates" picks up the new production code going forward.
 //              3. Start new prod server on branch's pre-assigned port (git config); health-check it
 //              4. Copy production DB into new slot (VACUUM INTO — atomic snapshot)
-//              5. Set PROD symbolic-ref → session branch; proxy switches instantly
+//              5. Set primordia.productionBranch in git config → session branch; proxy switches instantly
 //              6. Old slot kept indefinitely as registered git worktree (enables deep rollback via /admin/rollback)
 //              7. Session worktree stays checked out on the session branch; old slot retains its branch
-//                 at the pre-accept commit — rollback can match it via the PROD reflog
+//                 at the pre-accept commit — rollback can match it via primordia.productionHistory
 //              8. Persist "accepted" status + final progress log to DB
 //              9. Final VACUUM INTO new slot DB (captures complete accepted state)
-//             10. Set PROD symbolic-ref → session branch + touch git config → proxy switches; SIGTERM old server
+//             10. Set primordia.productionBranch in git config → session branch + touch port → proxy switches; SIGTERM old server
 //
 //            LEGACY (local dev, NODE_ENV !== 'production'):
 //              git checkout → stash → merge → stash-pop → bun install → worktree remove
@@ -77,7 +77,7 @@ async function appendToProgress(sessionId: string, text: string): Promise<void> 
  * correctly offers the new production changes to those sessions going forward.
  *
  * The parentBranch ref itself is NOT advanced — leaving it at its pre-accept
- * commit is what makes the PROD reflog hash-matching rollback work correctly.
+ * commit is what makes the production history rollback work correctly.
  */
 function reparentSiblings(
   repoRoot: string,
@@ -169,11 +169,11 @@ async function blueGreenAccept(
     ? path.dirname(path.resolve(worktreePath, gitCommonResult.stdout.trim()))
     : path.resolve(repoRoot); // fallback: assume repoRoot is the main repo
 
-  // Find the current production slot via the PROD symbolic-ref.
-  // Falls back to the main repo on the very first accept (before PROD is set).
+  // Find the current production slot via primordia.productionBranch in git config.
+  // Falls back to the main repo on the very first accept (before git config is set).
   let oldSlot: string = mainRepoRoot;
   try {
-    const prodBranch = execFileSync('git', ['symbolic-ref', '--short', 'PROD'], {
+    const prodBranch = execFileSync('git', ['config', '--get', 'primordia.productionBranch'], {
       cwd: repoRoot,
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -195,7 +195,7 @@ async function blueGreenAccept(
       if (oldSlot === mainRepoRoot && curPath && curBranch === prodBranch) oldSlot = curPath;
     }
   } catch {
-    // PROD not yet set — fall through to mainRepoRoot default
+    // primordia.productionBranch not yet set — fall through to mainRepoRoot default
   }
 
   // Step 1: ensure node_modules are up to date in the session worktree.
@@ -305,23 +305,23 @@ async function blueGreenAccept(
 
   // The session worktree remains checked out on the session branch at its own
   // tip commit. The old slot retains its branch ref at the pre-accept commit —
-  // this is deliberate: the PROD reflog rollback matches previous PROD commit
-  // hashes against worktree HEAD hashes, so the old slot must stay at the
-  // original commit. The PROD symbolic-ref is updated in scheduleSlotActivation
-  // after the DB is fully written, so the proxy switches atomically.
+  // this is deliberate: the rollback mechanism matches branch names against
+  // registered worktrees, so the old slot must stay on its original branch.
+  // primordia.productionBranch is updated in scheduleSlotActivation after the
+  // DB is fully written, so the proxy switches atomically.
 
-  // The caller schedules the final VACUUM INTO + PROD update AFTER persisting
-  // the "accepted" state to the DB, so the new slot's DB contains the complete
-  // progress log and is not truncated on refresh.
+  // The caller schedules the final VACUUM INTO + production branch update AFTER
+  // persisting the "accepted" state to the DB, so the new slot's DB contains the
+  // complete progress log and is not truncated on refresh.
   return { ok: true, branch, newProdPort, oldUpstreamPort };
 }
 
 /**
  * Activates the new production slot after all DB writes are complete.
  *
- * If REVERSE_PROXY_PORT is set (proxy in use): sets the PROD symbolic-ref to
- * the session branch so the reverse proxy routes to the new server, then
- * gracefully kills the old server via lsof on its former port.
+ * If REVERSE_PROXY_PORT is set (proxy in use): sets primordia.productionBranch
+ * in git config so the reverse proxy routes to the new server, then gracefully
+ * kills the old server via lsof on its former port.
  *
  * Falls back to `sudo systemctl restart primordia-proxy` when the proxy is not
  * configured (e.g. initial setup or local dev accidentally running in
@@ -338,9 +338,13 @@ function scheduleSlotActivation(
   const useProxy = !!process.env.REVERSE_PROXY_PORT && newProdPort !== null;
 
   if (useProxy) {
-    // Set PROD symbolic-ref so the proxy routes to the new session branch.
+    // Set primordia.productionBranch in git config so the proxy routes to the new branch.
     try {
-      execFileSync('git', ['symbolic-ref', 'PROD', `refs/heads/${branch}`], {
+      execFileSync('git', ['config', 'primordia.productionBranch', branch], {
+        cwd: repoRoot,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      execFileSync('git', ['config', '--add', 'primordia.productionHistory', branch], {
         cwd: repoRoot,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
@@ -348,7 +352,7 @@ function scheduleSlotActivation(
 
     // Re-write the session branch port in git config (same value, but the write
     // touches .git/config and fires the proxy's fs.watch so it reads the updated
-    // PROD ref immediately rather than waiting for the 5 s safety-net poll).
+    // production branch immediately rather than waiting for the 5 s safety-net poll).
     try {
       execFileSync('git', ['config', `branch.${branch}.port`, String(newProdPort)], {
         cwd: repoRoot,

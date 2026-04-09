@@ -4,9 +4,9 @@
 # Run once on the server after cloning/updating the repo.
 #
 # The proxy is the only long-running systemd service. It is responsible for:
-#   - Reading the PROD git symbolic-ref to determine the production branch/port.
+#   - Reading primordia.productionBranch from git config to determine the production branch/port.
 #   - Starting the production Next.js server on boot (if not already running).
-#   - Zero-downtime blue/green traffic cutover via PROD ref updates.
+#   - Zero-downtime blue/green traffic cutover via git config updates.
 #
 # Usage:
 #   bash scripts/install-service.sh
@@ -34,13 +34,14 @@ PROXY_STABLE="$HOME/primordia-proxy.ts"
 cp "${SCRIPT_DIR}/reverse-proxy.ts" "${PROXY_STABLE}"
 echo "  Installed proxy script: ${PROXY_STABLE}"
 
-# Initialise the PROD symbolic-ref so the reverse proxy knows which branch is
-# production. Only set on first install — never overwrite a live PROD pointer.
-if ! git -C "${REPO_ROOT}" symbolic-ref PROD >/dev/null 2>&1; then
-  git -C "${REPO_ROOT}" symbolic-ref PROD refs/heads/main
-  echo "  Initialized PROD symbolic-ref → refs/heads/main"
+# Initialise primordia.productionBranch in git config so the reverse proxy knows
+# which branch is production. Only set on first install — never overwrite a live value.
+if ! git -C "${REPO_ROOT}" config --get primordia.productionBranch >/dev/null 2>&1; then
+  git -C "${REPO_ROOT}" config primordia.productionBranch main
+  git -C "${REPO_ROOT}" config --add primordia.productionHistory main
+  echo "  Initialized production branch → main"
 else
-  echo "  PROD symbolic-ref already set → $(git -C "${REPO_ROOT}" symbolic-ref --short PROD)"
+  echo "  Production branch already set → $(git -C "${REPO_ROOT}" config --get primordia.productionBranch)"
 fi
 
 # Kill any legacy nohup process so we don't double-run.

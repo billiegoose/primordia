@@ -1,6 +1,7 @@
 // app/api/rollback/route.ts
 // Fast rollback for the blue/green deploy: swaps production back to the previous
-// slot (PROD@{1}) with zero downtime via the reverse proxy. Admin-only.
+// slot (second entry in primordia.productionHistory) with zero downtime via the
+// reverse proxy. Admin-only.
 //
 // GET  — returns { hasPrevious: boolean } so the UI can show/hide the rollback option.
 // POST — performs the rollback; returns { outcome: 'rolled-back' } or { error }.
@@ -64,17 +65,21 @@ function findCurrentAndPrevious(repoRoot: string): {
   previousBranch: string;
   prodBranch: string;
 } | { error: string } {
-  // Current prod branch from PROD symbolic-ref.
-  const prodBranch = spawnSync('git', ['symbolic-ref', '--short', 'PROD'], {
+  // Current prod branch from git config.
+  const prodBranch = spawnSync('git', ['config', '--get', 'primordia.productionBranch'], {
     cwd: repoRoot, encoding: 'utf8',
   }).stdout.trim();
-  if (!prodBranch) return { error: 'PROD symbolic-ref is not set.' };
+  if (!prodBranch) return { error: 'primordia.productionBranch is not set in git config.' };
 
-  // Previous production commit from PROD@{1}.
-  const prevCommit = spawnSync('git', ['rev-parse', 'PROD@{1}'], {
+  // Previous production branch from primordia.productionHistory (oldest-first; reverse for newest-first).
+  const historyOut = spawnSync('git', ['config', '--get-all', 'primordia.productionHistory'], {
     cwd: repoRoot, encoding: 'utf8',
   }).stdout.trim();
-  if (!prevCommit) return { error: 'No previous slot in PROD reflog (PROD@{1} does not exist).' };
+  const historyBranches = historyOut.split('\n').filter(Boolean).reverse();
+  if (historyBranches.length < 2) {
+    return { error: 'No previous slot in production history (primordia.productionHistory has fewer than 2 entries).' };
+  }
+  const previousBranch = historyBranches[1];
 
   const worktrees = parseWorktreeList(
     spawnSync('git', ['worktree', 'list', '--porcelain'], { cwd: repoRoot, encoding: 'utf8' }).stdout,
@@ -84,10 +89,10 @@ function findCurrentAndPrevious(repoRoot: string): {
   if (!currentWorktree) return { error: `No worktree found for production branch '${prodBranch}'.` };
 
   const previousWorktree = worktrees.find(
-    wt => wt.head === prevCommit && wt.path !== currentWorktree.path,
+    wt => wt.branch === previousBranch && wt.path !== currentWorktree.path,
   );
   if (!previousWorktree?.branch) {
-    return { error: 'No worktree found for previous production slot (may have been pruned).' };
+    return { error: `No worktree found for previous production branch '${previousBranch}' (may have been pruned).` };
   }
 
   return {
@@ -182,8 +187,9 @@ export async function POST() {
         return;
       }
 
-      // Update PROD → previous branch; touch port in git config to fire proxy's fs.watch.
-      spawnSync('git', ['symbolic-ref', 'PROD', `refs/heads/${previousBranch}`], { cwd: repoRoot });
+      // Update production branch in git config; touch port to fire proxy's fs.watch.
+      spawnSync('git', ['config', 'primordia.productionBranch', previousBranch], { cwd: repoRoot });
+      spawnSync('git', ['config', '--add', 'primordia.productionHistory', previousBranch], { cwd: repoRoot });
       spawnSync('git', ['config', `branch.${previousBranch}.port`, String(freePort)], { cwd: repoRoot });
 
       // Give the proxy ~500 ms to pick up the config, then kill the old server
@@ -200,8 +206,9 @@ export async function POST() {
       }, 500);
     })();
   } else {
-    // Fallback: update PROD then restart the proxy (brief downtime).
-    spawnSync('git', ['symbolic-ref', 'PROD', `refs/heads/${previousBranch}`], { cwd: repoRoot });
+    // Fallback: update production branch in git config then restart the proxy (brief downtime).
+    spawnSync('git', ['config', 'primordia.productionBranch', previousBranch], { cwd: repoRoot });
+    spawnSync('git', ['config', '--add', 'primordia.productionHistory', previousBranch], { cwd: repoRoot });
     setTimeout(() => {
       try { execSync('sudo systemctl restart primordia-proxy', { stdio: 'ignore' }); } catch {}
     }, 500);
