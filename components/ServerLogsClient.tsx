@@ -12,10 +12,19 @@ import { withBasePath } from "../lib/base-path";
 interface ServerLogsClientProps {
   /** API route to stream from. Defaults to /api/admin/logs. */
   apiPath?: string;
+  /**
+   * Initial log content rendered server-side. When provided, the component
+   * initializes with this text and opens the SSE stream with ?n=0 (no history
+   * replay) to avoid duplicating lines already shown.
+   */
+  initialOutput?: string;
 }
 
-export default function ServerLogsClient({ apiPath = "/api/admin/logs" }: ServerLogsClientProps) {
-  const [output, setOutput] = useState<string>("");
+export default function ServerLogsClient({
+  apiPath = "/api/admin/logs",
+  initialOutput = "",
+}: ServerLogsClientProps) {
+  const [output, setOutput] = useState<string>(initialOutput);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // true when auto-scroll is active (user hasn't scrolled up)
@@ -25,7 +34,11 @@ export default function ServerLogsClient({ apiPath = "/api/admin/logs" }: Server
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  const connect = useCallback(() => {
+  // connect(skipHistory=true) appends ?n=0 so SSE only streams new lines.
+  // Used on initial mount when initialOutput is already populated.
+  // connect(skipHistory=false) uses the full apiPath (replays last 100 lines).
+  // Used on manual reconnect.
+  const connect = useCallback((skipHistory: boolean) => {
     // Clean up any existing connection
     abortRef.current?.abort();
     const abort = new AbortController();
@@ -34,9 +47,11 @@ export default function ServerLogsClient({ apiPath = "/api/admin/logs" }: Server
     setError(null);
     setConnected(false);
 
+    const path = skipHistory ? `${apiPath}?n=0` : apiPath;
+
     (async () => {
       try {
-        const res = await fetch(withBasePath(apiPath), { signal: abort.signal });
+        const res = await fetch(withBasePath(path), { signal: abort.signal });
         if (!res.ok) {
           const text = await res.text();
           setError(`HTTP ${res.status}: ${text}`);
@@ -80,12 +95,14 @@ export default function ServerLogsClient({ apiPath = "/api/admin/logs" }: Server
         }
       }
     })();
-  }, []);
+  }, [apiPath]);
 
-  // Connect on mount, disconnect on unmount
+  // Connect on mount, disconnect on unmount.
+  // Skip history replay if initialOutput is already populated.
   useEffect(() => {
-    connect();
+    connect(!!initialOutput);
     return () => abortRef.current?.abort();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connect]);
 
   // Auto-scroll when output changes
@@ -109,7 +126,7 @@ export default function ServerLogsClient({ apiPath = "/api/admin/logs" }: Server
 
   function handleReconnect() {
     setOutput("");
-    connect();
+    connect(false);
   }
 
   return (

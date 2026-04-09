@@ -3,6 +3,7 @@
 // Admin only.
 
 import type { Metadata } from "next";
+import { spawnSync } from "child_process";
 import { redirect } from "next/navigation";
 import { getSessionUser, isAdmin } from "@/lib/auth";
 import { getDb } from "@/lib/db";
@@ -47,11 +48,19 @@ export default async function AdminProxyLogsPage() {
 
   const sessionUser = { id: user.id, username: user.username, isAdmin: true };
 
+  // Fetch the first batch of log lines server-side so the page is readable
+  // even when client-side JavaScript hasn't connected yet (e.g. broken HMR).
+  const initialLogs = spawnSync(
+    "journalctl",
+    ["-u", "primordia-proxy", "-n", "100", "--no-pager"],
+    { encoding: "utf8" },
+  ).stdout ?? "";
+
   return (
     <main className="flex flex-col w-full max-w-3xl mx-auto px-4 py-6 min-h-dvh">
       <PageNavBar subtitle="Admin" currentPage="admin" initialSession={sessionUser} />
       <AdminSubNav currentTab="proxy-logs" />
-      <ServerLogsClient apiPath="/api/admin/proxy-logs" />
+      <ServerLogsClient apiPath="/api/admin/proxy-logs" initialOutput={initialLogs} />
     </main>
   );
 }

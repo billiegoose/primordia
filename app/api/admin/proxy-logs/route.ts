@@ -21,7 +21,9 @@ export async function GET(req: NextRequest) {
 
   const stream = new ReadableStream({
     start(controller) {
-      const proc = spawn("journalctl", ["-u", "primordia-proxy", "-f", "-n", "100"], {
+      const url = new URL(req.url);
+      const n = url.searchParams.get("n") ?? "100";
+      const proc = spawn("journalctl", ["-u", "primordia-proxy", "-f", "-n", n], {
         stdio: ["ignore", "pipe", "pipe"],
       });
 
