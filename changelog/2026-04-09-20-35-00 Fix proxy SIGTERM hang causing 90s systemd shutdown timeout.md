@@ -19,3 +19,5 @@ Systemd's default `TimeoutStopSec` is 90 seconds. After that it escalates to SIG
 ```
 
 `server.closeAllConnections()` (Node.js 18.2+ / Bun) forcibly closes all idle keep-alive sockets, so `server.close()` can complete promptly. The 5-second timeout is a belt-and-suspenders guard in case active streaming connections don't drain.
+
+A secondary contributing factor: the proxy spawns preview dev servers with `stdio: ['ignore', 'pipe', 'pipe']`, so their stdout/stderr pipes back to the proxy process. If a preview session had a Claude Code instance running at shutdown time, `stopPreviewServer()` sends SIGTERM to the process group, but Claude Code may not exit immediately — those open pipes would keep the proxy's event loop alive even after `server.close()` completes. The unconditional `process.exit(0)` in the 5-second fallback timer handles this case too, regardless of how many child-process pipes remain open.
