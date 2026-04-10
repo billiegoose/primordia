@@ -19,6 +19,7 @@
 - Updated `components/AdminSubNav.tsx` to include the new "Server Health" tab.
 - Fixed the admin subnav tabs overflowing on narrow screens: added `overflow-x-auto` so the tab row scrolls horizontally, `shrink-0` on each tab so they don't compress, and `max-w-full` on the nav so it spans the page.
 - Removed `max-w-3xl` from all admin page `<main>` containers so the pages use full screen width, consistent with the nav bar spanning the full width.
+- Added `overflow-x-hidden` to all admin page `<main>` containers so tab overflow is clipped at the page boundary rather than causing horizontal page scroll.
 
 ## Why
 
