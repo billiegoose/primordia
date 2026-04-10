@@ -1200,16 +1200,10 @@ export default function EvolveSessionView({
                   <p className="text-gray-300 text-sm mb-4">
                     {isProduction ? (
                       <>
-                        Accepting will make{" "}
+                        Accepting will deploy{" "}
                         <code className="bg-gray-800 px-1 rounded">{sessionBranch}</code>{" "}
-                        the new live production instance. No merge commit is created —{" "}
-                        <code className="bg-gray-800 px-1 rounded">{branch ?? "main"}</code>{" "}
-                        stays at its current commit so the previous slot can be rolled back to.{" "}
-                        <code className="bg-gray-800 px-1 rounded">primordia.productionBranch</code>{" "}
-                        in git config will be updated to{" "}
-                        <code className="bg-gray-800 px-1 rounded">{sessionBranch}</code>
-                        , and the reverse proxy will cut traffic over with no downtime. The
-                        previous production worktree stays registered for rollback.
+                        to production with zero-downtime cutover. The previous slot stays
+                        registered for rollback.
                       </>
                     ) : (
                       <>
