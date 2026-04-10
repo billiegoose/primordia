@@ -14,6 +14,7 @@ import { useSessionUser } from "../lib/hooks";
 import { withBasePath } from "../lib/base-path";
 import Link from "next/link";
 import type { DiffFileSummary } from "../app/evolve/session/[id]/page";
+import { DiffFileExpander } from "./DiffFileExpander";
 
 // ─── Section parsing ──────────────────────────────────────────────────────────
 
@@ -967,17 +968,16 @@ export default function EvolveSessionView({
               </span>
             </summary>
             <div className="border-t border-gray-800">
-              <table className="w-full text-xs font-mono">
-                <tbody>
-                  {diffSummary.map((f, i) => (
-                    <tr key={i} className="border-b border-gray-800/60 last:border-0 hover:bg-gray-800/30">
-                      <td className="px-4 py-1.5 text-gray-300 truncate max-w-0 w-full">{f.file}</td>
-                      <td className="px-4 py-1.5 text-right whitespace-nowrap text-green-400 w-12">+{f.additions}</td>
-                      <td className="px-4 py-1.5 text-right whitespace-nowrap text-red-400 w-12">-{f.deletions}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              {diffSummary.map((f, i) => (
+                <DiffFileExpander
+                  key={i}
+                  sessionId={sessionId}
+                  file={f.file}
+                  additions={f.additions}
+                  deletions={f.deletions}
+                  isLast={i === diffSummary.length - 1}
+                />
+              ))}
             </div>
           </details>
         );
