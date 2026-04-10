@@ -2,7 +2,7 @@
 // Helpers for the local evolve flow.
 // Only used when NODE_ENV=development.
 
-import { query, type HookCallback, type PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
+import { query } from '@anthropic-ai/claude-agent-sdk';
 import { spawn } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -92,25 +92,184 @@ function getOrAssignBranchPort(branch: string, repoRoot: string): number {
   return port;
 }
 
-// ─── In-memory Claude abort controller registry ───────────────────────────────
+// ─── Worker process management ────────────────────────────────────────────────
+
+/** Config passed to the standalone Claude worker process via a temp JSON file. */
+interface WorkerConfig {
+  sessionId: string;
+  worktreePath: string;
+  repoRoot: string;
+  dbPath: string;
+  prompt: string;
+  timeoutMs: number;
+  /** When true, worker sets status='ready' + previewUrl on success. */
+  setReadyOnSuccess: boolean;
+  /** Message appended on success (only when setReadyOnSuccess=true). */
+  completionMessage: string;
+  /** Public origin for previewUrl construction. Null = don't update previewUrl. */
+  publicOrigin: string | null;
+}
+
+/** Maps session IDs to the PID of their running Claude worker process. */
+const activeWorkerPids = new Map<string, number>();
+
+/** Returns true if the OS process with the given PID is still alive. */
+function isProcessAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
 
 /**
- * Maps session IDs to the AbortController for any currently-running Claude
- * Code query() call. Populated by startLocalEvolve / runFollowupInWorktree
- * and cleared when the query finishes (normally, timeout, or abort).
+ * Throws if a Claude Code worker is already running in the given worktree,
+ * guarding against concurrent workers that would clobber each other's work.
+ *
+ * Reads the PID from `.primordia-worker.pid` (written by the worker on
+ * startup). If the PID file exists but the process is gone, the stale file
+ * is removed so the next launch can proceed.
  */
-const activeClaudeAbortControllers = new Map<string, AbortController>();
+function checkWorktreeNotBusy(worktreePath: string): void {
+  const pidFile = path.join(worktreePath, '.primordia-worker.pid');
+  if (!fs.existsSync(pidFile)) return;
+  const pidStr = fs.readFileSync(pidFile, 'utf8').trim();
+  const pid = parseInt(pidStr, 10);
+  if (!isNaN(pid) && isProcessAlive(pid)) {
+    throw new Error(
+      `A Claude Code worker (PID ${pid}) is already running in this worktree. ` +
+      `Wait for it to finish or abort the current session before starting another.`,
+    );
+  }
+  // Stale PID file — process is gone, clean it up.
+  try { fs.rmSync(pidFile, { force: true }); } catch { /* best-effort */ }
+}
 
 /**
- * Signals the running Claude Code instance for the given session to stop.
- * Returns true if an active controller was found and aborted, false if the
- * session has no running Claude Code instance.
+ * Spawns a detached Claude Code worker process for the given config.
+ * The worker process is independent of the server — it survives server
+ * restarts. Awaiting this function waits for the worker to exit.
+ *
+ * If the server exits while this is awaited, the worker keeps running.
+ * On server restart, reconnectRunningWorkers() re-attaches to live workers.
+ */
+async function spawnClaudeWorker(
+  config: WorkerConfig,
+  workerScriptPath: string,
+): Promise<void> {
+  checkWorktreeNotBusy(config.worktreePath);
+
+  const configFile = `/tmp/primordia-worker-${config.sessionId}.json`;
+  fs.writeFileSync(configFile, JSON.stringify(config), 'utf8');
+
+  return new Promise<void>((resolve, reject) => {
+    const proc = spawn('bun', ['run', workerScriptPath, configFile], {
+      cwd: config.repoRoot,
+      detached: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    if (!proc.pid) {
+      fs.rmSync(configFile, { force: true });
+      reject(new Error('Failed to spawn Claude worker: no PID assigned'));
+      return;
+    }
+
+    // Unref so the worker keeps running even if the server exits.
+    proc.unref();
+    activeWorkerPids.set(config.sessionId, proc.pid);
+
+    // Forward worker output to server logs.
+    proc.stdout?.on('data', (data: Buffer) => process.stdout.write(data));
+    proc.stderr?.on('data', (data: Buffer) => process.stderr.write(data));
+
+    proc.on('exit', () => {
+      activeWorkerPids.delete(config.sessionId);
+      try { fs.rmSync(configFile, { force: true }); } catch { /* best-effort */ }
+      resolve();
+    });
+
+    proc.on('error', (err: Error) => {
+      activeWorkerPids.delete(config.sessionId);
+      try { fs.rmSync(configFile, { force: true }); } catch { /* best-effort */ }
+      reject(new Error(`Claude worker spawn failed: ${err.message}`));
+    });
+  });
+}
+
+/**
+ * On server startup: reconnect to any Claude worker processes that survived
+ * from before the restart. For each session in a running state:
+ *   - If the worker's PID file exists and the process is alive, register its
+ *     PID so abortClaudeRun() can still send SIGTERM to it.
+ *   - If the PID file is missing or the process is dead, mark the session as
+ *     'ready' with a recovery note (consistent with the abort endpoint behavior).
+ *
+ * Call this once from instrumentation.ts when the server starts.
+ */
+export async function reconnectRunningWorkers(repoRoot: string): Promise<void> {
+  const db = await getDb();
+  const sessions = await db.listEvolveSessions(200);
+  const runningStatuses = new Set(['running-claude', 'fixing-types', 'starting']);
+
+  for (const record of sessions) {
+    if (!runningStatuses.has(record.status)) continue;
+
+    const pidFile = path.join(record.worktreePath, '.primordia-worker.pid');
+    let livePid: number | null = null;
+
+    if (fs.existsSync(pidFile)) {
+      const pidStr = fs.readFileSync(pidFile, 'utf8').trim();
+      const parsed = parseInt(pidStr, 10);
+      if (!isNaN(parsed) && isProcessAlive(parsed)) {
+        livePid = parsed;
+      }
+    }
+
+    if (livePid === null) {
+      // Worker is gone — recover the session so it isn't stuck forever.
+      const note =
+        record.status === 'fixing-types'
+          ? '\n\n🛑 **Session recovered.** The server restarted while Claude Code was running. ' +
+            'Moving to ready state with work completed so far.\n' +
+            '_(Auto-accept was cancelled — you can accept or reject manually.)_\n'
+          : '\n\n🛑 **Session recovered.** The server restarted while Claude Code was running. ' +
+            'Moving to ready state with work completed so far.\n';
+      await db.updateEvolveSession(record.id, {
+        status: 'ready',
+        progressText: record.progressText + note,
+      });
+      if (fs.existsSync(pidFile)) {
+        try { fs.rmSync(pidFile, { force: true }); } catch { /* best-effort */ }
+      }
+      continue;
+    }
+
+    // Worker is still running — register it so abortClaudeRun() works.
+    activeWorkerPids.set(record.id, livePid);
+    // Background: unregister PID when the worker eventually finishes.
+    const sessionId = record.id;
+    void (async () => {
+      while (isProcessAlive(livePid!)) {
+        await new Promise<void>((r) => setTimeout(r, 2000));
+      }
+      activeWorkerPids.delete(sessionId);
+    })();
+  }
+}
+
+/**
+ * Signals the running Claude Code worker for the given session to stop.
+ * Returns true if a live worker was found and signalled, false if the
+ * session has no registered worker PID.
  */
 export function abortClaudeRun(sessionId: string): boolean {
-  const controller = activeClaudeAbortControllers.get(sessionId);
-  if (!controller) return false;
-  controller.abort();
-  return true;
+  const pid = activeWorkerPids.get(sessionId);
+  if (pid === undefined) return false;
+  try {
+    process.kill(pid, 'SIGTERM');
+    return true;
+  } catch {
+    // Worker may have already exited.
+    activeWorkerPids.delete(sessionId);
+    return false;
+  }
 }
 
 // ─── Progress logging ─────────────────────────────────────────────────────────
@@ -184,77 +343,6 @@ function summarizeToolUse(
     case 'Agent':     return `Spawn sub-agent`;
     default:          return name;
   }
-}
-
-// ─── Worktree boundary enforcement ───────────────────────────────────────────
-
-/**
- * Returns a PreToolUse hook that blocks any file operation whose resolved path
- * falls outside worktreePath. Prevents Claude from accidentally touching the
- * main repo or other worktrees during a local evolve session.
- *
- * Covers:
- *  - Read / Write / Edit  — checked via `file_path`
- *  - Glob / Grep          — checked via `path` (absolute paths only)
- *  - Bash                 — blocks commands that explicitly reference repoRoot
- */
-function makeWorktreeBoundaryHook(worktreePath: string, repoRoot: string): HookCallback {
-  const worktreeNorm = path.resolve(worktreePath);
-  const repoRootNorm = path.resolve(repoRoot);
-
-  function isInsideWorktree(p: string): boolean {
-    const resolved = path.resolve(worktreeNorm, p);
-    return resolved === worktreeNorm || resolved.startsWith(worktreeNorm + path.sep);
-  }
-
-  return async (input) => {
-    const hook = input as PreToolUseHookInput;
-    const toolInput = hook.tool_input as Record<string, unknown>;
-    const toolName = hook.tool_name;
-
-    // Read / Write / Edit — block if file_path resolves outside the worktree
-    const filePath = typeof toolInput.file_path === 'string' ? toolInput.file_path : '';
-    if (filePath && !isInsideWorktree(filePath)) {
-      return {
-        decision: 'block' as const,
-        reason:
-          `Out-of-worktree access blocked: \`${filePath}\` is outside the worktree at ` +
-          `\`${worktreeNorm}\`. Only files within the worktree may be read or modified.`,
-      };
-    }
-
-    // Glob / Grep — block absolute search paths outside the worktree
-    const searchPath = typeof toolInput.path === 'string' ? toolInput.path : '';
-    if (searchPath && path.isAbsolute(searchPath) && !isInsideWorktree(searchPath)) {
-      return {
-        decision: 'block' as const,
-        reason:
-          `Out-of-worktree access blocked: search path \`${searchPath}\` is outside the ` +
-          `worktree at \`${worktreeNorm}\`.`,
-      };
-    }
-
-    // Bash — block commands that explicitly reference the main repo root.
-    // We use a regex with a lookahead instead of a plain `includes()` to avoid
-    // false positives when repoRootNorm is a string prefix of a worktree path
-    // (e.g. `/…/primordia` must not match `/…/primordia-worktrees/…`).
-    // The lookahead requires the match to be followed by /, whitespace, a quote,
-    // or end-of-string — i.e. it must appear as a path component, not a prefix.
-    if (toolName === 'Bash') {
-      const command = typeof toolInput.command === 'string' ? toolInput.command : '';
-      const escaped = repoRootNorm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      if (new RegExp(escaped + '(?=[/\\s"\'`]|$)').test(command)) {
-        return {
-          decision: 'block' as const,
-          reason:
-            `Out-of-worktree access blocked: the Bash command references the main repo root ` +
-            `\`${repoRootNorm}\`. Run git commands inside the worktree instead.`,
-        };
-      }
-    }
-
-    return {};
-  };
 }
 
 // ─── Git ──────────────────────────────────────────────────────────────────────
@@ -479,7 +567,9 @@ export async function startLocalEvolve(
       appendProgress(session, `- [x] Copied ${worktreeAttachmentPaths.length} attachment(s) into worktree\n`);
     }
 
-    // Step 6 — Run Claude Code via the Agent SDK
+    // Step 6 — Spawn Claude Code as a detached worker process.
+    // The worker writes progress to SQLite and sets status='ready' + previewUrl when done.
+    // It survives server restarts — on next startup, reconnectRunningWorkers() re-attaches.
     session.status = 'running-claude';
     appendProgress(session, `\n### 🤖 Claude Code\n\n`);
     await persist();
@@ -497,125 +587,21 @@ export async function startLocalEvolve(
       `1. Create a new changelog file in the \`changelog/\` directory named \`YYYY-MM-DD-HH-MM-SS Description of change.md\` (UTC time, e.g. \`2026-03-16-21-00-00 Fix login bug.md\`). The filename is the short description; the file body is the full "what changed + why" detail in markdown. Do NOT add changelog entries to CLAUDE.md itself.\n` +
       `2. Commit all changes with a descriptive message.`;
 
-    // Accumulate stderr lines so they can be surfaced if the process crashes.
-    const stderrLines: string[] = [];
-
-    // 20-minute timeout: abort Claude Code and fall through to "ready" state.
-    const claudeAbortController = new AbortController();
-    let claudeTimedOut = false;
-    let claudeUserAborted = false;
-    const claudeTimeoutId = setTimeout(() => {
-      claudeTimedOut = true;
-      claudeAbortController.abort();
-    }, 20 * 60 * 1000);
-
-    activeClaudeAbortControllers.set(session.id, claudeAbortController);
-
-    const run = query({
-      prompt,
-      options: {
-        cwd: session.worktreePath,
-        systemPrompt: {
-          type: 'preset',
-          preset: 'claude_code',
-          append: `The current working directory is: ${session.worktreePath}`,
-        },
-        permissionMode: 'bypassPermissions',
-        allowDangerouslySkipPermissions: true,
-        abortController: claudeAbortController,
-        // Capture stderr from the Claude Code process. Claude Code writes
-        // diagnostic/crash information to stderr before exiting with a non-zero
-        // code, so capturing it gives much better error messages than just the
-        // exit code alone.
-        stderr: (data: string) => {
-          stderrLines.push(data.trimEnd());
-        },
-        // Enforce that Claude can only touch files inside the worktree. Without
-        // this, Claude Code could (and occasionally did) write directly into the
-        // main repo branch instead of the isolated preview worktree.
-        hooks: {
-          PreToolUse: [
-            {
-              matcher: 'Read|Write|Edit|Glob|Grep|Bash',
-              hooks: [makeWorktreeBoundaryHook(session.worktreePath, repoRoot)],
-            },
-          ],
-        },
+    await spawnClaudeWorker(
+      {
+        sessionId: session.id,
+        worktreePath: session.worktreePath,
+        repoRoot,
+        dbPath: path.join(repoRoot, '.primordia-auth.db'),
+        prompt,
+        timeoutMs: 20 * 60 * 1000,
+        setReadyOnSuccess: true,
+        completionMessage: '\n✅ **Claude Code finished.**\n',
+        publicOrigin,
       },
-    });
-
-    try {
-      for await (const message of run) {
-        if (message.type === 'assistant') {
-          for (const block of message.message.content) {
-            if (block.type === 'text' && block.text.trim()) {
-              // If the previous content ended a list (single trailing newline), add
-              // a blank line so the list renders correctly in markdown.
-              if (session.progressText.endsWith('\n') && !session.progressText.endsWith('\n\n')) {
-                appendProgress(session, '\n');
-              }
-              appendProgress(session, block.text.trimEnd() + '\n\n');
-            } else if (block.type === 'tool_use') {
-              const summary = summarizeToolUse(block.name, block.input as Record<string, unknown>, session.worktreePath);
-              appendProgress(session, `- 🔧 ${summary}\n`);
-            }
-          }
-          // Write live progress to SQLite so the session page stays up to date.
-          await persist();
-        } else if (message.type === 'result') {
-          if (message.subtype !== 'success') {
-            // `errors` is populated by the SDK when subtype is e.g. error_during_execution.
-            const sdkErrors = (message as { errors?: string[] }).errors ?? [];
-            const stderrStr = stderrLines.join('\n').trim();
-            const details = [
-              sdkErrors.filter(Boolean).join('\n'),
-              stderrStr,
-            ].filter(Boolean).join('\n');
-            throw new Error(
-              `Claude Code run ended with: ${message.subtype}` +
-              (details ? `\n\nDetails:\n${details}` : ''),
-            );
-          }
-        }
-      }
-    } catch (err) {
-      // If the abort was triggered by our timeout or by the user, swallow the
-      // error and fall through to start the dev server with whatever work was completed.
-      claudeUserAborted = !claudeTimedOut && claudeAbortController.signal.aborted;
-      if (claudeTimedOut) {
-        appendProgress(session, `\n\n⏱️ **Claude Code timed out after 20 minutes.** Moving to ready state with work completed so far.\n`);
-        await persist();
-      } else if (claudeUserAborted) {
-        appendProgress(session, `\n\n🛑 **Claude Code was aborted.** Moving to ready state with work completed so far.\n`);
-        await persist();
-      } else {
-        // If this is a process-level failure (e.g. "Claude Code process exited with code 1")
-        // rather than the structured error we threw above, enrich it with any captured stderr.
-        const stderrStr = stderrLines.join('\n').trim();
-        if (
-          stderrStr &&
-          err instanceof Error &&
-          !err.message.includes('Details:') // not our own structured error
-        ) {
-          throw new Error(`${err.message}\n\nStderr:\n${stderrStr}`, { cause: err });
-        }
-        throw err;
-      }
-    } finally {
-      clearTimeout(claudeTimeoutId);
-      activeClaudeAbortControllers.delete(session.id);
-    }
-
-    if (!claudeTimedOut && !claudeUserAborted) {
-      appendProgress(session, `\n✅ **Claude Code finished.**\n`);
-      await persist();
-    }
-
-    // Step 6 — Mark session ready; the proxy will start the preview server on demand.
-    // The preview URL is always accessible through the proxy at /preview/{sessionId}.
-    session.previewUrl = `${publicOrigin}/preview/${session.id}`;
-    session.status = 'ready';
-    await persist();
+      path.join(repoRoot, 'scripts/claude-worker.ts'),
+    );
+    // Worker has exited — it already set status='ready' and previewUrl in the DB.
 
   } catch (err) {
     // Mark the session ready (with an error note in the log) so the UI shows
@@ -758,110 +744,40 @@ export async function runFollowupInWorktree(
       `**Follow-up request:**\n\n${followupRequest}${attachmentSection}\n\n` +
       `${changelogInstruction} Commit all changes with a descriptive message.`;
 
-    const stderrLines: string[] = [];
-
-    // 20-minute timeout: abort Claude Code and fall through to "ready" state.
-    const claudeAbortController = new AbortController();
-    let claudeTimedOut = false;
-    let claudeUserAborted = false;
-    const claudeTimeoutId = setTimeout(() => {
-      claudeTimedOut = true;
-      claudeAbortController.abort();
-    }, 20 * 60 * 1000);
-
-    activeClaudeAbortControllers.set(session.id, claudeAbortController);
-
-    const run = query({
-      prompt,
-      options: {
-        cwd: session.worktreePath,
-        systemPrompt: {
-          type: 'preset',
-          preset: 'claude_code',
-          append: `The current working directory is: ${session.worktreePath}`,
-        },
-        permissionMode: 'bypassPermissions',
-        allowDangerouslySkipPermissions: true,
-        abortController: claudeAbortController,
-        stderr: (data: string) => {
-          stderrLines.push(data.trimEnd());
-        },
-        hooks: {
-          PreToolUse: [
-            {
-              matcher: 'Read|Write|Edit|Glob|Grep|Bash',
-              hooks: [makeWorktreeBoundaryHook(session.worktreePath, repoRoot)],
-            },
-          ],
-        },
+    // Spawn a detached worker process — same pattern as startLocalEvolve.
+    // When onSuccess is provided (e.g. type-fix retry), the worker must NOT
+    // mark the session 'ready' itself (setReadyOnSuccess=false) so the server
+    // can call onSuccess after the worker exits.
+    await spawnClaudeWorker(
+      {
+        sessionId: session.id,
+        worktreePath: session.worktreePath,
+        repoRoot,
+        dbPath: path.join(repoRoot, '.primordia-auth.db'),
+        prompt,
+        timeoutMs: 20 * 60 * 1000,
+        setReadyOnSuccess: !onSuccess,
+        completionMessage: '\n✅ **Follow-up complete. Preview server will reload automatically.**\n',
+        publicOrigin: null,
       },
-    });
-
-    try {
-      for await (const message of run) {
-        if (message.type === 'assistant') {
-          for (const block of message.message.content) {
-            if (block.type === 'text' && block.text.trim()) {
-              if (session.progressText.endsWith('\n') && !session.progressText.endsWith('\n\n')) {
-                appendProgress(session, '\n');
-              }
-              appendProgress(session, block.text.trimEnd() + '\n\n');
-            } else if (block.type === 'tool_use') {
-              const summary = summarizeToolUse(block.name, block.input as Record<string, unknown>, session.worktreePath);
-              appendProgress(session, `- 🔧 ${summary}\n`);
-            }
-          }
-          await persist();
-        } else if (message.type === 'result') {
-          if (message.subtype !== 'success') {
-            const sdkErrors = (message as { errors?: string[] }).errors ?? [];
-            const stderrStr = stderrLines.join('\n').trim();
-            const details = [
-              sdkErrors.filter(Boolean).join('\n'),
-              stderrStr,
-            ].filter(Boolean).join('\n');
-            throw new Error(
-              `Claude Code run ended with: ${message.subtype}` +
-              (details ? `\n\nDetails:\n${details}` : ''),
-            );
-          }
-        }
-      }
-    } catch (err) {
-      claudeUserAborted = !claudeTimedOut && claudeAbortController.signal.aborted;
-      if (claudeTimedOut) {
-        appendProgress(session, `\n\n⏱️ **Claude Code timed out after 20 minutes.** Moving to ready state with work completed so far.\n`);
-        session.status = 'ready';
-        await persist();
-        return;
-      }
-      if (claudeUserAborted) {
-        appendProgress(session, `\n\n🛑 **Claude Code was aborted.** Moving to ready state with work completed so far.\n`);
-        session.status = 'ready';
-        await persist();
-        return;
-      }
-      const stderrStr = stderrLines.join('\n').trim();
-      if (
-        stderrStr &&
-        err instanceof Error &&
-        !err.message.includes('Details:')
-      ) {
-        throw new Error(`${err.message}\n\nStderr:\n${stderrStr}`, { cause: err });
-      }
-      throw err;
-    } finally {
-      clearTimeout(claudeTimeoutId);
-      activeClaudeAbortControllers.delete(session.id);
-    }
+      path.join(repoRoot, 'scripts/claude-worker.ts'),
+    );
 
     if (onSuccess) {
+      // Worker exited without setting status='ready'. Reload the session from
+      // the DB (the worker has been writing progress there) and hand off to
+      // the callback for final status handling (e.g. retrying the merge).
+      const updated = await db.getEvolveSession(session.id);
+      if (updated) {
+        session.status = updated.status as LocalSession['status'];
+        session.progressText = updated.progressText;
+        session.port = updated.port;
+        session.previewUrl = updated.previewUrl;
+      }
       await onSuccess(session);
-    } else {
-      appendProgress(session, `\n✅ **Follow-up complete. Preview server will reload automatically.**\n`);
-      session.status = 'ready';
-      await persist();
     }
+    // else: worker already set status='ready' in the DB.
+
   } catch (err) {
     session.status = 'ready';
     const msg = err instanceof Error ? err.message : String(err);

@@ -40,3 +40,6 @@ next-env.d.ts
 
 # Uploaded attachments copied into worktrees (transient, not part of the project)
 /attachments/
+
+# Claude Code worker PID file (written by scripts/claude-worker.ts on startup)
+.primordia-worker.pid
