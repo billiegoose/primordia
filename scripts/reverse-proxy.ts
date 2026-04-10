@@ -34,9 +34,9 @@
 // which is updated atomically during blue/green accepts.
 
 import * as http from 'http';
+import * as net from 'net';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as stream from 'stream';
 import { execFileSync, spawn, ChildProcess } from 'child_process';
 
 // Hop-by-hop headers must not be forwarded by a proxy (RFC 7230 §6.1).
@@ -1046,16 +1046,39 @@ async function handleRequest(
   forwardToPort(resolveUpstreamPort(), clientReq, clientRes);
 }
 
-const server = http.createServer((clientReq, clientRes) => {
+// Internal HTTP handler. Listens on a random localhost port; the external
+// net.Server forwards non-WebSocket connections to it via loopback.
+const httpHandler = http.createServer((clientReq, clientRes) => {
   void handleRequest(clientReq, clientRes);
 });
 
-server.on('upgrade', (clientReq: http.IncomingMessage, clientSocket: stream.Duplex, head: Buffer) => {
-  clientSocket.on('error', (err) => {
-    console.error(`[proxy] client socket error during WS upgrade:`, err.message);
+// Inject x-forwarded-for / x-forwarded-proto into a raw HTTP upgrade request
+// buffer and return the modified buffer.  Works at the byte level so we don't
+// need an HTTP parser just for these two headers.
+function buildWsUpgradeRequest(reqBuf: Buffer, remoteAddress: string): Buffer {
+  const headerEnd = reqBuf.indexOf('\r\n\r\n');
+  if (headerEnd === -1) return reqBuf; // shouldn't happen
+  let headers = reqBuf.slice(0, headerEnd).toString('binary');
+  // Remove any existing forwarded headers to avoid duplicates.
+  headers = headers.replace(/\r\nx-forwarded-for:[^\r\n]*/gi, '');
+  headers = headers.replace(/\r\nx-forwarded-proto:[^\r\n]*/gi, '');
+  headers += `\r\nX-Forwarded-For: ${remoteAddress}`;
+  headers += `\r\nX-Forwarded-Proto: http`;
+  return Buffer.concat([Buffer.from(headers, 'binary'), Buffer.from('\r\n\r\n')]);
+}
+
+// Handle a WebSocket upgrade at the raw TCP level.  This bypasses Bun's
+// http.Server upgrade socket, which does not correctly forward writes back
+// to the client (Bun bug: the socket's write() call succeeds but the bytes
+// are silently dropped).  Using raw net.Socket connections on both sides
+// avoids the issue entirely.
+function handleWsUpgrade(rawSocket: net.Socket, reqBuf: Buffer): void {
+  rawSocket.on('error', (err) => {
+    console.error('[proxy] client socket error during WS upgrade:', err.message);
   });
 
-  const url = clientReq.url ?? '/';
+  const reqStr = reqBuf.toString('binary');
+  const url = reqStr.match(/^[A-Z]+ (\S+)/)?.[1] ?? '/';
 
   // Update activity for preview WebSocket connections (HMR).
   const previewMatch = url.match(/^\/preview\/([^/?#]+)/);
@@ -1071,98 +1094,97 @@ server.on('upgrade', (clientReq: http.IncomingMessage, clientSocket: stream.Dupl
     if (cached) targetPort = cached;
   }
 
-  const options: http.RequestOptions = {
-    hostname: '127.0.0.1',
-    port: targetPort,
-    path: clientReq.url,
-    method: clientReq.method,
-    headers: {
-      ...clientReq.headers,
-      'x-forwarded-for': clientReq.socket.remoteAddress ?? '',
-      'x-forwarded-proto': 'http',
-    },
-  };
+  const upstreamSocket = net.createConnection(targetPort, '127.0.0.1');
+  upstreamSocket.on('connect', () => {
+    // Forward the upgrade request (with x-forwarded headers injected).
+    upstreamSocket.write(buildWsUpgradeRequest(reqBuf, rawSocket.remoteAddress ?? ''));
 
-  const upstreamReq = http.request(options);
-
-  upstreamReq.on('upgrade', (upstreamRes: http.IncomingMessage, upstreamSocket: stream.Duplex, upstreamHead: Buffer) => {
-    let responseHead = 'HTTP/1.1 101 Switching Protocols\r\n';
-    for (const [key, val] of Object.entries(upstreamRes.headers)) {
-      const values = Array.isArray(val) ? val : [val];
-      for (const v of values) responseHead += `${key}: ${v}\r\n`;
-    }
-    responseHead += '\r\n';
-    clientSocket.write(responseHead);
-
-    // upstreamHead contains data from the upstream socket buffered after the 101
-    // response headers — put it back on the upstream socket's readable side so
-    // it flows through upstreamSocket.pipe(clientSocket) to the browser.
-    // head contains data from the client socket buffered after the HTTP upgrade
-    // request headers — put it back on the client socket's readable side so it
-    // flows through clientSocket.pipe(upstreamSocket) to the dev server.
-    if (upstreamHead && upstreamHead.length > 0) upstreamSocket.unshift(upstreamHead);
-    if (head && head.length > 0) clientSocket.unshift(head);
-
-    upstreamSocket.pipe(clientSocket);
-    clientSocket.pipe(upstreamSocket);
-
-    clientSocket.on('error', () => upstreamSocket.destroy());
-    upstreamSocket.on('error', () => clientSocket.destroy());
-  });
-
-  // If the upstream responds with a non-101 (e.g. 400 or 404), the 'upgrade'
-  // event never fires. Without a 'response' handler the client socket would
-  // hang open indefinitely, so we send a 502 and close it.
-  //
-  // Bun quirk: in Bun's HTTP client, a 101 Switching Protocols response fires
-  // 'response' instead of 'upgrade'. Detect that case and handle it identically
-  // to the 'upgrade' handler above so WebSocket proxying works in Bun.
-  upstreamReq.on('response', (upstreamRes) => {
-    if (upstreamRes.statusCode === 101) {
-      let responseHead = 'HTTP/1.1 101 Switching Protocols\r\n';
-      for (const [key, val] of Object.entries(upstreamRes.headers)) {
-        const values = Array.isArray(val) ? val : [val];
-        for (const v of values) responseHead += `${key}: ${v}\r\n`;
+    // Inspect the first response chunk from the upstream to verify it is a 101.
+    // If not (e.g. the dev server returned 400), return a 502 to the browser.
+    // Once confirmed as 101, push the chunk back and start the bidirectional pipe.
+    upstreamSocket.once('data', (firstChunk: Buffer) => {
+      const firstLine = firstChunk.slice(0, 20).toString('binary');
+      if (!firstLine.startsWith('HTTP/1.1 101') && !firstLine.startsWith('HTTP/1.0 101')) {
+        console.error(`[proxy] WS upstream on port ${targetPort} did not return 101`);
+        upstreamSocket.destroy();
+        if (!rawSocket.destroyed) {
+          rawSocket.write(
+            `HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n` +
+            `WebSocket upstream did not upgrade\n`,
+          );
+          rawSocket.destroy();
+        }
+        return;
       }
-      responseHead += '\r\n';
-      clientSocket.write(responseHead);
+      // Put the first chunk back so it flows through the pipe.
+      upstreamSocket.unshift(firstChunk);
+      // Bidirectional pipe — after this the proxy is a transparent tunnel.
+      rawSocket.pipe(upstreamSocket);
+      upstreamSocket.pipe(rawSocket);
+      rawSocket.on('error', () => upstreamSocket.destroy());
+      upstreamSocket.on('error', () => rawSocket.destroy());
+      rawSocket.resume();
+    });
+  });
+  upstreamSocket.on('error', (err) => {
+    console.error(`[proxy] WS upstream error on port ${targetPort}:`, err.message);
+    if (!rawSocket.destroyed) rawSocket.destroy();
+  });
+}
 
-      if (head && head.length > 0) clientSocket.unshift(head);
+// External listener.  Each connection is inspected: WebSocket upgrades are
+// handled via raw-TCP tunnelling (see handleWsUpgrade); all other requests
+// are forwarded to the internal httpHandler via a loopback connection.
+let httpHandlerPort = 0;
+const server = net.createServer((rawSocket) => {
+  rawSocket.pause();
+  let buf = Buffer.alloc(0);
 
-      const upstreamSocket = upstreamRes.socket as stream.Duplex;
-      upstreamRes.pipe(clientSocket);
-      clientSocket.pipe(upstreamSocket);
-
-      clientSocket.on('error', () => upstreamSocket.destroy());
-      upstreamSocket.on('error', () => clientSocket.destroy());
+  const onData = (chunk: Buffer): void => {
+    buf = Buffer.concat([buf, chunk]);
+    const headerEnd = buf.indexOf('\r\n\r\n');
+    if (headerEnd === -1) {
+      // Headers not yet complete — keep accumulating.
+      rawSocket.resume();
       return;
     }
 
-    console.error(`[proxy] WS upstream on port ${targetPort} returned HTTP ${upstreamRes.statusCode ?? 'unknown'} instead of 101`);
-    upstreamRes.resume(); // drain so Node.js can reuse the connection
-    if (!clientSocket.destroyed) {
-      clientSocket.write(
-        `HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n` +
-        `WebSocket upstream did not upgrade (status ${upstreamRes.statusCode ?? 'unknown'})\n`,
-      );
-      clientSocket.destroy();
+    rawSocket.removeListener('data', onData);
+
+    const isWsUpgrade = /upgrade:\s*websocket/i.test(buf.slice(0, headerEnd).toString('binary'));
+    if (isWsUpgrade) {
+      handleWsUpgrade(rawSocket, buf);
+    } else {
+      // Forward to internal HTTP handler via loopback.
+      const internal = net.createConnection(httpHandlerPort, '127.0.0.1');
+      internal.on('connect', () => {
+        internal.write(buf);
+        rawSocket.pipe(internal);
+        internal.pipe(rawSocket);
+        rawSocket.on('error', () => internal.destroy());
+        internal.on('error', () => rawSocket.destroy());
+        rawSocket.resume();
+      });
+      internal.on('error', (err) => {
+        console.error('[proxy] internal handler connection error:', err.message);
+        if (!rawSocket.destroyed) rawSocket.destroy();
+      });
     }
-  });
+  };
 
-  upstreamReq.on('error', (err) => {
-    console.error(`[proxy] WS upstream error on port ${targetPort}:`, err.message);
-    clientSocket.destroy();
-  });
-
-  upstreamReq.end();
+  rawSocket.on('data', onData);
+  rawSocket.resume();
 });
 
-server.listen(LISTEN_PORT, '0.0.0.0', () => {
-  console.log(
-    `[proxy] listening on :${LISTEN_PORT} → upstream :${upstreamPort} (git config)`,
-  );
-  console.log(`[proxy] main repo: ${MAIN_REPO}`);
-  console.log(`[proxy] worktrees: ${WORKTREES_DIR}`);
+httpHandler.listen(0, '127.0.0.1', () => {
+  httpHandlerPort = (httpHandler.address() as net.AddressInfo).port;
+  server.listen(LISTEN_PORT, '0.0.0.0', () => {
+    console.log(
+      `[proxy] listening on :${LISTEN_PORT} → upstream :${upstreamPort} (git config)`,
+    );
+    console.log(`[proxy] main repo: ${MAIN_REPO}`);
+    console.log(`[proxy] worktrees: ${WORKTREES_DIR}`);
+  });
 });
 
 process.on('SIGTERM', () => {
@@ -1170,11 +1192,8 @@ process.on('SIGTERM', () => {
   for (const sessionId of previewProcesses.keys()) {
     stopPreviewServer(sessionId);
   }
-  // closeAllConnections() forces idle keep-alive connections to close immediately
-  // so that server.close() can call its callback without hanging indefinitely.
-  // Without this, systemd's TimeoutStopSec (90 s) fires and the process gets SIGKILL.
-  server.closeAllConnections();
-  server.close(() => process.exit(0));
-  // Belt-and-suspenders: force exit after 5 s if the server still won't drain.
+  // Close the external listener then the internal handler.
+  // Belt-and-suspenders: force exit after 5 s if connections don't drain.
+  server.close(() => httpHandler.close(() => process.exit(0)));
   setTimeout(() => process.exit(0), 5_000).unref();
 });
