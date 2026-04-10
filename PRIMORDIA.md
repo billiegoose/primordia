@@ -84,13 +84,15 @@ primordia/
 │   ├── chat/
 │   │   └── page.tsx               ← Server component: chat interface; redirects to /login if unauthenticated
 │   ├── admin/
-│   │   ├── page.tsx               ← Admin panel: owner-only; grant/revoke evolve access per user; tab subnav (Manage Users / Server Logs / Proxy Logs / Rollback)
+│   │   ├── page.tsx               ← Admin panel: owner-only; grant/revoke evolve access per user; tab subnav (Manage Users / Server Logs / Proxy Logs / Rollback / Server Health)
 │   │   ├── logs/
 │   │   │   └── page.tsx           ← Server logs: pre-fetches initial log buffer from /_proxy/prod/logs on server render; delegates live tail to ServerLogsClient; admin only
 │   │   ├── proxy-logs/
 │   │   │   └── page.tsx           ← Proxy logs: pre-fetches first 100 journalctl lines server-side (Linux only; skipped on macOS); delegates live tail to ServerLogsClient; admin only
-│   │   └── rollback/
-│   │       └── page.tsx           ← Deep rollback: lists previous prod slots from primordia.productionHistory; admin only
+│   │   ├── rollback/
+│   │   │   └── page.tsx           ← Deep rollback: lists previous prod slots from primordia.productionHistory; admin only
+│   │   └── server-health/
+│   │       └── page.tsx           ← Server health: disk/memory usage and oldest non-prod worktree cleanup; admin only
 │   ├── oops/
 │   │   └── page.tsx               ← Owner-only mobile shell: run occasional system commands without SSH
 │   ├── evolve/
@@ -121,8 +123,10 @@ primordia/
 │       │   │   └── route.ts       ← GET SSE stream of production server logs; always proxies /_proxy/prod/logs (REVERSE_PROXY_PORT required); admin only
 │       │   ├── proxy-logs/
 │       │   │   └── route.ts       ← GET SSE stream of `journalctl -u primordia-proxy -f -n 100`; returns informational message on non-Linux platforms (macOS guard); admin only
-│       │   └── rollback/
-│       │       └── route.ts       ← GET list previous prod slots from primordia.productionHistory; POST apply deep rollback to any slot; admin only
+│       │   ├── rollback/
+│       │   │   └── route.ts       ← GET list previous prod slots from primordia.productionHistory; POST apply deep rollback to any slot; admin only
+│       │   └── server-health/
+│       │       └── route.ts       ← GET disk/memory usage + oldest non-prod worktree; POST delete oldest non-prod worktree (kill dev server, git worktree remove, git branch -D); admin only
 │       ├── prune-branches/
 │       │   └── route.ts           ← POST delete all local branches merged into main; streams SSE progress
 │       ├── auth/
@@ -172,7 +176,8 @@ primordia/
 │   ├── AcceptRejectBar.tsx        ← Accept/reject bar for local preview worktrees
 │   ├── AdminPermissionsClient.tsx ← Client component: grant/revoke 'can_evolve' role per user (used by /admin)
 │   ├── AdminRollbackClient.tsx    ← Client component: deep rollback UI; lists previous production slots from primordia.productionHistory with roll-back buttons (used by /admin/rollback)
-│   ├── AdminSubNav.tsx            ← Tab subnav for admin pages: "Manage Users" (/admin), "Server Logs" (/admin/logs), "Proxy Logs" (/admin/proxy-logs), "Rollback" (/admin/rollback)
+│   ├── AdminServerHealthClient.tsx ← Client component: disk/memory usage bars and oldest non-prod worktree delete button (used by /admin/server-health)
+│   ├── AdminSubNav.tsx            ← Tab subnav for admin pages: "Manage Users" (/admin), "Server Logs" (/admin/logs), "Proxy Logs" (/admin/proxy-logs), "Rollback" (/admin/rollback), "Server Health" (/admin/server-health)
 │   ├── ForbiddenPage.tsx          ← Server component: 403 access-denied page with page description, required/met/unmet conditions, and how-to-fix
 │   ├── ChatInterface.tsx          ← Main chat UI (chat only); hamburger menu "Propose a change" opens FloatingEvolveDialog
 │   ├── ChangelogEntryDetails.tsx  ← Client component: single changelog <details> widget; lazy-loads body from /api/changelog on first open
@@ -401,6 +406,7 @@ When implementing changes, follow these principles:
 | Server logs (/admin/logs) | ✅ Live | Admin-only; live tail of production server stdout/stderr via SSE; in production routes through `/_proxy/prod/logs` on the reverse proxy; falls back to `journalctl -u primordia` in local dev; accessible from the admin subnav |
 | Proxy logs (/admin/proxy-logs) | ✅ Live | Admin-only; live tail of `journalctl -u primordia-proxy -f -n 100` via SSE; accessible from the admin subnav |
 | Deep rollback (/admin/rollback) | ✅ Live | Admin-only; lists all previous production slots from primordia.productionHistory in git config; "Roll back" button for each target; zero-downtime cutover via reverse proxy |
+| Server health (/admin/server-health) | ✅ Live | Admin-only; shows disk and memory usage with visual bars; shows oldest non-prod worktree with a "Delete oldest" button to free disk space |
 | Read-only git HTTP | ✅ Live | Clone/fetch via `git clone http[s]://<host>/api/git`; proxied through `git http-backend`; push permanently blocked (403) |
 
 ---
