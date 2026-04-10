@@ -6,7 +6,7 @@
 - Updated all references to `PRIMORDIA.md` across the codebase:
   - `CLAUDE.md` itself — title, file map entry, system-prompt description, design principle #1, and changelog section footer.
   - `lib/system-prompt.ts` — comment and `readFileSync` call now reference `CLAUDE.md`; system prompt tool description updated.
-  - `lib/evolve-sessions.ts` — both evolve prompts (initial and follow-up) updated to instruct Claude to read `CLAUDE.md` first; changelog instruction updated to say "Do NOT add changelog entries to CLAUDE.md itself."
+  - `lib/evolve-sessions.ts` — both evolve prompts (initial and follow-up) no longer instruct Claude to read `CLAUDE.md` first (Claude Code reads it automatically); changelog instruction updated to say "Do NOT add changelog entries to CLAUDE.md itself."
   - `README.md` — architecture link updated to `[CLAUDE.md](./CLAUDE.md)`.
   - `.gitattributes` — union merge rule updated from `PRIMORDIA.md merge=union` to `CLAUDE.md merge=union`.
 
