@@ -17,7 +17,7 @@ const tabs = [
 
 export default function AdminSubNav({ currentTab }: AdminSubNavProps) {
   return (
-    <nav className="flex gap-1 mb-6 border-b border-gray-800">
+    <nav className="flex gap-1 mb-6 border-b border-gray-800 overflow-x-auto">
       {tabs.map((tab) => {
         const active = tab.id === currentTab;
         return (
