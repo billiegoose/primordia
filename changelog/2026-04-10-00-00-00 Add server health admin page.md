@@ -17,7 +17,7 @@
   - `app/admin/server-health/page.tsx` — server component shell with auth + forbidden page.
   - `components/AdminServerHealthClient.tsx` — client component with usage bars and delete button.
 - Updated `components/AdminSubNav.tsx` to include the new "Server Health" tab.
-- Fixed the admin subnav tabs overflowing on narrow screens by adding `overflow-x-auto` so the tab row scrolls horizontally instead of wrapping or clipping.
+- Fixed the admin subnav tabs overflowing on narrow screens: added `overflow-x-auto` so the tab row scrolls horizontally, `shrink-0` on each tab so they don't compress, and `max-w-3xl` on the nav to match the page content width.
 
 ## Why
 

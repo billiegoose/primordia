@@ -17,14 +17,14 @@ const tabs = [
 
 export default function AdminSubNav({ currentTab }: AdminSubNavProps) {
   return (
-    <nav className="flex gap-1 mb-6 border-b border-gray-800 overflow-x-auto">
+    <nav className="flex gap-1 mb-6 border-b border-gray-800 overflow-x-auto max-w-3xl">
       {tabs.map((tab) => {
         const active = tab.id === currentTab;
         return (
           <Link
             key={tab.id}
             href={tab.href}
-            className={`px-4 py-2 text-sm font-medium rounded-t transition-colors ${
+            className={`px-4 py-2 text-sm font-medium rounded-t transition-colors shrink-0 ${
               active
                 ? "text-white border-b-2 border-white -mb-px"
                 : "text-gray-400 hover:text-gray-200"
