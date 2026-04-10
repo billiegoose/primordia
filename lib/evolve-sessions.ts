@@ -275,6 +275,27 @@ export function runGit(
   });
 }
 
+// ─── Worktree helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Parse `git worktree list --porcelain` output and return the worktree path
+ * that is currently checked out on `branchName`, or null if none.
+ */
+function parseWorktreePathForBranch(porcelain: string, branchName: string): string | null {
+  let currentPath: string | null = null;
+  for (const line of porcelain.split('\n')) {
+    if (line.startsWith('worktree ')) {
+      currentPath = line.slice('worktree '.length).trim();
+    } else if (line.startsWith('branch refs/heads/')) {
+      const branch = line.slice('branch refs/heads/'.length).trim();
+      if (branch === branchName && currentPath !== null) {
+        return currentPath;
+      }
+    }
+  }
+  return null;
+}
+
 // ─── Main flow ────────────────────────────────────────────────────────────────
 
 export async function startLocalEvolve(
@@ -325,12 +346,33 @@ export async function startLocalEvolve(
     const parentBranchResult = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], repoRoot);
     const parentBranch = parentBranchResult.stdout.trim() || 'main';
 
-    const wtArgs = options.skipBranchCreation
-      ? ['worktree', 'add', session.worktreePath, session.branch]
-      : ['worktree', 'add', session.worktreePath, '-b', session.branch];
-    const wtResult = await runGit(wtArgs, repoRoot);
-    if (wtResult.code !== 0) {
-      throw new Error(`git worktree add failed:\n${wtResult.stderr}`);
+    // When checking out an existing branch, detect if it's already registered in
+    // a worktree (e.g. a previous session left the worktree behind). If so,
+    // reuse that worktree path instead of trying to add a new one — git would
+    // reject the attempt with "already used by worktree at <path>".
+    if (options.skipBranchCreation) {
+      const listResult = await runGit(['worktree', 'list', '--porcelain'], repoRoot);
+      const existingPath = parseWorktreePathForBranch(listResult.stdout, session.branch);
+      if (existingPath) {
+        session.worktreePath = existingPath;
+        await db.updateEvolveSession(session.id, { worktreePath: existingPath });
+      } else {
+        const wtResult = await runGit(
+          ['worktree', 'add', session.worktreePath, session.branch],
+          repoRoot,
+        );
+        if (wtResult.code !== 0) {
+          throw new Error(`git worktree add failed:\n${wtResult.stderr}`);
+        }
+      }
+    } else {
+      const wtResult = await runGit(
+        ['worktree', 'add', session.worktreePath, '-b', session.branch],
+        repoRoot,
+      );
+      if (wtResult.code !== 0) {
+        throw new Error(`git worktree add failed:\n${wtResult.stderr}`);
+      }
     }
 
     // Store parent branch and session ID in git config so the preview's manage

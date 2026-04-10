@@ -117,7 +117,7 @@ export interface DbAdapter {
   createEvolveSession(session: EvolveSession): Promise<void>;
   updateEvolveSession(
     id: string,
-    updates: Partial<Pick<EvolveSession, "status" | "progressText" | "port" | "previewUrl">>,
+    updates: Partial<Pick<EvolveSession, "status" | "progressText" | "port" | "previewUrl" | "worktreePath">>,
   ): Promise<void>;
   getEvolveSession(id: string): Promise<EvolveSession | null>;
   listEvolveSessions(limit?: number): Promise<EvolveSession[]>;

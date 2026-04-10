@@ -413,7 +413,7 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
 
     async updateEvolveSession(
       id: string,
-      updates: Partial<Pick<EvolveSession, "status" | "progressText" | "port" | "previewUrl">>,
+      updates: Partial<Pick<EvolveSession, "status" | "progressText" | "port" | "previewUrl" | "worktreePath">>,
     ) {
       const sets: string[] = [];
       const values: unknown[] = [];
@@ -421,6 +421,7 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
       if (updates.progressText !== undefined)  { sets.push("progress_text = ?");   values.push(updates.progressText); }
       if (updates.port !== undefined)          { sets.push("port = ?");             values.push(updates.port); }
       if (updates.previewUrl !== undefined)    { sets.push("preview_url = ?");      values.push(updates.previewUrl); }
+      if (updates.worktreePath !== undefined)  { sets.push("worktree_path = ?");    values.push(updates.worktreePath); }
       if (sets.length === 0) return;
       values.push(id);
       db.prepare(`UPDATE evolve_sessions SET ${sets.join(", ")} WHERE id = ?`).run(...values);
