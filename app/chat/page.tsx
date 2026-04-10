@@ -52,7 +52,7 @@ function getMostRecentChangelogEntry(): string | null {
 
 export default async function ChatPage() {
   const user = await getSessionUser();
-  if (!user) redirect("/login");
+  if (!user) redirect("/login?next=/chat");
 
   const branch = runGit("git branch --show-current");
 

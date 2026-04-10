@@ -33,7 +33,7 @@ function runGit(cmd: string): string | null {
 
 export default async function EvolvePage() {
   const user = await getSessionUser();
-  if (!user) redirect("/login");
+  if (!user) redirect("/login?next=/evolve");
 
   const db = await getDb();
   const [canEvolve, allRoles] = await Promise.all([

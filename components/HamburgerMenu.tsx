@@ -12,6 +12,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import type { SessionUser } from "../lib/hooks";
 
 export type { SessionUser };
@@ -117,6 +118,7 @@ export function buildStandardMenuItems({
 export function HamburgerMenu({ sessionUser, onLogout, items, containerRef }: HamburgerMenuProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const localRef = useRef<HTMLDivElement>(null);
+  const pathname = usePathname();
   const menuRef = containerRef ?? localRef;
 
   const handleClickOutside = useCallback((e: MouseEvent) => {
@@ -180,7 +182,7 @@ export function HamburgerMenu({ sessionUser, onLogout, items, containerRef }: Ha
             </>
           ) : (
             <Link
-              href="/login"
+              href={`/login?next=${encodeURIComponent(pathname)}`}
               onClick={() => setMenuOpen(false)}
               className="flex items-center gap-3 px-4 py-3 text-sm text-gray-300 hover:text-blue-400 hover:bg-gray-800 transition-colors"
             >
