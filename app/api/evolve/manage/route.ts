@@ -525,75 +525,77 @@ async function runAcceptAsync(
   try {
     const db = await getDb();
 
-    // Gate 3: TypeScript must compile without errors.
-    await step('- Type-checking…\n');
-    const tscResult = await runCmd('bun', ['run', 'typecheck'], worktreePath);
-    if (tscResult.code !== 0) {
-      const typeErrors = (tscResult.stdout + tscResult.stderr).trim();
-      const fixPrompt =
-        `The TypeScript type check failed. Fix all type errors so the code compiles ` +
-        `without errors. Do not change any runtime behaviour — only fix the type issues.\n\n` +
-        `TypeScript compiler output:\n\`\`\`\n${typeErrors}\n\`\`\``;
-      const session = await db.getEvolveSession(sessionId);
-      if (!session) return;
-      const autoFixSession: LocalSession = {
-        id: session.id,
-        branch: session.branch,
-        worktreePath: session.worktreePath,
-        status: session.status as LocalSession['status'],
-        devServerStatus: 'running',
-        progressText: session.progressText,
-        port: session.port,
-        previewUrl: session.previewUrl,
-        request: session.request,
-        createdAt: session.createdAt,
-      };
-      console.log(`[runAcceptAsync] type errors for session ${sessionId}, starting auto-fix`);
-      await db.updateEvolveSession(sessionId, { status: 'fixing-types' });
-      void runFollowupInWorktree(
-        autoFixSession, fixPrompt, repoRoot, 'fixing-types',
-        (fixedSession) => retryAcceptAfterFix(fixedSession.id, repoRoot, parentBranch),
-        /* skipChangelog */ true,
-      );
-      return;
-    }
+    const isProduction = process.env.NODE_ENV === 'production';
 
-    // Gate 4: production build must succeed.
-    await step('- Building for production…\n');
-    const buildResult = await runCmd('bun', ['run', 'build'], worktreePath);
-    if (buildResult.code !== 0) {
-      const buildErrors = (buildResult.stdout + buildResult.stderr).trim();
-      const buildFixPrompt =
-        `The production build failed (\`bun run build\`). Fix all build errors so the build ` +
-        `completes successfully. Do not change any runtime behaviour — only fix the build issues.\n\n` +
-        `Build output:\n\`\`\`\n${buildErrors}\n\`\`\``;
-      const session = await db.getEvolveSession(sessionId);
-      if (!session) return;
-      const autoFixSession: LocalSession = {
-        id: session.id,
-        branch: session.branch,
-        worktreePath: session.worktreePath,
-        status: session.status as LocalSession['status'],
-        devServerStatus: 'running',
-        progressText: session.progressText,
-        port: session.port,
-        previewUrl: session.previewUrl,
-        request: session.request,
-        createdAt: session.createdAt,
-      };
-      console.log(`[runAcceptAsync] build errors for session ${sessionId}, starting auto-fix`);
-      await db.updateEvolveSession(sessionId, { status: 'fixing-types' });
-      void runFollowupInWorktree(
-        autoFixSession, buildFixPrompt, repoRoot, 'fixing-types',
-        (fixedSession) => retryAcceptAfterFix(fixedSession.id, repoRoot, parentBranch),
-        /* skipChangelog */ true,
-      );
-      return;
+    if (isProduction) {
+      // Gate 3: TypeScript must compile without errors.
+      await step('- Type-checking…\n');
+      const tscResult = await runCmd('bun', ['run', 'typecheck'], worktreePath);
+      if (tscResult.code !== 0) {
+        const typeErrors = (tscResult.stdout + tscResult.stderr).trim();
+        const fixPrompt =
+          `The TypeScript type check failed. Fix all type errors so the code compiles ` +
+          `without errors. Do not change any runtime behaviour — only fix the type issues.\n\n` +
+          `TypeScript compiler output:\n\`\`\`\n${typeErrors}\n\`\`\``;
+        const session = await db.getEvolveSession(sessionId);
+        if (!session) return;
+        const autoFixSession: LocalSession = {
+          id: session.id,
+          branch: session.branch,
+          worktreePath: session.worktreePath,
+          status: session.status as LocalSession['status'],
+          devServerStatus: 'running',
+          progressText: session.progressText,
+          port: session.port,
+          previewUrl: session.previewUrl,
+          request: session.request,
+          createdAt: session.createdAt,
+        };
+        console.log(`[runAcceptAsync] type errors for session ${sessionId}, starting auto-fix`);
+        await db.updateEvolveSession(sessionId, { status: 'fixing-types' });
+        void runFollowupInWorktree(
+          autoFixSession, fixPrompt, repoRoot, 'fixing-types',
+          (fixedSession) => retryAcceptAfterFix(fixedSession.id, repoRoot, parentBranch),
+          /* skipChangelog */ true,
+        );
+        return;
+      }
+
+      // Gate 4: production build must succeed.
+      await step('- Building for production…\n');
+      const buildResult = await runCmd('bun', ['run', 'build'], worktreePath);
+      if (buildResult.code !== 0) {
+        const buildErrors = (buildResult.stdout + buildResult.stderr).trim();
+        const buildFixPrompt =
+          `The production build failed (\`bun run build\`). Fix all build errors so the build ` +
+          `completes successfully. Do not change any runtime behaviour — only fix the build issues.\n\n` +
+          `Build output:\n\`\`\`\n${buildErrors}\n\`\`\``;
+        const session = await db.getEvolveSession(sessionId);
+        if (!session) return;
+        const autoFixSession: LocalSession = {
+          id: session.id,
+          branch: session.branch,
+          worktreePath: session.worktreePath,
+          status: session.status as LocalSession['status'],
+          devServerStatus: 'running',
+          progressText: session.progressText,
+          port: session.port,
+          previewUrl: session.previewUrl,
+          request: session.request,
+          createdAt: session.createdAt,
+        };
+        console.log(`[runAcceptAsync] build errors for session ${sessionId}, starting auto-fix`);
+        await db.updateEvolveSession(sessionId, { status: 'fixing-types' });
+        void runFollowupInWorktree(
+          autoFixSession, buildFixPrompt, repoRoot, 'fixing-types',
+          (fixedSession) => retryAcceptAfterFix(fixedSession.id, repoRoot, parentBranch),
+          /* skipChangelog */ true,
+        );
+        return;
+      }
     }
 
     // ── Merge: blue/green or legacy ──────────────────────────────────────────
-
-    const isProduction = process.env.NODE_ENV === 'production';
     let bgAcceptResult: BlueGreenAcceptResult | null = null;
 
     if (isProduction) {
