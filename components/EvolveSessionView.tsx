@@ -283,7 +283,7 @@ function LogSection({
           <p className="text-green-200 font-semibold">{doneTitle}</p>
           <p className="text-green-300/80 text-xs mt-1">
             {isProduction
-              ? "The branch was deployed to production as the new active slot."
+              ? "The branch was deployed to production."
               : mergedIntoBranch
                 ? <>The branch was merged into <code className="bg-green-950/60 px-1 rounded">{mergedIntoBranch}</code> and the worktree has been removed.</>
                 : "The branch was accepted and the worktree has been removed."}
