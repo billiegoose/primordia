@@ -9,6 +9,7 @@
 - Worker writes its PID to `.primordia-worker.pid` in the worktree on startup and deletes it on exit (any exit path).
 - Added `checkWorktreeNotBusy()` guard: before spawning a worker, reads the PID file and throws if that process is still alive, preventing concurrent agents from clobbering each other's work in the same worktree.
 - Added `.primordia-worker.pid` to `.gitignore`.
+- Removed `markInterruptedSessions()` from the blue/green deploy path: now that workers are detached processes, a server shutdown no longer kills in-flight Claude Code runs, so there's nothing to mark as interrupted.
 
 ### Why
 

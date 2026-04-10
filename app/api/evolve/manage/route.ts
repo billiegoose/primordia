@@ -500,11 +500,6 @@ async function retryAcceptAfterFix(
 
   // (Production only) Final VACUUM INTO + proxy spawn + slot activation.
   if (isProduction && bgAcceptResult && bgAcceptResult.ok) {
-    // Before the DB snapshot and proxy spawn, mark any sessions that are still
-    // running as interrupted. This server will self-terminate below, which will
-    // kill those Claude Code processes (exit 143). Without this step the new
-    // slot's DB would show them stuck in "running-claude" forever.
-    await markInterruptedSessions(db, sessionId);
     try { copyDb(process.cwd(), path.resolve(worktreePath)); } catch { /* best-effort */ }
     await spawnProdViaProxy(bgAcceptResult.branch,
       (text) => appendToProgress(sessionId, text));
@@ -526,30 +521,6 @@ async function retryAcceptAfterFix(
     // production server's work is done. Delay briefly so the final log write
     // can flush to SQLite before the process exits.
     setTimeout(() => process.exit(0), 1000);
-  }
-}
-
-/**
- * Before a blue/green deploy SIGTERMs the old prod server, mark any sessions
- * that are still actively running (running-claude, fixing-types, starting) as
- * ready with an error note. Without this, those sessions would appear stuck
- * forever in the new slot's DB — the Claude Code processes die with exit 143
- * when the old server is killed, but they can no longer write their error back
- * to the DB that the new server will use.
- */
-async function markInterruptedSessions(db: DbAdapter, acceptingSessionId: string): Promise<void> {
-  const allSessions = await db.listEvolveSessions(200);
-  const interruptible = ['running-claude', 'fixing-types', 'starting'] as const;
-  for (const s of allSessions) {
-    if (s.id === acceptingSessionId) continue;
-    if (!interruptible.includes(s.status as typeof interruptible[number])) continue;
-    await db.updateEvolveSession(s.id, {
-      status: 'ready',
-      progressText:
-        s.progressText +
-        '\n\n❌ **Error**: Claude Code process exited with code 143\n\n' +
-        '*Session interrupted by a concurrent production deploy. Use a follow-up request to continue.*\n',
-    });
   }
 }
 
@@ -745,11 +716,6 @@ async function runAcceptAsync(
     // the DB copied in blueGreenAccept would be missing the final entries,
     // leaving the session stuck in "Accepting changes" on refresh.
     if (isProduction && bgAcceptResult && bgAcceptResult.ok) {
-      // Before the DB snapshot and proxy spawn, mark any sessions that are still
-      // running as interrupted. This server will self-terminate below, which will
-      // kill those Claude Code processes (exit 143). Without this step the new
-      // slot's DB would show them stuck in "running-claude" forever.
-      await markInterruptedSessions(db, sessionId);
       try { copyDb(process.cwd(), path.resolve(worktreePath)); } catch { /* best-effort */ }
       await spawnProdViaProxy(bgAcceptResult.branch, step);
       // Move the `main` branch pointer to the accepted branch and push it so
