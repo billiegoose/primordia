@@ -81,7 +81,13 @@ export async function GET(request: Request) {
               progressDelta,
               status: session.status,
               previewUrl: session.previewUrl,
-              ...(terminal ? { done: true } : {}),
+              ...(terminal ? {
+                done: true,
+                durationMs: session.durationMs,
+                inputTokens: session.inputTokens,
+                outputTokens: session.outputTokens,
+                costUsd: session.costUsd,
+              } : {}),
             });
             lastSentOffset = progressText.length;
             lastSentStatus = session.status;

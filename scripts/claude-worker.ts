@@ -52,13 +52,25 @@ function dbGetProgressText(db: Db, sessionId: string): string {
 function dbUpdate(
   db: Db,
   sessionId: string,
-  updates: { status?: string; progressText?: string; previewUrl?: string | null },
+  updates: {
+    status?: string;
+    progressText?: string;
+    previewUrl?: string | null;
+    durationMs?: number | null;
+    inputTokens?: number | null;
+    outputTokens?: number | null;
+    costUsd?: number | null;
+  },
 ): void {
   const sets: string[] = [];
   const values: unknown[] = [];
-  if (updates.status !== undefined) { sets.push('status = ?'); values.push(updates.status); }
+  if (updates.status !== undefined)       { sets.push('status = ?');        values.push(updates.status); }
   if (updates.progressText !== undefined) { sets.push('progress_text = ?'); values.push(updates.progressText); }
-  if (updates.previewUrl !== undefined) { sets.push('preview_url = ?'); values.push(updates.previewUrl); }
+  if (updates.previewUrl !== undefined)   { sets.push('preview_url = ?');   values.push(updates.previewUrl); }
+  if (updates.durationMs !== undefined)   { sets.push('duration_ms = ?');   values.push(updates.durationMs); }
+  if (updates.inputTokens !== undefined)  { sets.push('input_tokens = ?');  values.push(updates.inputTokens); }
+  if (updates.outputTokens !== undefined) { sets.push('output_tokens = ?'); values.push(updates.outputTokens); }
+  if (updates.costUsd !== undefined)      { sets.push('cost_usd = ?');      values.push(updates.costUsd); }
   if (sets.length === 0) return;
   values.push(sessionId);
   db.prepare(`UPDATE evolve_sessions SET ${sets.join(', ')} WHERE id = ?`).run(...values);
@@ -195,6 +207,12 @@ async function main(): Promise<void> {
 
   const stderrLines: string[] = [];
 
+  // Usage metrics captured from the SDK result message.
+  let capturedDurationMs: number | null = null;
+  let capturedInputTokens: number | null = null;
+  let capturedOutputTokens: number | null = null;
+  let capturedCostUsd: number | null = null;
+
   try {
     const run = query({
       prompt,
@@ -238,7 +256,13 @@ async function main(): Promise<void> {
           }
           dbUpdate(db, sessionId, { progressText });
         } else if (message.type === 'result') {
-          if (message.subtype !== 'success') {
+          if (message.subtype === 'success') {
+            capturedDurationMs = (message as { duration_ms?: number }).duration_ms ?? null;
+            capturedCostUsd = (message as { total_cost_usd?: number }).total_cost_usd ?? null;
+            const usage = (message as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
+            capturedInputTokens = usage?.input_tokens ?? null;
+            capturedOutputTokens = usage?.output_tokens ?? null;
+          } else {
             const sdkErrors = (message as { errors?: string[] }).errors ?? [];
             const stderrStr = stderrLines.join('\n').trim();
             const details = [sdkErrors.filter(Boolean).join('\n'), stderrStr].filter(Boolean).join('\n');
@@ -253,13 +277,13 @@ async function main(): Promise<void> {
       userAborted = !timedOut && abortController.signal.aborted;
       if (timedOut) {
         appendProgress(`\n\n⏱️ **Claude Code timed out after 20 minutes.** Moving to ready state with work completed so far.\n`);
-        dbUpdate(db, sessionId, { status: 'ready', progressText });
+        dbUpdate(db, sessionId, { status: 'ready', progressText, durationMs: capturedDurationMs, inputTokens: capturedInputTokens, outputTokens: capturedOutputTokens, costUsd: capturedCostUsd });
         clearTimeout(timeoutId);
         cleanup();
         process.exit(0);
       } else if (userAborted) {
         appendProgress(`\n\n🛑 **Claude Code was aborted.** Moving to ready state with work completed so far.\n`);
-        dbUpdate(db, sessionId, { status: 'ready', progressText });
+        dbUpdate(db, sessionId, { status: 'ready', progressText, durationMs: capturedDurationMs, inputTokens: capturedInputTokens, outputTokens: capturedOutputTokens, costUsd: capturedCostUsd });
         clearTimeout(timeoutId);
         cleanup();
         process.exit(0);
@@ -275,6 +299,7 @@ async function main(): Promise<void> {
     }
 
     // Successful completion
+    const metrics = { durationMs: capturedDurationMs, inputTokens: capturedInputTokens, outputTokens: capturedOutputTokens, costUsd: capturedCostUsd };
     if (setReadyOnSuccess) {
       appendProgress(completionMessage);
       const previewUrl = publicOrigin ? `${publicOrigin}/preview/${sessionId}` : null;
@@ -282,10 +307,11 @@ async function main(): Promise<void> {
         status: 'ready',
         progressText,
         ...(previewUrl !== null ? { previewUrl } : {}),
+        ...metrics,
       });
     } else {
       // Leave status unchanged — the server's onSuccess callback handles the transition.
-      dbUpdate(db, sessionId, { progressText });
+      dbUpdate(db, sessionId, { progressText, ...metrics });
     }
 
     cleanup();
@@ -298,7 +324,7 @@ async function main(): Promise<void> {
         ? `\n\n*Caused by*: ${err.cause.message}`
         : '';
     appendProgress(`\n\n❌ **Error**: ${msg}${causeMsg}\n`);
-    dbUpdate(db, sessionId, { status: 'ready', progressText });
+    dbUpdate(db, sessionId, { status: 'ready', progressText, durationMs: capturedDurationMs, inputTokens: capturedInputTokens, outputTokens: capturedOutputTokens, costUsd: capturedCostUsd });
     cleanup();
     process.exit(1);
   }

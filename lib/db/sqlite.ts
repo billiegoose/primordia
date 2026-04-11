@@ -86,6 +86,12 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
     // Column already exists — ignore
   }
 
+  // Migration: add usage metrics columns (duration, tokens, cost)
+  try { db.exec("ALTER TABLE evolve_sessions ADD COLUMN duration_ms INTEGER"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE evolve_sessions ADD COLUMN input_tokens INTEGER"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE evolve_sessions ADD COLUMN output_tokens INTEGER"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE evolve_sessions ADD COLUMN cost_usd REAL"); } catch { /* already exists */ }
+
   // Migration: add id and display_name columns to roles (added when roles got UUIDs + customizable names)
   // Must run before the seed inserts below so existing DBs have the columns ready.
   try {
@@ -396,8 +402,9 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
     async createEvolveSession(session: EvolveSession) {
       db.prepare(
         `INSERT INTO evolve_sessions
-           (id, branch, worktree_path, status, progress_text, port, preview_url, request, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, branch, worktree_path, status, progress_text, port, preview_url, request, created_at,
+            duration_ms, input_tokens, output_tokens, cost_usd)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         session.id,
         session.branch,
@@ -408,12 +415,16 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
         session.previewUrl ?? null,
         session.request,
         session.createdAt,
+        session.durationMs ?? null,
+        session.inputTokens ?? null,
+        session.outputTokens ?? null,
+        session.costUsd ?? null,
       );
     },
 
     async updateEvolveSession(
       id: string,
-      updates: Partial<Pick<EvolveSession, "status" | "progressText" | "port" | "previewUrl" | "worktreePath">>,
+      updates: Partial<Pick<EvolveSession, "status" | "progressText" | "port" | "previewUrl" | "worktreePath" | "durationMs" | "inputTokens" | "outputTokens" | "costUsd">>,
     ) {
       const sets: string[] = [];
       const values: unknown[] = [];
@@ -422,6 +433,10 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
       if (updates.port !== undefined)          { sets.push("port = ?");             values.push(updates.port); }
       if (updates.previewUrl !== undefined)    { sets.push("preview_url = ?");      values.push(updates.previewUrl); }
       if (updates.worktreePath !== undefined)  { sets.push("worktree_path = ?");    values.push(updates.worktreePath); }
+      if (updates.durationMs !== undefined)    { sets.push("duration_ms = ?");      values.push(updates.durationMs); }
+      if (updates.inputTokens !== undefined)   { sets.push("input_tokens = ?");     values.push(updates.inputTokens); }
+      if (updates.outputTokens !== undefined)  { sets.push("output_tokens = ?");    values.push(updates.outputTokens); }
+      if (updates.costUsd !== undefined)       { sets.push("cost_usd = ?");         values.push(updates.costUsd); }
       if (sets.length === 0) return;
       values.push(id);
       db.prepare(`UPDATE evolve_sessions SET ${sets.join(", ")} WHERE id = ?`).run(...values);
@@ -434,6 +449,8 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
         id: string; branch: string; worktree_path: string; status: string;
         progress_text: string; port: number | null; preview_url: string | null;
         request: string; created_at: number;
+        duration_ms: number | null; input_tokens: number | null;
+        output_tokens: number | null; cost_usd: number | null;
       } | null;
       if (!r) return null;
       return {
@@ -446,6 +463,10 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
         previewUrl: r.preview_url,
         request: r.request,
         createdAt: r.created_at,
+        durationMs: r.duration_ms,
+        inputTokens: r.input_tokens,
+        outputTokens: r.output_tokens,
+        costUsd: r.cost_usd,
       };
     },
 
@@ -456,6 +477,8 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
         id: string; branch: string; worktree_path: string; status: string;
         progress_text: string; port: number | null; preview_url: string | null;
         request: string; created_at: number;
+        duration_ms: number | null; input_tokens: number | null;
+        output_tokens: number | null; cost_usd: number | null;
       }>;
       return rows.map((r) => ({
         id: r.id,
@@ -467,6 +490,10 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
         previewUrl: r.preview_url,
         request: r.request,
         createdAt: r.created_at,
+        durationMs: r.duration_ms,
+        inputTokens: r.input_tokens,
+        outputTokens: r.output_tokens,
+        costUsd: r.cost_usd,
       }));
     },
   };
