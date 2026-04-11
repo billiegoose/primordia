@@ -6,8 +6,8 @@
 "use client";
 
 import { useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
+import { withBasePath } from "@/lib/base-path";
 
 export function LandingNav() {
   const [open, setOpen] = useState(false);
@@ -21,7 +21,8 @@ export function LandingNav() {
           href="/"
           className="flex items-center gap-2 font-mono font-bold text-white tracking-tight hover:text-gray-300 transition-colors"
         >
-          <Image src="/primordia-logo.png" alt="" width={28} height={28} className="rounded-sm" aria-hidden="true" />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={withBasePath("/primordia-logo.png")} alt="" width={28} height={28} className="rounded-sm" aria-hidden="true" />
           Primordia
         </Link>
 

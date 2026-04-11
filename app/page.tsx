@@ -3,9 +3,9 @@
 // The actual chat lives at /chat.
 
 import type { Metadata } from "next";
-import Image from "next/image";
 import Link from "next/link";
 import { buildPageTitle } from "@/lib/page-title";
+import { withBasePath } from "@/lib/base-path";
 
 export function generateMetadata(): Metadata {
   return { title: buildPageTitle() };
@@ -99,12 +99,12 @@ export default function LandingPage() {
 
         {/* Logo */}
         <div className="animate-fade-up relative mb-0">
-          <Image
-            src="/primordia-logo.png"
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={withBasePath("/primordia-logo.png")}
             alt="Primordia logo"
             width={180}
             height={180}
-            priority
             className="drop-shadow-[0_0_32px_rgba(34,197,94,0.4)]"
           />
         </div>
