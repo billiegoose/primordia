@@ -224,8 +224,10 @@ set -euo pipefail
 export LANG=en_US.UTF-8
 export LC_ALL=en_US.UTF-8
 export LANGUAGE=en_US.UTF-8
-# Generate locale if not already present (non-fatal)
+# Install locales package and generate en_US.UTF-8 (non-fatal)
+sudo apt-get install -y locales >/dev/null 2>&1 || true
 sudo locale-gen en_US.UTF-8 >/dev/null 2>&1 || true
+sudo update-locale LANG=en_US.UTF-8 >/dev/null 2>&1 || true
 
 GREEN="\033[0;32m"; CYAN="\033[0;36m"; RED="\033[0;31m"; DIM="\033[2m"; BOLD="\033[1m"; RESET="\033[0m"
 info()    { echo -e "${CYAN}▸${RESET} $*"; }
