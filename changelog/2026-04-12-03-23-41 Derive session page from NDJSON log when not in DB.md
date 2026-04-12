@@ -22,6 +22,10 @@ After a failed DB lookup, the page now calls `deriveSessionFromLog` with the can
 
 Same fallback applied in the SSE polling loop: if the session is not in the DB, attempt log-based reconstruction before reporting "Session not found". Since a log-derived session has no running worker, it will already be in a terminal state, so the stream closes immediately after delivering events.
 
+### Updated `app/api/evolve/attachment/[sessionId]/route.ts`
+
+Same fallback applied to the attachment-serving endpoint: if the session is not in the DB, the candidate worktree path is derived from the session ID and used to locate the `attachments/` directory. This allows attachment thumbnails and downloads to work when viewing log-derived sessions.
+
 ### Updated `components/EvolveSessionView.tsx`
 
 The **⬆ Upstream Changes** box now shows whenever `canEvolve` is true and there are upstream commits — it is no longer gated on `canAcceptReject`. This means the box is visible when viewing a session from the session's own preview server, not just from the parent's. The **Apply Updates** button inside the box remains gated on `canAcceptReject`, since that merge action requires being on the parent branch. Additionally, the label in the upstream-changes message now shows the session branch's actual parent (from `git config branch.<name>.parent`) rather than the currently-checked-out branch of the running instance. Previously, if the running instance's branch differed from the session's real parent, the message would nonsensically read "`session-logs-without-db` is 1 commit ahead of `session-logs-without-db`". The session page now passes an explicit `parentBranch` prop derived from git config, and the component displays it in preference to `branch`. If `parentBranch` is `null` (e.g. git config has no parent entry), the upstream-changes label shows a `[parent branch unknown]` warning in yellow rather than silently falling back to the current branch name or a hard-coded placeholder.
