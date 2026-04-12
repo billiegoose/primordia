@@ -536,6 +536,15 @@ function StructuredSection({
           <div className="px-4 py-3 rounded-lg bg-gray-900 border border-gray-700 text-sm">
             <p className="text-gray-400 text-xs mb-1 font-medium uppercase tracking-wide">Follow-up request</p>
             <p className="text-gray-100 leading-relaxed whitespace-pre-wrap">{requestEvent.request}</p>
+            {requestEvent.attachments && requestEvent.attachments.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-2">
+                {requestEvent.attachments.map((name) => (
+                  <span key={name} className="flex items-center gap-1 px-2 py-1 rounded-md bg-gray-800 border border-gray-700 text-xs text-gray-300 font-mono">
+                    {name}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         )}
         {claudeEvents.length > 0 && (
@@ -1191,10 +1200,25 @@ export default function EvolveSessionView({
       </header>
 
       {/* Original request */}
-      <div className="mb-6 px-4 py-3 rounded-lg bg-gray-900 border border-gray-700 text-sm">
-        <p className="text-gray-400 text-xs mb-1 font-medium uppercase tracking-wide">Your request</p>
-        <p className="text-gray-100 leading-relaxed whitespace-pre-wrap">{initialRequest}</p>
-      </div>
+      {(() => {
+        const initialReqEvent = events.find((e): e is Extract<SessionEvent, { type: 'initial_request' }> => e.type === 'initial_request');
+        const attachments = initialReqEvent?.attachments ?? [];
+        return (
+          <div className="mb-6 px-4 py-3 rounded-lg bg-gray-900 border border-gray-700 text-sm">
+            <p className="text-gray-400 text-xs mb-1 font-medium uppercase tracking-wide">Your request</p>
+            <p className="text-gray-100 leading-relaxed whitespace-pre-wrap">{initialRequest}</p>
+            {attachments.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-2">
+                {attachments.map((name) => (
+                  <span key={name} className="flex items-center gap-1 px-2 py-1 rounded-md bg-gray-800 border border-gray-700 text-xs text-gray-300 font-mono">
+                    {name}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Created branch — setup steps fold into this card */}
       <div className="mb-6 px-4 py-4 rounded-lg bg-amber-900/40 border border-amber-700/50 text-sm">
