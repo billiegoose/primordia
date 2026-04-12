@@ -7,9 +7,11 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { execSync } from "child_process";
+import * as fs from "fs";
 import { getSessionUser, hasEvolvePermission } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { buildPageTitle } from "@/lib/page-title";
+import { readSessionEvents, getSessionNdjsonPath, type SessionEvent } from "@/lib/session-events";
 import EvolveSessionView from "@/components/EvolveSessionView";
 
 export function generateMetadata(): Metadata {
@@ -143,11 +145,25 @@ export default async function EvolveSessionPage({
   const upstreamCommitCount = getUpstreamCommitCount(session.branch);
   const diffSummary = getGitDiffSummary(session.branch);
 
+  // Load initial events from the NDJSON log (new sessions) or fall back to
+  // legacy progressText so old sessions still render correctly.
+  let initialEvents: SessionEvent[] = [];
+  let initialLineCount = 0;
+  const ndjsonPath = getSessionNdjsonPath(session.worktreePath);
+  if (fs.existsSync(ndjsonPath)) {
+    const result = readSessionEvents(ndjsonPath);
+    initialEvents = result.events;
+    initialLineCount = result.totalLines;
+  } else if (session.progressText) {
+    initialEvents = [{ type: 'legacy_text', content: session.progressText }];
+  }
+
   return (
     <EvolveSessionView
       sessionId={session.id}
       initialRequest={session.request}
-      initialProgressText={session.progressText}
+      initialEvents={initialEvents}
+      initialLineCount={initialLineCount}
       initialStatus={session.status}
       initialPreviewUrl={session.previewUrl}
       branch={branch}

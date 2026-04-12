@@ -44,6 +44,7 @@ import {
 import { getSessionUser } from '../../../../lib/auth';
 import { getDb } from '../../../../lib/db';
 import type { DbAdapter } from '../../../../lib/db/types';
+import { appendSessionEvent, getSessionNdjsonPath } from '../../../../lib/session-events';
 
 /** Run an arbitrary command; resolves with stdout, stderr, and exit code. */
 function runCmd(
@@ -62,12 +63,15 @@ function runCmd(
   });
 }
 
-/** Append text to a session's progressText without modifying any other field. */
-async function appendToProgress(sessionId: string, text: string): Promise<void> {
+/** Write a log line event to the session's NDJSON file. */
+async function appendLogLine(sessionId: string, content: string): Promise<void> {
   const db = await getDb();
   const row = await db.getEvolveSession(sessionId);
   if (!row) return;
-  await db.updateEvolveSession(sessionId, { progressText: row.progressText + text });
+  const ndjsonPath = getSessionNdjsonPath(row.worktreePath);
+  if (fs.existsSync(ndjsonPath)) {
+    appendSessionEvent(ndjsonPath, { type: 'log_line', content, ts: Date.now() });
+  }
 }
 
 /**
@@ -354,14 +358,14 @@ async function retryAcceptAfterFix(
 
   const { branch, worktreePath, port } = current;
 
-  /** Append text and mark the session ready (with error in the log). */
+  /** Write an error log line and mark the session ready. */
   async function failWithError(msg: string): Promise<void> {
-    await appendToProgress(sessionId, msg);
+    await appendLogLine(sessionId, msg);
     await db.updateEvolveSession(sessionId, { status: 'ready' });
   }
 
   // Re-run the TypeScript check to verify the fix worked.
-  await appendToProgress(sessionId, '- Re-checking TypeScript types…\n');
+  await appendLogLine(sessionId, '- Re-checking TypeScript types…');
   console.log(`[retryAcceptAfterFix] re-running typecheck in ${worktreePath}`);
   const tscResult = await runCmd('bun', ['run', 'typecheck'], worktreePath);
   console.log(`[retryAcceptAfterFix] typecheck exit code=${tscResult.code}`);
@@ -369,13 +373,13 @@ async function retryAcceptAfterFix(
     const typeErrors = (tscResult.stdout + tscResult.stderr).trim();
     console.log(`[retryAcceptAfterFix] typecheck still failing:\n${typeErrors}`);
     await failWithError(
-      `\n\n❌ **Auto-fix failed**: TypeScript errors remain after the fix attempt.\n\n\`\`\`\n${typeErrors}\n\`\`\`\n`,
+      `❌ Auto-fix failed: TypeScript errors remain after the fix attempt.\n\`\`\`\n${typeErrors}\n\`\`\``,
     );
     return;
   }
 
   // Also verify the production build succeeds.
-  await appendToProgress(sessionId, '- Re-building for production…\n');
+  await appendLogLine(sessionId, '- Re-building for production…');
   console.log(`[retryAcceptAfterFix] re-running build in ${worktreePath}`);
   const buildResult = await runCmd('bun', ['run', 'build'], worktreePath);
   console.log(`[retryAcceptAfterFix] build exit code=${buildResult.code}`);
@@ -383,7 +387,7 @@ async function retryAcceptAfterFix(
     const buildErrors = (buildResult.stdout + buildResult.stderr).trim();
     console.log(`[retryAcceptAfterFix] build still failing:\n${buildErrors}`);
     await failWithError(
-      `\n\n❌ **Auto-fix failed**: Production build still failing after the fix attempt.\n\n\`\`\`\n${buildErrors}\n\`\`\`\n`,
+      `❌ Auto-fix failed: Production build still failing after the fix attempt.\n\`\`\`\n${buildErrors}\n\`\`\``,
     );
     return;
   }
@@ -404,10 +408,10 @@ async function retryAcceptAfterFix(
   if (isProduction) {
     // Blue/green path: build is already done in the worktree, swap the slot.
     console.log(`[retryAcceptAfterFix] blue/green accept for session ${sessionId}`);
-    const bgResult = await blueGreenAccept(worktreePath, branch, parentBranch, repoRoot, (text) => appendToProgress(sessionId, text));
+    const bgResult = await blueGreenAccept(worktreePath, branch, parentBranch, repoRoot, (text) => appendLogLine(sessionId, text));
     if (!bgResult.ok) {
       console.log(`[retryAcceptAfterFix] blue/green accept failed: ${bgResult.error}`);
-      await failWithError(`\n\n❌ **Accept failed**: ${bgResult.error}\n`);
+      await failWithError(`❌ Accept failed: ${bgResult.error}`);
       return;
     }
     bgAcceptResult = bgResult;
@@ -448,7 +452,7 @@ async function retryAcceptAfterFix(
     }
 
     // Merge the preview branch.
-    await appendToProgress(sessionId, '- Merging branch…\n');
+    await appendLogLine(sessionId, '- Merging branch…');
     console.log(`[retryAcceptAfterFix] merging branch ${branch} into ${parentBranch} at ${mergeRoot}`);
     const mergeResult = await runGit(
       ['merge', branch, '--no-ff', '-m', `chore: merge ${branch}`],
@@ -463,8 +467,8 @@ async function retryAcceptAfterFix(
         await runGit(['merge', '--abort'], mergeRoot);
         if (stashed) await runGit(['stash', 'pop'], mergeRoot);
         await failWithError(
-          `\n\n❌ **Accept failed**: merge failed and automatic conflict resolution also failed.\n\n` +
-          `Merge error:\n${mergeResult.stderr}\n\nAuto-resolution log:\n${resolution.log}\n`,
+          `❌ Accept failed: merge failed and automatic conflict resolution also failed.\n` +
+          `Merge error:\n${mergeResult.stderr}\n\nAuto-resolution log:\n${resolution.log}`,
         );
         return;
       }
@@ -474,15 +478,14 @@ async function retryAcceptAfterFix(
 
     // Sync dependencies after merge so the running server reflects any
     // package.json changes that came in from the accepted branch.
-    await appendToProgress(sessionId, '- Installing dependencies…\n');
+    await appendLogLine(sessionId, '- Installing dependencies…');
     console.log(`[retryAcceptAfterFix] running bun install --frozen-lockfile in ${mergeRoot}`);
     const installResult = await runCmd('bun', ['install', '--frozen-lockfile'], mergeRoot);
     console.log(`[retryAcceptAfterFix] bun install exit code=${installResult.code}`);
     if (installResult.code !== 0) {
       await failWithError(
-        `\n\n❌ **Accept failed**: \`bun install --frozen-lockfile\` failed after merge. ` +
-        `The lockfile may be out of sync with package.json.\n\n` +
-        `\`\`\`\n${(installResult.stdout + installResult.stderr).trim()}\n\`\`\`\n`,
+        `❌ Accept failed: \`bun install --frozen-lockfile\` failed after merge.\n` +
+        `\`\`\`\n${(installResult.stdout + installResult.stderr).trim()}\n\`\`\``,
       );
       return;
     }
@@ -495,27 +498,35 @@ async function retryAcceptAfterFix(
 
   // Mark as accepted and log the decision.
   console.log(`[retryAcceptAfterFix] merge complete, marking session ${sessionId} as accepted`);
-  await appendToProgress(sessionId, `\n\n---\n\n✅ **Accepted** — ${isProduction ? 'deployed to production' : `merged into \`${parentBranch}\``}\n`);
+  {
+    const ndjsonRow = await getDb().then(d => d.getEvolveSession(sessionId));
+    if (ndjsonRow) {
+      const ndjsonPath = getSessionNdjsonPath(ndjsonRow.worktreePath);
+      if (fs.existsSync(ndjsonPath)) {
+        appendSessionEvent(ndjsonPath, { type: 'decision', action: 'accepted', detail: isProduction ? 'deployed to production' : `merged into \`${parentBranch}\``, ts: Date.now() });
+      }
+    }
+  }
   await db.updateEvolveSession(sessionId, { status: 'accepted' });
 
   // (Production only) Final VACUUM INTO + proxy spawn + slot activation.
   if (isProduction && bgAcceptResult && bgAcceptResult.ok) {
     try { copyDb(process.cwd(), path.resolve(worktreePath)); } catch { /* best-effort */ }
     await spawnProdViaProxy(bgAcceptResult.branch,
-      (text) => appendToProgress(sessionId, text));
+      (text) => appendLogLine(sessionId, text));
     // Move the `main` branch pointer to the accepted branch and push it so
     // external clones always reflect the latest production code.
     await moveMainAndPush(worktreePath, bgAcceptResult.branch,
-      (text) => appendToProgress(sessionId, text));
+      (text) => appendLogLine(sessionId, text));
     // Run update-service.sh AFTER the proxy has accepted the new prod instance.
     // If the proxy script changed, this will restart primordia-proxy — doing it
     // before spawnProdViaProxy would kill the proxy before it could handle the
     // spawn request, leaving the branch marked accepted but not actually serving.
-    await appendToProgress(sessionId, '- Updating service files…\n');
+    await appendLogLine(sessionId, '- Updating service files…');
     const retryUpdateScript = path.join(worktreePath, 'scripts', 'update-service.sh');
     const retryUpdateResult = await runCmd('bash', [retryUpdateScript], worktreePath);
     if (retryUpdateResult.code !== 0) {
-      await appendToProgress(sessionId, `  ⚠ update-service.sh exited ${retryUpdateResult.code}: ${(retryUpdateResult.stdout + retryUpdateResult.stderr).trim()}\n`);
+      await appendLogLine(sessionId, `  ⚠ update-service.sh exited ${retryUpdateResult.code}: ${(retryUpdateResult.stdout + retryUpdateResult.stderr).trim()}`);
     }
     // Self-terminate: the proxy has switched traffic to the new slot. This old
     // production server's work is done. Delay briefly so the final log write
@@ -529,7 +540,7 @@ async function retryAcceptAfterFix(
  * the POST handler can return immediately and the client can stream progress
  * via the existing SSE endpoint.
  *
- * Writes step labels to progressText as each stage begins, and sets the
+ * Writes step labels to NDJSON events as each stage begins, and sets the
  * session status to "accepted" (or "ready" with error log) when done.
  */
 async function runAcceptAsync(
@@ -539,10 +550,10 @@ async function runAcceptAsync(
   parentBranch: string,
   repoRoot: string,
 ): Promise<void> {
-  const step = (text: string) => appendToProgress(sessionId, text);
+  const step = (text: string) => appendLogLine(sessionId, text);
 
   async function failWithError(msg: string): Promise<void> {
-    await appendToProgress(sessionId, msg);
+    await appendLogLine(sessionId, msg);
     const db = await getDb();
     await db.updateEvolveSession(sessionId, { status: 'ready' });
   }
@@ -554,7 +565,7 @@ async function runAcceptAsync(
 
     if (isProduction) {
       // Gate 3: TypeScript must compile without errors.
-      await step('- Type-checking…\n');
+      await step('- Type-checking…');
       const tscResult = await runCmd('bun', ['run', 'typecheck'], worktreePath);
       if (tscResult.code !== 0) {
         const typeErrors = (tscResult.stdout + tscResult.stderr).trim();
@@ -570,7 +581,6 @@ async function runAcceptAsync(
           worktreePath: session.worktreePath,
           status: session.status as LocalSession['status'],
           devServerStatus: 'running',
-          progressText: session.progressText,
           port: session.port,
           previewUrl: session.previewUrl,
           request: session.request,
@@ -587,7 +597,7 @@ async function runAcceptAsync(
       }
 
       // Gate 4: production build must succeed.
-      await step('- Building for production…\n');
+      await step('- Building for production…');
       const buildResult = await runCmd('bun', ['run', 'build'], worktreePath);
       if (buildResult.code !== 0) {
         const buildErrors = (buildResult.stdout + buildResult.stderr).trim();
@@ -603,7 +613,6 @@ async function runAcceptAsync(
           worktreePath: session.worktreePath,
           status: session.status as LocalSession['status'],
           devServerStatus: 'running',
-          progressText: session.progressText,
           port: session.port,
           previewUrl: session.previewUrl,
           request: session.request,
@@ -627,7 +636,7 @@ async function runAcceptAsync(
       // Blue/green path: build is already done in the worktree, swap the slot.
       const bgResult = await blueGreenAccept(worktreePath, branch, parentBranch, repoRoot, step);
       if (!bgResult.ok) {
-        await failWithError(`\n\n❌ **Accept failed**: ${bgResult.error}\n`);
+        await failWithError(`❌ Accept failed: ${bgResult.error}`);
         return;
       }
       bgAcceptResult = bgResult;
@@ -643,7 +652,7 @@ async function runAcceptAsync(
           mergeRoot = alreadyCheckedOutMatch[1];
         } else {
           await failWithError(
-            `\n\n❌ **Accept failed**: \`git checkout ${parentBranch}\` failed:\n${checkoutResult.stderr}\n`,
+            `❌ Accept failed: \`git checkout ${parentBranch}\` failed:\n${checkoutResult.stderr}`,
           );
           return;
         }
@@ -661,7 +670,7 @@ async function runAcceptAsync(
       }
 
       // Merge the preview branch into the parent branch.
-      await step('- Merging branch…\n');
+      await step('- Merging branch…');
       const mergeResult = await runGit(
         ['merge', branch, '--no-ff', '-m', `chore: merge ${branch}`],
         mergeRoot,
@@ -673,8 +682,8 @@ async function runAcceptAsync(
           await runGit(['merge', '--abort'], mergeRoot);
           if (stashed) await runGit(['stash', 'pop'], mergeRoot);
           await failWithError(
-            `\n\n❌ **Accept failed**: merge failed and automatic conflict resolution also failed.\n\n` +
-            `Merge error:\n${mergeResult.stderr}\n\nAuto-resolution log:\n${resolution.log}\n`,
+            `❌ Accept failed: merge failed and automatic conflict resolution also failed.\n` +
+            `Merge error:\n${mergeResult.stderr}\n\nAuto-resolution log:\n${resolution.log}`,
           );
           return;
         }
@@ -684,18 +693,17 @@ async function runAcceptAsync(
         const popResult = await runGit(['stash', 'pop'], mergeRoot);
         if (popResult.code !== 0) {
           // Non-fatal — log the warning but continue. The merge succeeded.
-          await step(`\n⚠️ Merge succeeded but restoring stashed changes produced a conflict. Run \`git stash pop\` manually to resolve.\n\n`);
+          await step(`⚠️ Merge succeeded but restoring stashed changes produced a conflict. Run \`git stash pop\` manually to resolve.`);
         }
       }
 
       // Sync dependencies after merge.
-      await step('- Installing dependencies…\n');
+      await step('- Installing dependencies…');
       const installResult = await runCmd('bun', ['install', '--frozen-lockfile'], mergeRoot);
       if (installResult.code !== 0) {
         await failWithError(
-          `\n\n❌ **Accept failed**: \`bun install --frozen-lockfile\` failed after merge. ` +
-          `The lockfile may be out of sync with package.json.\n\n` +
-          `\`\`\`\n${(installResult.stdout + installResult.stderr).trim()}\n\`\`\`\n`,
+          `❌ Accept failed: \`bun install --frozen-lockfile\` failed after merge.\n` +
+          `\`\`\`\n${(installResult.stdout + installResult.stderr).trim()}\n\`\`\``,
         );
         return;
       }
@@ -707,7 +715,15 @@ async function runAcceptAsync(
     }
 
     // Mark as accepted.
-    await appendToProgress(sessionId, `\n\n---\n\n✅ **Accepted** — ${isProduction ? 'deployed to production' : `merged into \`${parentBranch}\``}\n`);
+    {
+      const ndjsonRow = await db.getEvolveSession(sessionId);
+      if (ndjsonRow) {
+        const ndjsonPath = getSessionNdjsonPath(ndjsonRow.worktreePath);
+        if (fs.existsSync(ndjsonPath)) {
+          appendSessionEvent(ndjsonPath, { type: 'decision', action: 'accepted', detail: isProduction ? 'deployed to production' : `merged into \`${parentBranch}\``, ts: Date.now() });
+        }
+      }
+    }
     await db.updateEvolveSession(sessionId, { status: 'accepted' });
 
     // (Production only) Final VACUUM INTO + proxy spawn + slot activation.
@@ -725,11 +741,11 @@ async function runAcceptAsync(
       // If the proxy script changed, this will restart primordia-proxy — doing it
       // before spawnProdViaProxy would kill the proxy before it could handle the
       // spawn request, leaving the branch marked accepted but not actually serving.
-      await step('- Updating service files…\n');
+      await step('- Updating service files…');
       const updateServiceScript = path.join(worktreePath, 'scripts', 'update-service.sh');
       const updateServiceResult = await runCmd('bash', [updateServiceScript], worktreePath);
       if (updateServiceResult.code !== 0) {
-        await step(`  ⚠ update-service.sh exited ${updateServiceResult.code}: ${(updateServiceResult.stdout + updateServiceResult.stderr).trim()}\n`);
+        await step(`  ⚠ update-service.sh exited ${updateServiceResult.code}: ${(updateServiceResult.stdout + updateServiceResult.stderr).trim()}`);
       }
       // Self-terminate: the proxy has switched traffic to the new slot. This old
       // production server's work is done. Delay briefly so the final log write
@@ -739,7 +755,7 @@ async function runAcceptAsync(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[runAcceptAsync] unexpected error for session ${sessionId}:`, err);
-    await failWithError(`\n\n❌ **Accept failed** (unexpected error): ${msg}\n`).catch(() => {});
+    await failWithError(`❌ Accept failed (unexpected error): ${msg}`).catch(() => {});
   }
 }
 
@@ -777,17 +793,21 @@ export async function POST(request: Request) {
     });
   } catch { /* proxy not running — preview server may already be gone */ }
 
-  /** Append a log entry and update the session status in the parent's own DB. */
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  /** Write a decision event and update the session status in the parent's own DB. */
   async function logDecision(action: 'accept' | 'reject'): Promise<void> {
     const row = await db.getEvolveSession(body.sessionId!);
     if (!row) return;
-    const logEntry =
-      action === 'accept'
-        ? `\n\n---\n\n✅ **Accepted** — merged into \`${parentBranch}\`\n`
-        : `\n\n---\n\n🗑️ **Rejected** — branch discarded\n`;
+    const ndjsonPath = getSessionNdjsonPath(row.worktreePath);
+    if (fs.existsSync(ndjsonPath)) {
+      const detail = action === 'accept'
+        ? (isProduction ? 'deployed to production' : `merged into \`${parentBranch}\``)
+        : 'changes discarded';
+      appendSessionEvent(ndjsonPath, { type: 'decision', action: action === 'accept' ? 'accepted' : 'rejected', detail, ts: Date.now() });
+    }
     await db.updateEvolveSession(body.sessionId!, {
       status: action === 'accept' ? 'accepted' : 'rejected',
-      progressText: row.progressText + logEntry,
       port: row.port,
       previewUrl: row.previewUrl,
     });
@@ -853,17 +873,13 @@ export async function POST(request: Request) {
       // Gates 1+2+3 pass. The remaining work (type-check, build, merge) runs
       // fire-and-forget so the client receives a response immediately and can
       // stream progress via SSE.
-      const isProduction = process.env.NODE_ENV === 'production';
       const acceptingRow = await db.getEvolveSession(body.sessionId);
       if (acceptingRow) {
-        await db.updateEvolveSession(body.sessionId, {
-          status: 'accepting',
-          progressText: acceptingRow.progressText + (isProduction
-            ? `\n\n### 🚀 Deploying to production\n\n`
-            : `\n\n### 🚀 Merging into ${parentBranch}\n\n`),
-          port: acceptingRow.port,
-          previewUrl: acceptingRow.previewUrl,
-        });
+        const ndjsonPath = getSessionNdjsonPath(acceptingRow.worktreePath);
+        if (fs.existsSync(ndjsonPath)) {
+          appendSessionEvent(ndjsonPath, { type: 'section_start', sectionType: 'deploy', label: isProduction ? '🚀 Deploying to production' : `🚀 Merging into \`${parentBranch}\``, ts: Date.now() });
+        }
+        await db.updateEvolveSession(body.sessionId, { status: 'accepting' });
       }
       void runAcceptAsync(body.sessionId, worktreePath, branch, parentBranch, repoRoot);
       return Response.json({ outcome: 'accepting' });

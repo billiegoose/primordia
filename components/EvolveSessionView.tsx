@@ -15,8 +15,9 @@ import { withBasePath } from "../lib/base-path";
 import Link from "next/link";
 import type { DiffFileSummary } from "../app/evolve/session/[id]/page";
 import { DiffFileExpander } from "./DiffFileExpander";
+import type { SessionEvent } from "../lib/session-events";
 
-// ─── Section parsing ──────────────────────────────────────────────────────────
+// ─── Old markdown-based section rendering (legacy fallback) ───────────────────
 
 interface ParsedSection {
   heading: string;
@@ -25,24 +26,16 @@ interface ParsedSection {
 
 function parseProgressSections(text: string): ParsedSection[] {
   if (!text.trim()) return [];
-
-  // Split on a newline immediately followed by "### " + an emoji to locate section
-  // boundaries. All real section headings start with an emoji (e.g. "### 🤖 Claude Code");
-  // markdown headings inside Claude's summary text (e.g. "### Changes made") begin with
-  // an ASCII letter and must NOT be treated as section delimiters.
   const chunks = text.split(/\n(?=### [^\u0000-\u007F])/u);
-
   return chunks
     .map((chunk, i) => {
       if (i === 0) {
-        // First chunk has no ### heading — it is the Setup section.
         const content = chunk
           .replace(/\n\n---\s*$/, "")
           .replace(/\n---\s*$/, "")
           .trim();
         return { heading: "Setup", content };
       }
-      // All subsequent chunks start with "### heading\n..."
       const newlineIdx = chunk.indexOf("\n");
       const heading =
         newlineIdx === -1
@@ -58,18 +51,7 @@ function parseProgressSections(text: string): ParsedSection[] {
     .filter((s) => s.heading || s.content);
 }
 
-// ─── Per-section metrics ──────────────────────────────────────────────────────
-
-interface SectionMetrics {
-  durationMs?: number;
-  costUsd?: number;
-  inputTokens?: number;
-  outputTokens?: number;
-}
-
 const METRICS_RE = /\n?<!-- metrics: (\{[^}]*\}) -->\n?/;
-
-/** Extract embedded metrics from section content and return both. */
 function parseMetricsFromContent(content: string): {
   metrics: SectionMetrics | null;
   strippedContent: string;
@@ -82,6 +64,229 @@ function parseMetricsFromContent(content: string): {
   } catch {
     return { metrics: null, strippedContent: content };
   }
+}
+
+function splitClaudeContent(content: string): {
+  detailsContent: string;
+  finalItem: string;
+  toolCallCount: number;
+} {
+  const stripped = content
+    .replace(/\n*---\n+(?:✅ \*\*Accepted\*\*|🗑️ \*\*Rejected\*\*)[^\n]*\n?$/, "")
+    .replace(/\n?✅ \*\*Claude Code finished\.\*\*\s*$/, "")
+    .replace(/\n?✅ \*\*Follow-up complete\. Preview server will reload automatically\.\*\*\s*$/, "")
+    .trim();
+  const toolCallCount = (stripped.match(/^- 🔧 /gm) ?? []).length;
+  const lines = stripped.split("\n");
+  let lastToolIdx = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].startsWith("- 🔧 ")) { lastToolIdx = i; break; }
+  }
+  if (lastToolIdx === -1) return { detailsContent: "", finalItem: stripped, toolCallCount };
+  return {
+    detailsContent: lines.slice(0, lastToolIdx + 1).join("\n").trim(),
+    finalItem: lines.slice(lastToolIdx + 1).join("\n").trim(),
+    toolCallCount,
+  };
+}
+
+function LegacyLogSection({
+  section,
+  isActive,
+  previewUrl,
+}: {
+  section: ParsedSection;
+  isActive: boolean;
+  previewUrl?: string | null;
+}) {
+  const { heading, content } = section;
+  const isFollowupSection = heading.includes("Follow-up Request");
+  const isClaudeSection = heading.includes("Claude Code");
+  const isTypeFixSection = heading.includes("Fixing type errors");
+  const isServerSection =
+    heading.includes("Starting preview server") ||
+    heading.includes("Restarting preview server");
+  const isDeploySection =
+    heading.includes("Deploying to production") ||
+    heading.includes("Merging into");
+
+  if (isFollowupSection) {
+    const requestText = content.replace(/^> /m, "").trim();
+    return (
+      <div className="px-4 py-3 rounded-lg bg-gray-900 border border-gray-700 text-sm">
+        <p className="text-gray-400 text-xs mb-1 font-medium uppercase tracking-wide">Follow-up request</p>
+        <p className="text-gray-100 leading-relaxed whitespace-pre-wrap">{requestText}</p>
+      </div>
+    );
+  }
+
+  if (isClaudeSection || isTypeFixSection) {
+    const borderClass = isTypeFixSection ? "border-orange-700/50" : "border-blue-700/50";
+    const headingClass = isTypeFixSection ? "text-orange-300" : "text-blue-300";
+    const hasFinishMarker =
+      content.includes("✅ **Claude Code finished.**") ||
+      content.includes("✅ **Follow-up complete. Preview server will reload automatically.**");
+    const hasErrorMarker =
+      content.includes("❌ **Error**:") ||
+      content.includes("❌ **Auto-fix failed");
+    const isRunning = isActive && !hasFinishMarker && !hasErrorMarker;
+
+    if (isRunning) {
+      return (
+        <div className={`rounded-lg border ${borderClass} bg-gray-900 text-sm overflow-hidden`}>
+          <div className="px-4 py-2.5 border-b border-gray-800 flex items-center gap-2">
+            <span className={`font-semibold text-xs ${headingClass}`}>{heading}</span>
+            <span className="ml-auto flex items-center gap-1.5 text-gray-500 text-xs animate-pulse">
+              <span className="w-1.5 h-1.5 rounded-full bg-current inline-block" />
+              Running…
+            </span>
+          </div>
+          <div className="px-4 py-3"><MarkdownContent text={content || " "} /></div>
+        </div>
+      );
+    }
+
+    const { metrics: sectionMetrics, strippedContent } = parseMetricsFromContent(content);
+    const { detailsContent, finalItem, toolCallCount } = splitClaudeContent(strippedContent);
+    const doneBorderClass = hasErrorMarker ? "border-red-700/50" : borderClass;
+    const doneHeadingClass = hasErrorMarker ? "text-red-400" : headingClass;
+    const doneTitle = hasErrorMarker
+      ? (isTypeFixSection ? "❌ Auto-fix failed" : "❌ Claude Code failed")
+      : (isTypeFixSection ? "🔧 Type errors fixed" : "🤖 Claude Code finished");
+    return (
+      <div className={`rounded-lg border ${doneBorderClass} bg-gray-900 text-sm overflow-hidden`}>
+        <div className="px-4 py-2.5 border-b border-gray-800">
+          <span className={`font-semibold text-xs ${doneHeadingClass}`}>{doneTitle}</span>
+        </div>
+        {detailsContent && (
+          <details className="group border-b border-gray-800">
+            <summary className="flex items-center gap-2 px-4 py-2 cursor-pointer select-none hover:bg-gray-800/40 transition-colors list-none text-xs">
+              <span className="text-gray-600 group-open:rotate-90 transition-transform">▶</span>
+              <span className="text-gray-500">🔧 {toolCallCount} tool call{toolCallCount !== 1 ? "s" : ""} made</span>
+            </summary>
+            <div className="px-4 py-3 border-t border-gray-800"><MarkdownContent text={detailsContent} /></div>
+          </details>
+        )}
+        {finalItem && <div className="px-4 py-3"><MarkdownContent text={finalItem} /></div>}
+        {sectionMetrics && <MetricsRow metrics={sectionMetrics} />}
+      </div>
+    );
+  }
+
+  if (isServerSection) {
+    if (isActive) {
+      return (
+        <div className="rounded-lg border border-emerald-700/50 bg-gray-900 text-sm overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-gray-800 flex items-center gap-2">
+            <span className="font-semibold text-xs text-emerald-300">{heading}</span>
+            <span className="ml-auto flex items-center gap-1.5 text-gray-500 text-xs animate-pulse">
+              <span className="w-1.5 h-1.5 rounded-full bg-current inline-block" />
+              Starting…
+            </span>
+          </div>
+          <div className="px-4 py-3"><MarkdownContent text={content || " "} /></div>
+        </div>
+      );
+    }
+    return (
+      <div className="rounded-lg border border-emerald-700/50 bg-gray-900 text-sm overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-gray-800">
+          <span className="font-semibold text-xs text-emerald-300">🚀 Preview ready</span>
+        </div>
+        {content && (
+          <details className="group border-b border-gray-800">
+            <summary className="flex items-center gap-2 px-4 py-2 cursor-pointer select-none hover:bg-gray-800/40 transition-colors list-none text-xs">
+              <span className="text-gray-600 group-open:rotate-90 transition-transform">▶</span>
+              <span className="text-gray-500">🪵 Server logs</span>
+            </summary>
+            <div className="px-4 py-3 border-t border-gray-800"><MarkdownContent text={content} /></div>
+          </details>
+        )}
+        {previewUrl && (
+          <div className="px-4 py-3">
+            <a href={previewUrl} target="_blank" rel="noopener noreferrer"
+              className="text-emerald-400 hover:text-emerald-200 underline break-all">{previewUrl}</a>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (isDeploySection) {
+    if (isActive) {
+      return (
+        <div className="rounded-lg border border-gray-700 bg-gray-900 text-sm overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-gray-800 flex items-center gap-2">
+            <span className="font-semibold text-xs text-gray-300">{heading}</span>
+            <span className="ml-auto flex items-center gap-1.5 text-gray-500 text-xs animate-pulse">
+              <span className="w-1.5 h-1.5 rounded-full bg-current inline-block" />
+              Running…
+            </span>
+          </div>
+          <div className="px-4 py-3"><MarkdownContent text={content || " "} /></div>
+        </div>
+      );
+    }
+    const isProduction = heading.includes("Deploying to production");
+    const mergedIntoBranch = !isProduction ? (heading.match(/Merging into `([^`]+)`/) ?? [])[1] ?? null : null;
+    const doneTitle = isProduction ? "🚀 Deployed to production" : heading.replace(/🚀\s*Merging into/, "✅ Merged into");
+    return (
+      <div className="rounded-lg bg-green-900/40 border border-green-700/50 text-sm overflow-hidden">
+        <div className="px-4 py-4">
+          <p className="text-green-200 font-semibold">{doneTitle}</p>
+          <p className="text-green-300/80 text-xs mt-1">
+            {isProduction ? "The branch was deployed to production."
+              : mergedIntoBranch
+                ? <>The branch was merged into <code className="bg-green-950/60 px-1 rounded">{mergedIntoBranch}</code> and the worktree has been removed.</>
+                : "The branch was accepted and the worktree has been removed."}
+          </p>
+        </div>
+        {content && (
+          <details className="group border-t border-green-800/50">
+            <summary className="flex items-center gap-2 px-4 py-2 cursor-pointer select-none hover:bg-green-900/30 transition-colors list-none text-xs">
+              <span className="text-green-700 group-open:rotate-90 transition-transform">▶</span>
+              <span className="text-green-700/80">Deploy log</span>
+            </summary>
+            <div className="px-4 py-3 border-t border-green-800/50"><MarkdownContent text={content} /></div>
+          </details>
+        )}
+      </div>
+    );
+  }
+
+  if (isActive) {
+    return (
+      <div className="rounded-lg border border-gray-700 bg-gray-900 text-sm overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-gray-800 flex items-center gap-2">
+          <span className="font-semibold text-xs text-gray-300">{heading}</span>
+          <span className="ml-auto flex items-center gap-1.5 text-gray-500 text-xs animate-pulse">
+            <span className="w-1.5 h-1.5 rounded-full bg-current inline-block" />
+            Running…
+          </span>
+        </div>
+        <div className="px-4 py-3"><MarkdownContent text={content || " "} /></div>
+      </div>
+    );
+  }
+
+  return (
+    <details className="group rounded-lg border border-gray-800 overflow-hidden">
+      <summary className="flex items-center gap-2 px-4 py-2.5 cursor-pointer select-none hover:bg-gray-800/40 transition-colors list-none">
+        <span className="text-gray-600 group-open:rotate-90 transition-transform flex-shrink-0 text-xs">▶</span>
+        <span className="font-semibold text-xs flex-shrink-0 text-gray-300">{heading}</span>
+      </summary>
+      <div className="px-4 py-3 border-t border-gray-800"><MarkdownContent text={content} /></div>
+    </details>
+  );
+}
+
+// ─── Metrics ──────────────────────────────────────────────────────────────────
+
+interface SectionMetrics {
+  durationMs?: number;
+  costUsd?: number;
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 function formatDuration(ms: number): string {
@@ -122,247 +327,270 @@ function MetricsRow({ metrics }: { metrics: SectionMetrics }) {
   );
 }
 
-/**
- * For a finished Claude Code (or type-fix) section, split content into:
- * - `detailsContent`: all blocks except the last → goes in <details>
- * - `finalItem`: the last block (Claude's summary / final message) → shown outside
- * - `toolCallCount`: total `- 🔧 ` lines in the content
- */
-function splitClaudeContent(content: string): {
-  detailsContent: string;
-  finalItem: string;
-  toolCallCount: number;
-} {
-  // Strip any decision log entry (---\n\n✅ **Accepted**… or 🗑️ **Rejected**…) that may
-  // have been appended after the finish marker by logDecision() in manage/route.ts.
-  const stripped = content
-    .replace(/\n*---\n+(?:✅ \*\*Accepted\*\*|🗑️ \*\*Rejected\*\*)[^\n]*\n?$/, "")
-    .replace(/\n?✅ \*\*Claude Code finished\.\*\*\s*$/, "")
-    .replace(/\n?✅ \*\*Follow-up complete\. Preview server will reload automatically\.\*\*\s*$/, "")
-    .trim();
+// ─── Structured event rendering ───────────────────────────────────────────────
 
-  const toolCallCount = (stripped.match(/^- 🔧 /gm) ?? []).length;
-
-  // Find the last tool call line and split there: everything after it is the
-  // final message Claude wrote, everything up to and including it is detail.
-  const lines = stripped.split("\n");
-  let lastToolIdx = -1;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (lines[i].startsWith("- 🔧 ")) {
-      lastToolIdx = i;
-      break;
-    }
-  }
-
-  if (lastToolIdx === -1) {
-    // No tool calls — everything is the final message
-    return { detailsContent: "", finalItem: stripped, toolCallCount };
-  }
-
-  const detailsContent = lines.slice(0, lastToolIdx + 1).join("\n").trim();
-  const finalItem = lines.slice(lastToolIdx + 1).join("\n").trim();
-  return { detailsContent, finalItem, toolCallCount };
+/** A logical section derived from structured session events. */
+interface SectionGroup {
+  type: 'setup' | 'claude' | 'type_fix' | 'followup' | 'deploy';
+  label: string;
+  events: SessionEvent[];
 }
 
-// ─── LogSection ───────────────────────────────────────────────────────────────
+/** Group a flat list of SessionEvents into display sections. */
+function groupEventsIntoSections(events: SessionEvent[]): SectionGroup[] {
+  const sections: SectionGroup[] = [{ type: 'setup', label: 'Setup', events: [] }];
+  for (const event of events) {
+    if (event.type === 'section_start') {
+      sections.push({ type: event.sectionType, label: event.label, events: [] });
+    } else {
+      sections[sections.length - 1].events.push(event);
+    }
+  }
+  return sections;
+}
 
-function LogSection({
+/** Generate a short human-readable description of a tool call's primary argument. */
+function summarizeToolInput(name: string, input: Record<string, unknown>): string {
+  const lname = name.toLowerCase();
+  if (lname === 'bash') {
+    const cmd = typeof input.command === 'string' ? input.command : '';
+    return cmd.length > 100 ? cmd.slice(0, 100) + '…' : cmd;
+  }
+  // For file tools, show the path
+  for (const key of ['file_path', 'path', 'pattern', 'glob']) {
+    if (typeof input[key] === 'string') {
+      const val = input[key] as string;
+      return val.length > 80 ? '…' + val.slice(-80) : val;
+    }
+  }
+  // Generic fallback: first key=value pair
+  const entries = Object.entries(input).slice(0, 1);
+  if (entries.length === 0) return '';
+  const [k, v] = entries[0];
+  const val = typeof v === 'string' ? v : JSON.stringify(v);
+  return `${k}=${val.length > 60 ? val.slice(0, 60) + '…' : val}`;
+}
+
+/** Split content events into "detail" events (before/including last tool_use) and "final" events. */
+function splitClaudeEventsForDisplay(events: SessionEvent[]): {
+  detailEvents: (Extract<SessionEvent, { type: 'tool_use' }> | Extract<SessionEvent, { type: 'text' }>)[];
+  finalEvents: Extract<SessionEvent, { type: 'text' }>[];
+  toolCallCount: number;
+} {
+  type ContentEvent = Extract<SessionEvent, { type: 'tool_use' }> | Extract<SessionEvent, { type: 'text' }>;
+  const content = events.filter(
+    (e): e is ContentEvent => e.type === 'tool_use' || e.type === 'text',
+  );
+  let lastToolIdx = -1;
+  for (let i = content.length - 1; i >= 0; i--) {
+    if (content[i].type === 'tool_use') { lastToolIdx = i; break; }
+  }
+  const toolCallCount = content.filter((e) => e.type === 'tool_use').length;
+  if (lastToolIdx === -1) {
+    return { detailEvents: [], finalEvents: content.filter((e): e is Extract<SessionEvent, { type: 'text' }> => e.type === 'text'), toolCallCount: 0 };
+  }
+  return {
+    detailEvents: content.slice(0, lastToolIdx + 1),
+    finalEvents: content.slice(lastToolIdx + 1).filter((e): e is Extract<SessionEvent, { type: 'text' }> => e.type === 'text'),
+    toolCallCount,
+  };
+}
+
+/** Render a running Claude/type-fix section (streaming events live). */
+function RunningClaudeSection({ events, label, isTypeFixSection }: {
+  events: SessionEvent[];
+  label: string;
+  isTypeFixSection: boolean;
+}) {
+  const borderClass = isTypeFixSection ? "border-orange-700/50" : "border-blue-700/50";
+  const headingClass = isTypeFixSection ? "text-orange-300" : "text-blue-300";
+
+  return (
+    <div className={`rounded-lg border ${borderClass} bg-gray-900 text-sm overflow-hidden`}>
+      <div className="px-4 py-2.5 border-b border-gray-800 flex items-center gap-2">
+        <span className={`font-semibold text-xs ${headingClass}`}>{label}</span>
+        <span className="ml-auto flex items-center gap-1.5 text-gray-500 text-xs animate-pulse">
+          <span className="w-1.5 h-1.5 rounded-full bg-current inline-block" />
+          Running…
+        </span>
+      </div>
+      <div className="px-4 py-3 space-y-2">
+        {events.map((event, i) => {
+          if (event.type === 'tool_use') {
+            const summary = summarizeToolInput(event.name, event.input);
+            return (
+              <p key={i} className="text-gray-400 text-xs font-mono">
+                🔧 {event.name}{summary ? <span className="text-gray-600"> {summary}</span> : null}
+              </p>
+            );
+          }
+          if (event.type === 'text') {
+            return <MarkdownContent key={i} text={event.content} />;
+          }
+          if (event.type === 'log_line') {
+            return <p key={i} className="text-gray-500 text-xs">{event.content}</p>;
+          }
+          return null;
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Render a completed Claude/type-fix section with tool calls collapsed. */
+function DoneClaudeSection({ events, label, isTypeFixSection }: {
+  events: SessionEvent[];
+  label: string;
+  isTypeFixSection: boolean;
+}) {
+  const resultEvent = events.find((e): e is Extract<SessionEvent, { type: 'result' }> => e.type === 'result');
+  const metricsEvent = events.find((e): e is Extract<SessionEvent, { type: 'metrics' }> => e.type === 'metrics');
+  const hasError = resultEvent?.subtype === 'error' || resultEvent?.subtype === 'timeout' || resultEvent?.subtype === 'aborted';
+
+  const borderClass = isTypeFixSection ? "border-orange-700/50" : "border-blue-700/50";
+  const headingClass = isTypeFixSection ? "text-orange-300" : "text-blue-300";
+  const doneBorderClass = hasError ? "border-red-700/50" : borderClass;
+  const doneHeadingClass = hasError ? "text-red-400" : headingClass;
+  const doneTitle = hasError
+    ? (isTypeFixSection ? "❌ Auto-fix failed" : "❌ Claude Code failed")
+    : (isTypeFixSection ? "🔧 Type errors fixed" : "🤖 Claude Code finished");
+
+  const { detailEvents, finalEvents, toolCallCount } = splitClaudeEventsForDisplay(events);
+
+  return (
+    <div className={`rounded-lg border ${doneBorderClass} bg-gray-900 text-sm overflow-hidden`}>
+      <div className="px-4 py-2.5 border-b border-gray-800">
+        <span className={`font-semibold text-xs ${doneHeadingClass}`}>{doneTitle}</span>
+      </div>
+      {toolCallCount > 0 && (
+        <details className="group border-b border-gray-800">
+          <summary className="flex items-center gap-2 px-4 py-2 cursor-pointer select-none hover:bg-gray-800/40 transition-colors list-none text-xs">
+            <span className="text-gray-600 group-open:rotate-90 transition-transform">▶</span>
+            <span className="text-gray-500">🔧 {toolCallCount} tool call{toolCallCount !== 1 ? "s" : ""} made</span>
+          </summary>
+          <div className="px-4 py-3 border-t border-gray-800 space-y-1">
+            {detailEvents.map((event, i) => {
+              if (event.type === 'tool_use') {
+                const summary = summarizeToolInput(event.name, event.input);
+                return (
+                  <p key={i} className="text-gray-400 text-xs font-mono">
+                    🔧 {event.name}{summary ? <span className="text-gray-600"> {summary}</span> : null}
+                  </p>
+                );
+              }
+              if (event.type === 'text') {
+                return <MarkdownContent key={i} text={event.content} />;
+              }
+              return null;
+            })}
+          </div>
+        </details>
+      )}
+      {finalEvents.length > 0 && (
+        <div className="px-4 py-3">
+          {finalEvents.map((e, i) => <MarkdownContent key={i} text={e.content} />)}
+        </div>
+      )}
+      {metricsEvent && (
+        <MetricsRow metrics={{
+          durationMs: metricsEvent.durationMs ?? undefined,
+          costUsd: metricsEvent.costUsd ?? undefined,
+          inputTokens: metricsEvent.inputTokens ?? undefined,
+          outputTokens: metricsEvent.outputTokens ?? undefined,
+        }} />
+      )}
+    </div>
+  );
+}
+
+/** Render a single non-setup, non-legacy section. */
+function StructuredSection({
   section,
   isActive,
   previewUrl,
 }: {
-  section: ParsedSection;
+  section: SectionGroup;
   isActive: boolean;
   previewUrl?: string | null;
 }) {
-  const { heading, content } = section;
+  const { type, label, events } = section;
 
-  const isFollowupSection = heading.includes("Follow-up Request");
-  const isClaudeSection = heading.includes("Claude Code");
-  const isTypeFixSection = heading.includes("Fixing type errors");
-  const isServerSection =
-    heading.includes("Starting preview server") ||
-    heading.includes("Restarting preview server");
-  const isDeploySection =
-    heading.includes("Deploying to production") ||
-    heading.includes("Merging into");
-
-  // ── Follow-up Request: render like "Your request" ─────────────────────────
-  if (isFollowupSection) {
-    const requestText = content.replace(/^> /m, "").trim();
+  // ── Follow-up request ────────────────────────────────────────────────────
+  if (type === 'followup') {
+    const requestEvent = events.find((e): e is Extract<SessionEvent, { type: 'followup_request' }> => e.type === 'followup_request');
+    const claudeEvents = events.filter((e) => e.type !== 'followup_request');
+    const hasResult = claudeEvents.some((e) => e.type === 'result');
     return (
-      <div className="px-4 py-3 rounded-lg bg-gray-900 border border-gray-700 text-sm">
-        <p className="text-gray-400 text-xs mb-1 font-medium uppercase tracking-wide">Follow-up request</p>
-        <p className="text-gray-100 leading-relaxed whitespace-pre-wrap">{requestText}</p>
-      </div>
+      <>
+        {requestEvent && (
+          <div className="px-4 py-3 rounded-lg bg-gray-900 border border-gray-700 text-sm">
+            <p className="text-gray-400 text-xs mb-1 font-medium uppercase tracking-wide">Follow-up request</p>
+            <p className="text-gray-100 leading-relaxed whitespace-pre-wrap">{requestEvent.request}</p>
+          </div>
+        )}
+        {claudeEvents.length > 0 && (
+          isActive && !hasResult
+            ? <RunningClaudeSection events={claudeEvents} label={label} isTypeFixSection={false} />
+            : <DoneClaudeSection events={claudeEvents} label={label} isTypeFixSection={false} />
+        )}
+      </>
     );
   }
 
-  // ── Claude Code / Fixing type errors ──────────────────────────────────────
-  if (isClaudeSection || isTypeFixSection) {
-    const borderClass = isTypeFixSection ? "border-orange-700/50" : "border-blue-700/50";
-    const headingClass = isTypeFixSection ? "text-orange-300" : "text-blue-300";
-
-    // Treat the section as finished if the content already contains an end marker,
-    // even if the status update hasn't arrived in the same SSE tick yet.
-    const hasFinishMarker =
-      content.includes("✅ **Claude Code finished.**") ||
-      content.includes("✅ **Follow-up complete. Preview server will reload automatically.**");
-    const hasErrorMarker =
-      content.includes("❌ **Error**:") ||
-      content.includes("❌ **Auto-fix failed");
-    const isRunning = isActive && !hasFinishMarker && !hasErrorMarker;
-
-    if (isRunning) {
-      return (
-        <div className={`rounded-lg border ${borderClass} bg-gray-900 text-sm overflow-hidden`}>
-          <div className="px-4 py-2.5 border-b border-gray-800 flex items-center gap-2">
-            <span className={`font-semibold text-xs ${headingClass}`}>{heading}</span>
-            <span className="ml-auto flex items-center gap-1.5 text-gray-500 text-xs animate-pulse">
-              <span className="w-1.5 h-1.5 rounded-full bg-current inline-block" />
-              Running…
-            </span>
-          </div>
-          <div className="px-4 py-3">
-            <MarkdownContent text={content || " "} />
-          </div>
-        </div>
-      );
+  // ── Claude Code / type_fix ───────────────────────────────────────────────
+  if (type === 'claude' || type === 'type_fix') {
+    const hasResult = events.some((e) => e.type === 'result');
+    if (isActive && !hasResult) {
+      return <RunningClaudeSection events={events} label={label} isTypeFixSection={type === 'type_fix'} />;
     }
-
-    // Done — collapse tool calls into <details>, show final message outside
-    const { metrics: sectionMetrics, strippedContent } = parseMetricsFromContent(content);
-    const { detailsContent, finalItem, toolCallCount } = splitClaudeContent(strippedContent);
-    const doneBorderClass = hasErrorMarker ? "border-red-700/50" : borderClass;
-    const doneHeadingClass = hasErrorMarker ? "text-red-400" : headingClass;
-    const doneTitle = hasErrorMarker
-      ? (isTypeFixSection ? "❌ Auto-fix failed" : "❌ Claude Code failed")
-      : (isTypeFixSection ? "🔧 Type errors fixed" : "🤖 Claude Code finished");
-    return (
-      <div className={`rounded-lg border ${doneBorderClass} bg-gray-900 text-sm overflow-hidden`}>
-        <div className="px-4 py-2.5 border-b border-gray-800">
-          <span className={`font-semibold text-xs ${doneHeadingClass}`}>{doneTitle}</span>
-        </div>
-        {detailsContent && (
-          <details className="group border-b border-gray-800">
-            <summary className="flex items-center gap-2 px-4 py-2 cursor-pointer select-none hover:bg-gray-800/40 transition-colors list-none text-xs">
-              <span className="text-gray-600 group-open:rotate-90 transition-transform">▶</span>
-              <span className="text-gray-500">
-                🔧 {toolCallCount} tool call{toolCallCount !== 1 ? "s" : ""} made
-              </span>
-            </summary>
-            <div className="px-4 py-3 border-t border-gray-800">
-              <MarkdownContent text={detailsContent} />
-            </div>
-          </details>
-        )}
-        {finalItem && (
-          <div className="px-4 py-3">
-            <MarkdownContent text={finalItem} />
-          </div>
-        )}
-        {sectionMetrics && <MetricsRow metrics={sectionMetrics} />}
-      </div>
-    );
+    return <DoneClaudeSection events={events} label={label} isTypeFixSection={type === 'type_fix'} />;
   }
 
-  // ── Preview server ─────────────────────────────────────────────────────────
-  if (isServerSection) {
-    if (isActive) {
-      return (
-        <div className="rounded-lg border border-emerald-700/50 bg-gray-900 text-sm overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-gray-800 flex items-center gap-2">
-            <span className="font-semibold text-xs text-emerald-300">{heading}</span>
-            <span className="ml-auto flex items-center gap-1.5 text-gray-500 text-xs animate-pulse">
-              <span className="w-1.5 h-1.5 rounded-full bg-current inline-block" />
-              Starting…
-            </span>
-          </div>
-          <div className="px-4 py-3">
-            <MarkdownContent text={content || " "} />
-          </div>
-        </div>
-      );
-    }
+  // ── Deploy ───────────────────────────────────────────────────────────────
+  if (type === 'deploy') {
+    const logLines = events
+      .filter((e): e is Extract<SessionEvent, { type: 'log_line' }> => e.type === 'log_line')
+      .map((e) => e.content)
+      .join('\n');
+    const resultEvent = events.find((e): e is Extract<SessionEvent, { type: 'result' }> => e.type === 'result');
+    const isProduction = label.includes("production");
+    const mergedIntoBranch = !isProduction ? (label.match(/into `([^`]+)`/) ?? [])[1] ?? null : null;
 
-    // Done — collapse server logs, show preview URL
-    return (
-      <div className="rounded-lg border border-emerald-700/50 bg-gray-900 text-sm overflow-hidden">
-        <div className="px-4 py-2.5 border-b border-gray-800">
-          <span className="font-semibold text-xs text-emerald-300">🚀 Preview ready</span>
-        </div>
-        {content && (
-          <details className="group border-b border-gray-800">
-            <summary className="flex items-center gap-2 px-4 py-2 cursor-pointer select-none hover:bg-gray-800/40 transition-colors list-none text-xs">
-              <span className="text-gray-600 group-open:rotate-90 transition-transform">▶</span>
-              <span className="text-gray-500">🪵 Server logs</span>
-            </summary>
-            <div className="px-4 py-3 border-t border-gray-800">
-              <MarkdownContent text={content} />
-            </div>
-          </details>
-        )}
-        {previewUrl && (
-          <div className="px-4 py-3">
-            <a
-              href={previewUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-emerald-400 hover:text-emerald-200 underline break-all"
-            >
-              {previewUrl}
-            </a>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // ── Deploy section (Deploying to production / Merging into) ───────────────
-  if (isDeploySection) {
-    if (isActive) {
+    if (isActive && !resultEvent) {
       return (
         <div className="rounded-lg border border-gray-700 bg-gray-900 text-sm overflow-hidden">
           <div className="px-4 py-2.5 border-b border-gray-800 flex items-center gap-2">
-            <span className="font-semibold text-xs text-gray-300">{heading}</span>
+            <span className="font-semibold text-xs text-gray-300">{label}</span>
             <span className="ml-auto flex items-center gap-1.5 text-gray-500 text-xs animate-pulse">
               <span className="w-1.5 h-1.5 rounded-full bg-current inline-block" />
               Running…
             </span>
           </div>
-          <div className="px-4 py-3">
-            <MarkdownContent text={content || " "} />
-          </div>
+          {logLines && <div className="px-4 py-3"><pre className="text-xs text-gray-400 whitespace-pre-wrap font-mono">{logLines}</pre></div>}
         </div>
       );
     }
 
-    // Done — green box with collapsible log
-    const isProduction = heading.includes("Deploying to production");
-    const mergedIntoBranch = !isProduction
-      ? (heading.match(/Merging into `([^`]+)`/) ?? [])[1] ?? null
-      : null;
-    const doneTitle = isProduction ? "🚀 Deployed to production" : heading.replace(/🚀\s*Merging into/, "✅ Merged into");
+    const doneTitle = isProduction ? "🚀 Deployed to production" : label.replace(/🚀\s*Merging into/, "✅ Merged into").replace(/🚀\s*Deploying into/, "✅ Merged into");
     return (
       <div className="rounded-lg bg-green-900/40 border border-green-700/50 text-sm overflow-hidden">
         <div className="px-4 py-4">
           <p className="text-green-200 font-semibold">{doneTitle}</p>
           <p className="text-green-300/80 text-xs mt-1">
-            {isProduction
-              ? "The branch was deployed to production."
+            {isProduction ? "The branch was deployed to production."
               : mergedIntoBranch
                 ? <>The branch was merged into <code className="bg-green-950/60 px-1 rounded">{mergedIntoBranch}</code> and the worktree has been removed.</>
                 : "The branch was accepted and the worktree has been removed."}
           </p>
         </div>
-        {content && (
+        {logLines && (
           <details className="group border-t border-green-800/50">
             <summary className="flex items-center gap-2 px-4 py-2 cursor-pointer select-none hover:bg-green-900/30 transition-colors list-none text-xs">
               <span className="text-green-700 group-open:rotate-90 transition-transform">▶</span>
               <span className="text-green-700/80">Deploy log</span>
             </summary>
             <div className="px-4 py-3 border-t border-green-800/50">
-              <MarkdownContent text={content} />
+              <pre className="text-xs text-gray-400 whitespace-pre-wrap font-mono">{logLines}</pre>
             </div>
           </details>
         )}
@@ -370,36 +598,48 @@ function LogSection({
     );
   }
 
-  // ── Default: fallback collapsible ──────────────────────────────────────────
+  // ── Preview server (legacy deploy type) ──────────────────────────────────
+  const logLines = events
+    .filter((e): e is Extract<SessionEvent, { type: 'log_line' }> => e.type === 'log_line')
+    .map((e) => e.content)
+    .join('\n');
   if (isActive) {
     return (
-      <div className="rounded-lg border border-gray-700 bg-gray-900 text-sm overflow-hidden">
+      <div className="rounded-lg border border-emerald-700/50 bg-gray-900 text-sm overflow-hidden">
         <div className="px-4 py-2.5 border-b border-gray-800 flex items-center gap-2">
-          <span className="font-semibold text-xs text-gray-300">{heading}</span>
+          <span className="font-semibold text-xs text-emerald-300">{label}</span>
           <span className="ml-auto flex items-center gap-1.5 text-gray-500 text-xs animate-pulse">
             <span className="w-1.5 h-1.5 rounded-full bg-current inline-block" />
-            Running…
+            Starting…
           </span>
         </div>
-        <div className="px-4 py-3">
-          <MarkdownContent text={content || " "} />
-        </div>
+        {logLines && <div className="px-4 py-3"><pre className="text-xs text-gray-400 whitespace-pre-wrap font-mono">{logLines}</pre></div>}
       </div>
     );
   }
-
   return (
-    <details className="group rounded-lg border border-gray-800 overflow-hidden">
-      <summary className="flex items-center gap-2 px-4 py-2.5 cursor-pointer select-none hover:bg-gray-800/40 transition-colors list-none">
-        <span className="text-gray-600 group-open:rotate-90 transition-transform flex-shrink-0 text-xs">
-          ▶
-        </span>
-        <span className="font-semibold text-xs flex-shrink-0 text-gray-300">{heading}</span>
-      </summary>
-      <div className="px-4 py-3 border-t border-gray-800">
-        <MarkdownContent text={content} />
+    <div className="rounded-lg border border-emerald-700/50 bg-gray-900 text-sm overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-gray-800">
+        <span className="font-semibold text-xs text-emerald-300">🚀 Preview ready</span>
       </div>
-    </details>
+      {logLines && (
+        <details className="group border-b border-gray-800">
+          <summary className="flex items-center gap-2 px-4 py-2 cursor-pointer select-none hover:bg-gray-800/40 transition-colors list-none text-xs">
+            <span className="text-gray-600 group-open:rotate-90 transition-transform">▶</span>
+            <span className="text-gray-500">🪵 Server logs</span>
+          </summary>
+          <div className="px-4 py-3 border-t border-gray-800">
+            <pre className="text-xs text-gray-400 whitespace-pre-wrap font-mono">{logLines}</pre>
+          </div>
+        </details>
+      )}
+      {previewUrl && (
+        <div className="px-4 py-3">
+          <a href={previewUrl} target="_blank" rel="noopener noreferrer"
+            className="text-emerald-400 hover:text-emerald-200 underline break-all">{previewUrl}</a>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -408,7 +648,10 @@ function LogSection({
 interface EvolveSessionViewProps {
   sessionId: string;
   initialRequest: string;
-  initialProgressText: string;
+  /** Initial structured events loaded server-side (empty for new sessions with no NDJSON yet). */
+  initialEvents: SessionEvent[];
+  /** Number of NDJSON lines already included in initialEvents, for SSE reconnection offset. */
+  initialLineCount: number;
   initialStatus: string;
   initialPreviewUrl: string | null;
   /** The currently checked-out branch (parent). Used in confirmation copy and NavHeader. */
@@ -432,7 +675,8 @@ interface EvolveSessionViewProps {
 export default function EvolveSessionView({
   sessionId,
   initialRequest,
-  initialProgressText,
+  initialEvents,
+  initialLineCount,
   initialStatus,
   initialPreviewUrl,
   branch,
@@ -443,7 +687,7 @@ export default function EvolveSessionView({
   canEvolve,
   isProduction,
 }: EvolveSessionViewProps) {
-  const [progressText, setProgressText] = useState(initialProgressText);
+  const [events, setEvents] = useState<SessionEvent[]>(initialEvents);
   const [status, setStatus] = useState(initialStatus);
   const [previewUrl, setPreviewUrl] = useState<string | null>(initialPreviewUrl);
   /** Status of the preview server as reported by the proxy management API. */
@@ -474,8 +718,8 @@ export default function EvolveSessionView({
   const [liveDiffSummary, setLiveDiffSummary] = useState<DiffFileSummary[]>(diffSummary);
   const abortControllerRef = useRef<AbortController | null>(null);
   const proxyLogsControllerRef = useRef<AbortController | null>(null);
-  /** Tracks how many characters of progressText the client has received, for SSE reconnection. */
-  const progressLengthRef = useRef(initialProgressText.length);
+  /** Tracks how many NDJSON lines the client has received, for SSE reconnection offset. */
+  const lineCountRef = useRef(initialLineCount);
   /** Mirrors current status so the visibilitychange handler can read it without a stale closure. */
   const statusRef = useRef(initialStatus);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -484,7 +728,7 @@ export default function EvolveSessionView({
   /**
    * True when the user is scrolled to (or near) the bottom.
    * Updated by a scroll listener so we capture position *before* new content
-   * is rendered — checking scrollHeight inside the progressText effect would
+   * is rendered — checking scrollHeight inside the events effect would
    * be wrong because the DOM has already grown by then.
    */
   const wasAtBottomRef = useRef(true);
@@ -492,9 +736,6 @@ export default function EvolveSessionView({
   // Track scroll position so we know whether to auto-scroll on new content.
   useEffect(() => {
     function onScroll() {
-      // Use clientHeight (layout viewport) rather than window.innerHeight
-      // (visual viewport) so mobile address-bar hide/show doesn't cause
-      // false "not at bottom" readings.
       wasAtBottomRef.current =
         window.scrollY + document.documentElement.clientHeight >=
         document.documentElement.scrollHeight - 40;
@@ -507,12 +748,12 @@ export default function EvolveSessionView({
     };
   }, []);
 
-  // Auto-scroll to bottom as progress grows, but only if the user is already at the bottom.
+  // Auto-scroll to bottom as events grow, but only if the user is already at the bottom.
   useEffect(() => {
     if (wasAtBottomRef.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: "instant" });
     }
-  }, [progressText]);
+  }, [events]);
 
   // Stop the SSE stream on unmount
   useEffect(() => {
@@ -559,7 +800,7 @@ export default function EvolveSessionView({
     abortControllerRef.current?.abort();
     const controller = new AbortController();
     abortControllerRef.current = controller;
-    const offset = progressLengthRef.current;
+    const offset = lineCountRef.current;
 
     try {
       const response = await fetch(
@@ -582,18 +823,24 @@ export default function EvolveSessionView({
           if (!raw) continue;
           try {
             const parsed = JSON.parse(raw) as {
-              progressDelta?: string;
+              events?: SessionEvent[];
+              lineCount?: number;
               status?: string;
               previewUrl?: string | null;
               done?: boolean;
             };
 
-            if (parsed.progressDelta) {
-              setProgressText((prev) => {
-                const next = prev + parsed.progressDelta!;
-                progressLengthRef.current = next.length;
-                return next;
-              });
+            if (parsed.events && parsed.events.length > 0) {
+              // legacy_text events carry the full progressText — replace state entirely
+              if (parsed.events.some((e) => e.type === 'legacy_text')) {
+                setEvents(parsed.events);
+                lineCountRef.current = 0;
+              } else {
+                setEvents((prev) => [...prev, ...parsed.events!]);
+                if (parsed.lineCount != null) lineCountRef.current = parsed.lineCount;
+              }
+            } else if (parsed.lineCount != null) {
+              lineCountRef.current = parsed.lineCount;
             }
             if (parsed.status != null) {
               setStatus(parsed.status);
@@ -694,7 +941,6 @@ export default function EvolveSessionView({
   // Auto-focus the follow-up textarea whenever the follow-up panel opens.
   useEffect(() => {
     if (activeAction === "followup") {
-      // Small delay so the DOM is painted before we focus.
       setTimeout(() => followupTextareaRef.current?.focus(), 0);
     }
   }, [activeAction]);
@@ -704,7 +950,6 @@ export default function EvolveSessionView({
     setRestartError(null);
 
     try {
-      // Call the proxy management API directly — it owns the server lifecycle.
       const res = await fetch(`/_proxy/preview/${sessionId}/restart`, { method: 'POST' });
 
       if (!res.ok) {
@@ -713,7 +958,6 @@ export default function EvolveSessionView({
       }
 
       setProxyServerStatus('starting');
-      // Re-subscribe to server logs so the new startup output is captured.
       void startServerLogsStream();
     } catch (err) {
       setRestartError(err instanceof Error ? err.message : String(err));
@@ -738,7 +982,6 @@ export default function EvolveSessionView({
         throw new Error(data.error ?? `Server error: ${res.status}`);
       }
 
-      // The server will transition the session to ready; keep streaming to catch the update.
       void startStreaming();
     } catch (err) {
       setAbortError(err instanceof Error ? err.message : String(err));
@@ -853,15 +1096,12 @@ export default function EvolveSessionView({
       const data = (await res.json()) as { outcome?: string; error?: string; stashWarning?: string };
       if (!res.ok) throw new Error(data.error ?? `API error: ${res.statusText}`);
       if (data.outcome === 'accepting') {
-        // Accept is running async on the server — stream its progress via SSE.
         setStatus('accepting');
         setActiveAction(null);
         void startStreaming();
         return;
       }
       if (data.outcome === 'auto-fixing-types') {
-        // Type check failed — the server automatically started a fix run and will
-        // retry Accept when done. Stream the progress; the server handles the rest.
         setStatus('fixing-types');
         setActiveAction(null);
         void startStreaming();
@@ -912,16 +1152,43 @@ export default function EvolveSessionView({
   /** True while the session pipeline is actively running (not yet ready for action). */
   const isClaudeRunning = status === "starting" || status === "running-claude" || status === "fixing-types";
 
+  // ─── Derive setup/content sections from events ───────────────────────────
 
-  // Parse progress into sections; integrate setup into the "Created branch" card.
-  const sections = progressText ? parseProgressSections(progressText) : [];
-  const setupSection = sections.length > 0 && sections[0].heading === "Setup" ? sections[0] : null;
-  const contentSections = sections.filter((s) => s.heading !== "Setup");
-  // Setup is "active" while it's the only section (no ### headings yet) and we're not terminal.
-  const isSetupActive = !isTerminal && (sections.length === 0 || (sections.length === 1 && sections[0].heading === "Setup"));
-  const setupStepCount = setupSection
-    ? (setupSection.content.match(/^- \[x\]/gm) ?? []).length
-    : 0;
+  // Check if this is a legacy session (no NDJSON, only progressText string)
+  const legacyTextEvent = events.find((e): e is Extract<SessionEvent, { type: 'legacy_text' }> => e.type === 'legacy_text');
+
+  // Legacy rendering path
+  let legacySections: ParsedSection[] = [];
+  let legacySetupSection: ParsedSection | null = null;
+  let legacyContentSections: ParsedSection[] = [];
+  let legacyIsSetupActive = false;
+  let legacySetupStepCount = 0;
+
+  // Structured rendering path
+  let sections: SectionGroup[] = [];
+  let setupSection: SectionGroup | null = null;
+  let contentSections: SectionGroup[] = [];
+  let isSetupActive = false;
+  let setupStepCount = 0;
+
+  if (legacyTextEvent) {
+    legacySections = parseProgressSections(legacyTextEvent.content);
+    legacySetupSection = legacySections.length > 0 && legacySections[0].heading === "Setup" ? legacySections[0] : null;
+    legacyContentSections = legacySections.filter((s) => s.heading !== "Setup");
+    legacyIsSetupActive = !isTerminal && (legacySections.length === 0 || (legacySections.length === 1 && legacySections[0].heading === "Setup"));
+    legacySetupStepCount = legacySetupSection
+      ? (legacySetupSection.content.match(/^- \[x\]/gm) ?? []).length
+      : 0;
+  } else {
+    sections = groupEventsIntoSections(events);
+    setupSection = sections[0] ?? null;
+    contentSections = sections.slice(1);
+    // Setup is active while it's the only section and session isn't terminal
+    isSetupActive = !isTerminal && contentSections.length === 0;
+    setupStepCount = setupSection
+      ? setupSection.events.filter((e): e is Extract<SessionEvent, { type: 'setup_step' }> => e.type === 'setup_step' && e.done).length
+      : 0;
+  }
 
   return (
     <main className="flex flex-col w-full max-w-3xl mx-auto px-4 py-6 min-h-dvh">
@@ -967,7 +1234,7 @@ export default function EvolveSessionView({
             <circle cx="6" cy="18" r="3"/>
             <path d="M18 9a9 9 0 0 1-9 9"/>
           </svg>
-          {isSetupActive ? (
+          {(legacyTextEvent ? legacyIsSetupActive : isSetupActive) ? (
             <>
               Creating branch…
               <span className="ml-1 flex items-center gap-1 text-amber-600/70 text-xs animate-pulse">
@@ -979,14 +1246,35 @@ export default function EvolveSessionView({
           )}
         </p>
         <code className="font-mono text-amber-200 text-sm">{sessionBranch}</code>
-        {!isSetupActive && setupSection && (
+
+        {/* Structured setup steps */}
+        {!isSetupActive && !legacyTextEvent && setupSection && setupStepCount > 0 && (
           <details className="group mt-2">
             <summary className="flex items-center gap-1.5 cursor-pointer select-none text-xs text-amber-600/80 hover:text-amber-400 transition-colors list-none">
               <span className="group-open:rotate-90 transition-transform inline-block">▶</span>
               ✅ {setupStepCount} step{setupStepCount !== 1 ? "s" : ""} completed
             </summary>
+            <div className="mt-2 pl-2 border-l border-amber-700/30 space-y-0.5">
+              {setupSection.events
+                .filter((e): e is Extract<SessionEvent, { type: 'setup_step' }> => e.type === 'setup_step')
+                .map((e, i) => (
+                  <p key={i} className="text-xs text-amber-200/70">
+                    {e.done ? '✅' : '⏳'} {e.label}
+                  </p>
+                ))}
+            </div>
+          </details>
+        )}
+
+        {/* Legacy setup steps (markdown) */}
+        {!legacyIsSetupActive && legacySetupSection && (
+          <details className="group mt-2">
+            <summary className="flex items-center gap-1.5 cursor-pointer select-none text-xs text-amber-600/80 hover:text-amber-400 transition-colors list-none">
+              <span className="group-open:rotate-90 transition-transform inline-block">▶</span>
+              ✅ {legacySetupStepCount} step{legacySetupStepCount !== 1 ? "s" : ""} completed
+            </summary>
             <div className="mt-2 pl-2 border-l border-amber-700/30">
-              <MarkdownContent text={setupSection.content} />
+              <MarkdownContent text={legacySetupSection.content} />
             </div>
           </details>
         )}
@@ -994,20 +1282,37 @@ export default function EvolveSessionView({
 
       {/* Progress sections */}
       <div className="mb-6 flex flex-col gap-6">
-        {contentSections.map((section, i) => {
-          const isSectionActive = i === contentSections.length - 1 && !isTerminal;
-          const isServer =
-            section.heading.includes("Starting preview server") ||
-            section.heading.includes("Restarting preview server");
-          return (
-            <LogSection
-              key={i}
-              section={section}
-              isActive={isSectionActive}
-              previewUrl={isServer ? previewUrl : undefined}
-            />
-          );
-        })}
+        {legacyTextEvent ? (
+          // Legacy rendering: use old markdown-based section components
+          legacyContentSections.map((section, i) => {
+            const isSectionActive = i === legacyContentSections.length - 1 && !isTerminal;
+            const isServer =
+              section.heading.includes("Starting preview server") ||
+              section.heading.includes("Restarting preview server");
+            return (
+              <LegacyLogSection
+                key={i}
+                section={section}
+                isActive={isSectionActive}
+                previewUrl={isServer ? previewUrl : undefined}
+              />
+            );
+          })
+        ) : (
+          // Structured rendering: use event-based section components
+          contentSections.map((section, i) => {
+            const isSectionActive = i === contentSections.length - 1 && !isTerminal;
+            const isServer = section.type === 'deploy' && section.label.toLowerCase().includes('preview');
+            return (
+              <StructuredSection
+                key={i}
+                section={section}
+                isActive={isSectionActive}
+                previewUrl={isServer ? previewUrl : undefined}
+              />
+            );
+          })
+        )}
 
         {/* Rejected banner — inline with other sections */}
         {status === "rejected" && (
@@ -1098,7 +1403,6 @@ export default function EvolveSessionView({
           </details>
         );
       })()}
-
 
       {/* Upstream Changes — shown when the parent branch has commits not yet in the session branch; hidden for non-evolvers */}
       {canEvolve && remainingUpstream > 0 && status !== "accepted" && status !== "rejected" && (
@@ -1277,14 +1581,12 @@ export default function EvolveSessionView({
                   type="button"
                   onClick={() => followupFileInputRef.current?.click()}
                   disabled={isClaudeRunning || isSubmittingFollowup}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-gray-400 hover:text-gray-200 hover:bg-gray-800 border border-gray-700 transition-colors disabled:opacity-50"
+                  className="px-3 py-1.5 rounded-lg border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-600 disabled:opacity-40 text-xs transition-colors"
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
-                    <path fillRule="evenodd" d="M15.621 4.379a3 3 0 0 0-4.242 0l-7 7a1.5 1.5 0 0 0 2.122 2.121l7-7a.5.5 0 0 1 .707.708l-7 7a2.5 2.5 0 0 1-3.536-3.536l7-7a4.5 4.5 0 0 1 6.364 6.364l-7 7A6.5 6.5 0 0 1 2.45 9.955l7-7a.5.5 0 1 1 .707.708l-7 7A5.5 5.5 0 0 0 10.95 18.92l7-7a3 3 0 0 0 0-4.242Z" clipRule="evenodd" />
-                  </svg>
-                  Attach files
+                  📎 Attach files
                 </button>
                 <button
+                  type="button"
                   onClick={handleFollowupSubmit}
                   disabled={isClaudeRunning || isSubmittingFollowup || !followupText.trim()}
                   className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium transition-colors"
@@ -1389,16 +1691,7 @@ export default function EvolveSessionView({
             <Link href="/changelog" className="text-blue-400 hover:text-blue-300">
               Changelog
             </Link>
-            <>
-              {" "}·{" "}
-              <Link href="/branches" className="text-blue-400 hover:text-blue-300">
-                Branches
-              </Link>
-            </>
           </span>
-          <code className="font-mono text-amber-300/60">
-            {branch ? <>{branch} ▸ </> : null}{sessionBranch}
-          </code>
         </div>
       </div>
     </main>

@@ -7,6 +7,7 @@ import { spawn } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import { getDb } from './db';
+import { appendSessionEvent, readSessionEvents, getSessionNdjsonPath } from './session-events';
 
 export type LocalSessionStatus =
   | 'starting'
@@ -29,8 +30,6 @@ export interface LocalSession {
   worktreePath: string;
   status: LocalSessionStatus;
   devServerStatus: DevServerStatus;
-  /** Formatted markdown progress string for display in the chat. */
-  progressText: string;
   port: number | null;
   previewUrl: string | null;
   /** The original change request text submitted by the user. */
@@ -104,8 +103,6 @@ interface WorkerConfig {
   timeoutMs: number;
   /** When true, worker sets status='ready' + previewUrl on success. */
   setReadyOnSuccess: boolean;
-  /** Message appended on success (only when setReadyOnSuccess=true). */
-  completionMessage: string;
   /** Public origin for previewUrl construction. Null = don't update previewUrl. */
   publicOrigin: string | null;
 }
@@ -224,17 +221,14 @@ export async function reconnectRunningWorkers(repoRoot: string): Promise<void> {
 
     if (livePid === null) {
       // Worker is gone — recover the session so it isn't stuck forever.
-      const note =
-        record.status === 'fixing-types'
-          ? '\n\n🛑 **Session recovered.** The server restarted while Claude Code was running. ' +
-            'Moving to ready state with work completed so far.\n' +
-            '_(Auto-accept was cancelled — you can accept or reject manually.)_\n'
-          : '\n\n🛑 **Session recovered.** The server restarted while Claude Code was running. ' +
-            'Moving to ready state with work completed so far.\n';
-      await db.updateEvolveSession(record.id, {
-        status: 'ready',
-        progressText: record.progressText + note,
-      });
+      const recoveryMessage = record.status === 'fixing-types'
+        ? 'Session recovered after server restart. Auto-accept was cancelled — you can accept or reject manually.'
+        : 'Session recovered after server restart.';
+      const ndjsonPath = getSessionNdjsonPath(record.worktreePath);
+      if (fs.existsSync(ndjsonPath)) {
+        appendSessionEvent(ndjsonPath, { type: 'result', subtype: 'aborted', message: recoveryMessage, ts: Date.now() });
+      }
+      await db.updateEvolveSession(record.id, { status: 'ready' });
       if (fs.existsSync(pidFile)) {
         try { fs.rmSync(pidFile, { force: true }); } catch { /* best-effort */ }
       }
@@ -269,79 +263,6 @@ export function abortClaudeRun(sessionId: string): boolean {
     // Worker may have already exited.
     activeWorkerPids.delete(sessionId);
     return false;
-  }
-}
-
-// ─── Progress logging ─────────────────────────────────────────────────────────
-
-export function appendProgress(session: LocalSession, text: string): void {
-  session.progressText += text;
-  // Cap at 100 KB to avoid unbounded memory growth
-  if (session.progressText.length > 100_000) {
-    session.progressText = '[…earlier output truncated…]\n' + session.progressText.slice(-90_000);
-  }
-}
-
-// ─── Session context extractor ────────────────────────────────────────────────
-
-/**
- * Parses accumulated progressText to extract the text of every previous
- * follow-up request. Returned in submission order so the follow-up prompt
- * can list them as numbered prior requests.
- *
- * Matches the literal format written by runFollowupInWorktree:
- *   ### 🔄 Follow-up Request\n\n> {request}\n\n### 🤖 Claude Code
- */
-function extractPriorFollowupRequests(progressText: string): string[] {
-  const results: string[] = [];
-  const regex = /### 🔄 Follow-up Request\n\n> ([\s\S]*?)\n\n### 🤖 Claude Code/g;
-  let match;
-  while ((match = regex.exec(progressText)) !== null) {
-    results.push(match[1].trim());
-  }
-  return results;
-}
-
-// ─── Tool use summarizer ──────────────────────────────────────────────────────
-
-function summarizeToolUse(
-  name: string,
-  input: Record<string, unknown>,
-  worktreePath: string = '',
-): string {
-  const rawFilePath = String(input.file_path ?? input.path ?? '');
-  const command = String(input.command ?? '');
-  const pattern = String(input.pattern ?? '');
-
-  // Replace the absolute worktree prefix with "./" for readability.
-  const shortenPath = (p: string): string => {
-    if (!worktreePath || !p) return p;
-    const prefix = worktreePath.endsWith(path.sep) ? worktreePath : worktreePath + path.sep;
-    if (p === worktreePath) return '.';
-    if (p.startsWith(prefix)) return './' + p.slice(prefix.length);
-    return p;
-  };
-
-  const filePath = shortenPath(rawFilePath);
-
-  switch (name) {
-    case 'Read':      return `Read \`${filePath}\``;
-    case 'Write':     return `Write \`${filePath}\``;
-    case 'Edit':      return `Edit \`${filePath}\``;
-    case 'Glob':      return `Glob \`${pattern}\``;
-    case 'Grep':      return `Grep \`${pattern}\``;
-    case 'Bash':      return `Bash \`${command.replace(/\r?\n/g, ' ')}\``;
-    case 'TodoWrite': {
-      const todos = (input.todos as Array<{ content: string; status: string }> | undefined) ?? [];
-      if (!todos.length) return 'Update todo list';
-      const items = todos.map((t) => {
-        const icon = t.status === 'completed' ? '✅' : t.status === 'in_progress' ? '🔄' : '⬜';
-        return `${icon} ${t.content}`;
-      });
-      return `Updated todos: ${items.join(' · ')}`;
-    }
-    case 'Agent':     return `Spawn sub-agent`;
-    default:          return name;
   }
 }
 
@@ -411,7 +332,6 @@ export async function startLocalEvolve(
   const persist = () =>
     db.updateEvolveSession(session.id, {
       status: session.status,
-      progressText: session.progressText,
       port: session.port,
       previewUrl: session.previewUrl,
     });
@@ -419,9 +339,8 @@ export async function startLocalEvolve(
   try {
     // Step 1 — Create a new git worktree (on a fresh branch, or from an existing one)
     const worktreeLabel = options.skipBranchCreation
-      ? `Checking out existing branch \`${session.branch}\` into worktree`
-      : `Creating worktree \`${session.branch}\``;
-    appendProgress(session, `- [ ] ${worktreeLabel}…\n`);
+      ? `Checked out existing branch \`${session.branch}\``
+      : `Created worktree \`${session.branch}\``;
 
     // Record the current branch so the preview instance can merge back into it.
     const parentBranchResult = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], repoRoot);
@@ -456,6 +375,11 @@ export async function startLocalEvolve(
       }
     }
 
+    // AFTER worktree is created, write the NDJSON file with all setup events
+    const ndjsonPath = getSessionNdjsonPath(session.worktreePath);
+    appendSessionEvent(ndjsonPath, { type: 'section_start', sectionType: 'setup', label: 'Setup', ts: Date.now() });
+    appendSessionEvent(ndjsonPath, { type: 'setup_step', label: worktreeLabel, done: true, ts: Date.now() });
+
     // Store parent branch and session ID in git config so the preview's manage
     // endpoint can find them when logging the accept/reject decision back to the
     // parent instance's SQLite database.
@@ -468,17 +392,9 @@ export async function startLocalEvolve(
     session.port = getOrAssignBranchPort(session.branch, repoRoot);
     await persist();
 
-    // Mark done by replacing the pending item
-    session.progressText = session.progressText.replace(
-      `- [ ] ${worktreeLabel}…`,
-      `- [x] ${worktreeLabel}`,
-    );
-    await persist();
-
     // Step 2 — Run bun install in the worktree.
     // Bun is fast enough that a full install is preferable to a shared symlink,
     // which can cause subtle dependency issues when the worktree diverges.
-    appendProgress(session, `- [ ] Running \`bun install\`…\n`);
     await new Promise<void>((resolve, reject) => {
       const proc = spawn('bun', ['install'], {
         cwd: session.worktreePath,
@@ -486,11 +402,7 @@ export async function startLocalEvolve(
       });
       proc.on('close', (code) => {
         if (code === 0) {
-          session.progressText = session.progressText.replace(
-            '- [ ] Running `bun install`…',
-            '- [x] `bun install` complete',
-          );
-          void persist();
+          appendSessionEvent(ndjsonPath, { type: 'setup_step', label: '`bun install` complete', done: true, ts: Date.now() });
           resolve();
         } else {
           reject(new Error(`bun install failed with exit code ${code}`));
@@ -531,7 +443,7 @@ export async function startLocalEvolve(
         // Non-fatal — the child worktree will just have a stale partial session.
       }
 
-      appendProgress(session, `- [x] Copied \`${dbName}\` (isolated data branch)\n`);
+      appendSessionEvent(ndjsonPath, { type: 'setup_step', label: `Copied \`${dbName}\` (isolated data branch)`, done: true, ts: Date.now() });
     }
 
     // Step 4 — Symlink .env.local so the preview server has the same credentials.
@@ -545,7 +457,7 @@ export async function startLocalEvolve(
     if (fs.existsSync(srcEnv) && !fs.existsSync(dstEnv)) {
       const resolvedEnv = fs.realpathSync(srcEnv);
       fs.symlinkSync(resolvedEnv, dstEnv);
-      appendProgress(session, `- [x] Symlinked \`.env.local\`\n`);
+      appendSessionEvent(ndjsonPath, { type: 'setup_step', label: 'Symlinked `.env.local`', done: true, ts: Date.now() });
     }
 
     // Step 5 — Copy user-uploaded attachments into the worktree
@@ -564,14 +476,14 @@ export async function startLocalEvolve(
         try { fs.unlinkSync(srcPath); } catch { /* non-fatal */ }
       }
       try { fs.rmdirSync(path.dirname(attachmentPaths[0])); } catch { /* non-fatal */ }
-      appendProgress(session, `- [x] Copied ${worktreeAttachmentPaths.length} attachment(s) into worktree\n`);
+      appendSessionEvent(ndjsonPath, { type: 'setup_step', label: `Copied ${worktreeAttachmentPaths.length} attachment(s) into worktree`, done: true, ts: Date.now() });
     }
 
     // Step 6 — Spawn Claude Code as a detached worker process.
-    // The worker writes progress to SQLite and sets status='ready' + previewUrl when done.
+    // The worker writes progress to the NDJSON file and sets status='ready' + previewUrl when done.
     // It survives server restarts — on next startup, reconnectRunningWorkers() re-attaches.
     session.status = 'running-claude';
-    appendProgress(session, `\n### 🤖 Claude Code\n\n`);
+    appendSessionEvent(ndjsonPath, { type: 'section_start', sectionType: 'claude', label: '🤖 Claude Code', ts: Date.now() });
     await persist();
 
     const attachmentSection = worktreeAttachmentPaths.length > 0
@@ -596,7 +508,6 @@ export async function startLocalEvolve(
         prompt,
         timeoutMs: 20 * 60 * 1000,
         setReadyOnSuccess: true,
-        completionMessage: '\n✅ **Claude Code finished.**\n',
         publicOrigin,
       },
       path.join(repoRoot, 'scripts/claude-worker.ts'),
@@ -608,11 +519,11 @@ export async function startLocalEvolve(
     // the failure and allows follow-up requests to retry or recover.
     session.status = 'ready';
     const msg = err instanceof Error ? err.message : String(err);
-    const causeMsg =
-      err instanceof Error && err.cause instanceof Error
-        ? `\n\n*Caused by*: ${err.cause.message}`
-        : '';
-    appendProgress(session, `\n\n❌ **Error**: ${msg}${causeMsg}\n`);
+    // Write error event to NDJSON if file exists (worktree may not have been created yet)
+    const ndjsonPath = getSessionNdjsonPath(session.worktreePath);
+    if (fs.existsSync(ndjsonPath)) {
+      appendSessionEvent(ndjsonPath, { type: 'result', subtype: 'error', message: msg, ts: Date.now() });
+    }
     await persist().catch(() => {});
   }
 }
@@ -647,20 +558,20 @@ export async function runFollowupInWorktree(
   const persist = () =>
     db.updateEvolveSession(session.id, {
       status: session.status,
-      progressText: session.progressText,
       port: session.port,
       previewUrl: session.previewUrl,
     });
 
+  const ndjsonPath = getSessionNdjsonPath(session.worktreePath);
+
   try {
     if (skipChangelog) {
       // Type-fix passes get their own section heading instead of the user-facing follow-up format.
-      appendProgress(session, `\n\n---\n\n### 🔧 Fixing type errors…\n\n`);
+      appendSessionEvent(ndjsonPath, { type: 'section_start', sectionType: 'type_fix', label: '🔧 Fixing type errors…', ts: Date.now() });
     } else {
-      appendProgress(
-        session,
-        `\n\n---\n\n### 🔄 Follow-up Request\n\n> ${followupRequest}\n\n### 🤖 Claude Code\n\n`,
-      );
+      appendSessionEvent(ndjsonPath, { type: 'section_start', sectionType: 'followup', label: '🔄 Follow-up Request', ts: Date.now() });
+      appendSessionEvent(ndjsonPath, { type: 'followup_request', request: followupRequest, ts: Date.now() });
+      appendSessionEvent(ndjsonPath, { type: 'section_start', sectionType: 'claude', label: '🤖 Claude Code', ts: Date.now() });
     }
     session.status = inProgressStatus;
     await persist();
@@ -699,7 +610,10 @@ export async function runFollowupInWorktree(
     // Skip for skipChangelog (type-fix) passes — they don't need this context.
     let sessionContextSection = '';
     if (!skipChangelog) {
-      const priorFollowups = extractPriorFollowupRequests(session.progressText);
+      const { events: priorEvents } = readSessionEvents(getSessionNdjsonPath(session.worktreePath));
+      const priorFollowups = priorEvents
+        .filter((e): e is Extract<typeof e, { type: 'followup_request' }> => e.type === 'followup_request')
+        .map(e => e.request);
 
       // Commits made so far in this session only (exclude parent-branch history).
       const parentConfigResult = await runGit(
@@ -757,7 +671,6 @@ export async function runFollowupInWorktree(
         prompt,
         timeoutMs: 20 * 60 * 1000,
         setReadyOnSuccess: !onSuccess,
-        completionMessage: '\n✅ **Follow-up complete. Preview server will reload automatically.**\n',
         publicOrigin: null,
       },
       path.join(repoRoot, 'scripts/claude-worker.ts'),
@@ -765,12 +678,11 @@ export async function runFollowupInWorktree(
 
     if (onSuccess) {
       // Worker exited without setting status='ready'. Reload the session from
-      // the DB (the worker has been writing progress there) and hand off to
+      // the DB (the worker has been writing progress to NDJSON) and hand off to
       // the callback for final status handling (e.g. retrying the merge).
       const updated = await db.getEvolveSession(session.id);
       if (updated) {
         session.status = updated.status as LocalSession['status'];
-        session.progressText = updated.progressText;
         session.port = updated.port;
         session.previewUrl = updated.previewUrl;
       }
@@ -781,11 +693,9 @@ export async function runFollowupInWorktree(
   } catch (err) {
     session.status = 'ready';
     const msg = err instanceof Error ? err.message : String(err);
-    const causeMsg =
-      err instanceof Error && err.cause instanceof Error
-        ? `\n\n*Caused by*: ${err.cause.message}`
-        : '';
-    appendProgress(session, `\n\n❌ **Error**: ${msg}${causeMsg}\n`);
+    if (fs.existsSync(ndjsonPath)) {
+      appendSessionEvent(ndjsonPath, { type: 'result', subtype: 'error', message: msg, ts: Date.now() });
+    }
     await persist().catch(() => {});
   }
 }
@@ -868,8 +778,7 @@ export async function resolveConflictsWithClaude(
             }
             log += block.text.trimEnd() + '\n\n';
           } else if (block.type === 'tool_use') {
-            const summary = summarizeToolUse(block.name, block.input as Record<string, unknown>, mergeRoot);
-            log += `- 🔧 ${summary}\n`;
+            log += `- 🔧 ${block.name}\n`;
           }
         }
       } else if (message.type === 'result') {

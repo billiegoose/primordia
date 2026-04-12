@@ -125,7 +125,7 @@ export interface DbAdapter {
   createEvolveSession(session: EvolveSession): Promise<void>;
   updateEvolveSession(
     id: string,
-    updates: Partial<Pick<EvolveSession, "status" | "progressText" | "port" | "previewUrl" | "worktreePath" | "durationMs" | "inputTokens" | "outputTokens" | "costUsd">>,
+    updates: Partial<Pick<EvolveSession, "status" | "port" | "previewUrl" | "worktreePath" | "durationMs" | "inputTokens" | "outputTokens" | "costUsd">>,
   ): Promise<void>;
   getEvolveSession(id: string): Promise<EvolveSession | null>;
   listEvolveSessions(limit?: number): Promise<EvolveSession[]>;

@@ -9,6 +9,7 @@
 import { getSessionUser } from '../../../../lib/auth';
 import { getDb } from '../../../../lib/db';
 import { abortClaudeRun } from '../../../../lib/evolve-sessions';
+import { appendSessionEvent, getSessionNdjsonPath } from '../../../../lib/session-events';
 
 export async function POST(request: Request) {
   const user = await getSessionUser();
@@ -45,13 +46,17 @@ export async function POST(request: Request) {
     // stuck in 'running-claude' or 'starting' in SQLite.
     // Recover by transitioning the session to 'ready' directly so the user can
     // accept, reject, or submit a follow-up on whatever work was completed.
+    const ndjsonPath = getSessionNdjsonPath(record.worktreePath);
+    appendSessionEvent(ndjsonPath, {
+      type: 'log_line',
+      content:
+        '🛑 Session recovered. The server restarted while Claude Code was running. ' +
+        'Moving to ready state with work completed so far.' +
+        (record.status === 'fixing-types' ? ' (Auto-accept was cancelled — you can accept or reject manually.)' : ''),
+      ts: Date.now(),
+    });
     await db.updateEvolveSession(body.sessionId, {
       status: 'ready',
-      progressText:
-        record.progressText +
-        '\n\n🛑 **Session recovered.** The server restarted while Claude Code was running. ' +
-        'Moving to ready state with work completed so far.\n' +
-        (record.status === 'fixing-types' ? '_(Auto-accept was cancelled — you can accept or reject manually.)_\n' : ''),
       port: record.port,
       previewUrl: record.previewUrl,
     });

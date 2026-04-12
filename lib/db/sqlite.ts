@@ -424,12 +424,11 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
 
     async updateEvolveSession(
       id: string,
-      updates: Partial<Pick<EvolveSession, "status" | "progressText" | "port" | "previewUrl" | "worktreePath" | "durationMs" | "inputTokens" | "outputTokens" | "costUsd">>,
+      updates: Partial<Pick<EvolveSession, "status" | "port" | "previewUrl" | "worktreePath" | "durationMs" | "inputTokens" | "outputTokens" | "costUsd">>,
     ) {
       const sets: string[] = [];
       const values: unknown[] = [];
       if (updates.status !== undefined)       { sets.push("status = ?");          values.push(updates.status); }
-      if (updates.progressText !== undefined)  { sets.push("progress_text = ?");   values.push(updates.progressText); }
       if (updates.port !== undefined)          { sets.push("port = ?");             values.push(updates.port); }
       if (updates.previewUrl !== undefined)    { sets.push("preview_url = ?");      values.push(updates.previewUrl); }
       if (updates.worktreePath !== undefined)  { sets.push("worktree_path = ?");    values.push(updates.worktreePath); }

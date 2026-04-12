@@ -1,22 +1,20 @@
 // app/api/evolve/stream/route.ts
-// Streams live session progress as SSE so the session page sees updates immediately
-// instead of waiting for a polling interval.
+// Streams live session progress as SSE.
 //
 // GET ?sessionId=<id>&offset=<n>
 //   sessionId — the evolve session to watch
-//   offset    — number of progressText characters the client already has (default 0)
+//   offset    — number of NDJSON lines the client already has (default 0)
 //
 // SSE events:
-//   data: { progressDelta: string, status: string, previewUrl: string | null }
+//   data: { events: SessionEvent[], lineCount: number, status: string, previewUrl: string | null }
 // Final event (terminal state):
-//   data: { progressDelta: string, status: string, previewUrl: string | null, done: true }
-//
-// Note: devServerStatus is no longer included in the SSE stream. The proxy manages
-// preview server lifecycle and exposes status via /_proxy/preview/:id/status. The
-// session page polls that endpoint separately.
+//   data: { events: SessionEvent[], lineCount: number, status: string, previewUrl: string | null, done: true }
 
 import { getSessionUser } from '../../../../lib/auth';
 import { getDb } from '../../../../lib/db';
+import { readSessionEvents, getSessionNdjsonPath } from '../../../../lib/session-events';
+import type { SessionEvent } from '../../../../lib/session-events';
+import * as fs from 'fs';
 
 const POLL_INTERVAL_MS = 500;
 
@@ -42,8 +40,7 @@ export async function GET(request: Request) {
 
   const stream = new ReadableStream({
     async start(controller) {
-      let lastSentOffset = offset;
-      // Use sentinel values so the first iteration always sends the current state.
+      let lastSentLineCount = offset;
       let lastSentStatus = '';
       let lastSentPreviewUrl: string | null | undefined = undefined;
 
@@ -67,29 +64,38 @@ export async function GET(request: Request) {
             return;
           }
 
-          const progressText = session.progressText ?? '';
-          const progressDelta = progressText.slice(lastSentOffset);
           const terminal = isTerminal(session.status);
+          const ndjsonPath = getSessionNdjsonPath(session.worktreePath);
+          const hasNdjson = fs.existsSync(ndjsonPath);
+
+          let events: SessionEvent[] = [];
+          let totalLines = lastSentLineCount;
+
+          if (hasNdjson) {
+            const result = readSessionEvents(ndjsonPath, lastSentLineCount);
+            events = result.events;
+            totalLines = result.totalLines;
+          } else if (session.progressText) {
+            // Legacy fallback: serve progressText as a single legacy_text event
+            // Always resend the full content (lineCount stays at 0)
+            events = [{ type: 'legacy_text', content: session.progressText }];
+            totalLines = 0;
+          }
 
           const hasChange =
-            progressDelta.length > 0 ||
+            events.length > 0 ||
             session.status !== lastSentStatus ||
             session.previewUrl !== lastSentPreviewUrl;
 
           if (hasChange || terminal) {
             sendEvent({
-              progressDelta,
+              events,
+              lineCount: totalLines,
               status: session.status,
               previewUrl: session.previewUrl,
-              ...(terminal ? {
-                done: true,
-                durationMs: session.durationMs,
-                inputTokens: session.inputTokens,
-                outputTokens: session.outputTokens,
-                costUsd: session.costUsd,
-              } : {}),
+              ...(terminal ? { done: true } : {}),
             });
-            lastSentOffset = progressText.length;
+            lastSentLineCount = totalLines;
             lastSentStatus = session.status;
             lastSentPreviewUrl = session.previewUrl;
           }
@@ -99,7 +105,6 @@ export async function GET(request: Request) {
             return;
           }
 
-          // Wait before the next poll, but wake early if the client disconnects.
           await new Promise<void>((resolve) => {
             const timer = setTimeout(resolve, POLL_INTERVAL_MS);
             abortSignal.addEventListener('abort', () => {
