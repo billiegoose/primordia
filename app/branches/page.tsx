@@ -17,6 +17,7 @@ import { PruneBranchesButton } from "@/components/PruneBranchesButton";
 import { CreateSessionFromBranchButton } from "@/components/CreateSessionFromBranchButton";
 import { buildPageTitle } from "@/lib/page-title";
 import { getSessionUser, isAdmin, hasEvolvePermission } from "@/lib/auth";
+import { withBasePath } from "@/lib/base-path";
 
 export const dynamic = "force-dynamic";
 
@@ -566,7 +567,7 @@ export default async function BranchesPage() {
         <p>
           Clone:{" "}
           <span className="text-gray-400 select-all">
-            {currentServerUrl}/api/git
+            {currentServerUrl}{withBasePath("/api/git")}
           </span>
         </p>
       </div>
