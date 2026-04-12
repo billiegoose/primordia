@@ -124,7 +124,6 @@ echo ""
 # ── Create VM ─────────────────────────────────────────────────────────────────
 
 _CURRENT_STEP="create VM"
-diag "Running: ssh exe.dev new --name=${VM_NAME} --json"
 start_spinner "Creating VM '${VM_NAME}' on exe.dev..."
 VM_JSON=$(ssh -n -o BatchMode=yes exe.dev new "--name=${VM_NAME}" --json 2>&1) || {
   stop_spinner
@@ -154,38 +153,11 @@ fi
 [[ -z "$PROXY_PORT" ]] && PROXY_PORT="8000"
 diag "Resolved hostname: ${VM_HOST}"
 diag "Proxy port: ${PROXY_PORT}"
-echo ""
-
-# ── Pre-resolve git server hostname ───────────────────────────────────────────
-# The new VM may not be able to resolve primordia.exe.xyz from within the
-# exe.dev network.  Resolve the IP here (on the local machine, which can reach
-# it) and inject it into the remote VM's /etc/hosts.
-
-_CURRENT_STEP="resolve git server hostname"
-PRIMORDIA_GIT_HOST="primordia.exe.xyz"
-PRIMORDIA_GIT_IP=""
-if command -v python3 &>/dev/null; then
-  PRIMORDIA_GIT_IP=$(python3 -c "import socket; print(socket.gethostbyname('${PRIMORDIA_GIT_HOST}'))" 2>/dev/null || true)
-fi
-if [[ -z "$PRIMORDIA_GIT_IP" ]] && command -v dig &>/dev/null; then
-  PRIMORDIA_GIT_IP=$(dig +short "${PRIMORDIA_GIT_HOST}" 2>/dev/null \
-    | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)
-fi
-if [[ -z "$PRIMORDIA_GIT_IP" ]]; then
-  PRIMORDIA_GIT_IP=$(getent hosts "${PRIMORDIA_GIT_HOST}" 2>/dev/null \
-    | awk '{print $1}' | head -1 || true)
-fi
-if [[ -n "$PRIMORDIA_GIT_IP" ]]; then
-  diag "Resolved ${PRIMORDIA_GIT_HOST} → ${PRIMORDIA_GIT_IP} (will inject into remote /etc/hosts)"
-else
-  diag "Warning: could not pre-resolve ${PRIMORDIA_GIT_HOST} — will attempt DNS on remote VM"
-fi
 
 # ── Install Primordia on the VM ───────────────────────────────────────────────
 
 _CURRENT_STEP="install Primordia on VM"
 info "Installing Primordia on ${VM_HOST} (this may take a few minutes)..."
-diag "SSHing into ${VM_HOST} to run remote setup..."
 echo ""
 
 # We use a two-step approach to avoid a stdin-consumption bug:
@@ -202,15 +174,11 @@ echo ""
 #     Step 2 — execute the file with -tt (PTY for live output streaming).
 #               bash reads from the file; subprocesses inherit a clean PTY stdin
 #               (the user's forwarded terminal), not the script content.
-#
-# $1 = PRIMORDIA_GIT_HOST, $2 = PRIMORDIA_GIT_IP (may be empty)
 
 ssh -o StrictHostKeyChecking=accept-new "${VM_HOST}" \
   'cat > /tmp/primordia_setup.sh' << 'REMOTE'
 # Positional args passed from local machine:
-PRIMORDIA_GIT_HOST="${1:-primordia.exe.xyz}"
-PRIMORDIA_GIT_IP="${2:-}"
-REVERSE_PROXY_PORT="${3:-8000}"
+REVERSE_PROXY_PORT="${1:-8000}"
 
 set -euo pipefail
 
@@ -233,19 +201,6 @@ warn_msg(){ echo -e "\033[0;33m⚠${RESET} $*"; }
 
 _REMOTE_STEP="(initialising)"
 trap 'echo -e "\n${RED}✗ Remote setup failed${RESET} at step: ${BOLD}${_REMOTE_STEP}${RESET} (line ${LINENO})" >&2' ERR
-
-# ── Remote diagnostics ─────────────────────────────────────────────────────────
-_REMOTE_STEP="remote diagnostics"
-diag "--- Remote host diagnostics ---"
-diag "Hostname:  $(hostname -f 2>/dev/null || hostname)"
-diag "OS:        $(uname -srm)"
-diag "User:      $(whoami)"
-diag "Disk:      $(df -h / 2>/dev/null | awk 'NR==2{print $4" free of "$2}' || echo 'unknown')"
-diag "Memory:    $(free -h 2>/dev/null | awk '/^Mem:/{print $7" free of "$2}' || echo 'unknown')"
-diag "resolv.conf: $(grep -v '^#' /etc/resolv.conf 2>/dev/null | tr '\n' ' ' || echo 'missing')"
-diag "DNS scopes: $(resolvectl status 2>/dev/null | grep 'Current Scopes' | head -3 | tr '\n' ' ' || echo 'n/a')"
-diag "--------------------------------"
-echo ""
 
 # ── Wait for DNS ──────────────────────────────────────────────────────────────
 # Fresh VMs have a known race condition where systemd-resolved starts before
@@ -321,8 +276,15 @@ success "git $(git --version | awk '{print $3}')"
 _REMOTE_STEP="install bun"
 export PATH="$HOME/.bun/bin:$PATH"
 if ! command -v bun &>/dev/null; then
-  info "Installing bun..."
-  curl -fsSL https://bun.sh/install | bash
+  _bun_install_log=$(mktemp)
+  if ! bash -c 'curl -fsSL https://bun.sh/install | bash' > "$_bun_install_log" 2>&1; then
+    echo -e "${DIM}  --- bun install output ---${RESET}" >&2
+    cat "$_bun_install_log" >&2
+    echo -e "${DIM}  --------------------------${RESET}" >&2
+    rm -f "$_bun_install_log"
+    exit 1
+  fi
+  rm -f "$_bun_install_log"
   export PATH="$HOME/.bun/bin:$PATH"
 fi
 success "bun $(bun --version)"
@@ -332,24 +294,22 @@ git config --global user.email "primordia@localhost" 2>/dev/null || true
 
 echo ""
 
-# ── Ensure git server hostname is resolvable ───────────────────────────────────
-_REMOTE_STEP="ensure git host resolvable"
-if [[ -n "$PRIMORDIA_GIT_IP" ]]; then
-  if ! getent hosts "$PRIMORDIA_GIT_HOST" &>/dev/null; then
-    diag "Adding ${PRIMORDIA_GIT_HOST} → ${PRIMORDIA_GIT_IP} to /etc/hosts..."
-    echo "${PRIMORDIA_GIT_IP} ${PRIMORDIA_GIT_HOST}" | sudo tee -a /etc/hosts >/dev/null
-    diag "DNS injected via /etc/hosts"
-  fi
-fi
-
 # ── Clone Primordia ────────────────────────────────────────────────────────────
 _REMOTE_STEP="clone Primordia"
 if [[ -d "$HOME/primordia/.git" ]]; then
-  info "Primordia already present — pulling latest changes..."
-  git -C "$HOME/primordia" pull
+  info "Pulling latest changes..."
+  _clone_log=$(mktemp)
+  if ! git -C "$HOME/primordia" pull > "$_clone_log" 2>&1; then
+    cat "$_clone_log" >&2; rm -f "$_clone_log"; exit 1
+  fi
+  rm -f "$_clone_log"
 else
   info "Cloning Primordia..."
-  git clone https://primordia.exe.xyz/api/git "$HOME/primordia"
+  _clone_log=$(mktemp)
+  if ! git clone https://primordia.exe.xyz/api/git "$HOME/primordia" > "$_clone_log" 2>&1; then
+    cat "$_clone_log" >&2; rm -f "$_clone_log"; exit 1
+  fi
+  rm -f "$_clone_log"
 fi
 success "Primordia cloned to ~/primordia"
 
@@ -365,18 +325,5 @@ REMOTE
 # bash reads from the file — subprocesses get a clean PTY stdin (the forwarded
 # local terminal), not the script content.
 ssh -tt -o StrictHostKeyChecking=accept-new "${VM_HOST}" \
-  "bash /tmp/primordia_setup.sh '${PRIMORDIA_GIT_HOST}' '${PRIMORDIA_GIT_IP:-}' '${PROXY_PORT}'; rm -f /tmp/primordia_setup.sh"
+  "bash /tmp/primordia_setup.sh '${PROXY_PORT}'; rm -f /tmp/primordia_setup.sh"
 
-# ── Done ──────────────────────────────────────────────────────────────────────
-
-echo ""
-echo -e "${BOLD}${GREEN}  Primordia is running!${RESET}"
-echo ""
-echo -e "  Access (requires sign-in):  ${BOLD}https://${VM_HOST}:${PROXY_PORT}/${RESET}"
-echo ""
-echo -e "  To make it publicly accessible, run:"
-echo -e "    ${DIM}ssh exe.dev share set-public ${VM_NAME}${RESET}"
-echo ""
-echo -e "  Sign in with your exe.dev account. Any missing configuration"
-echo -e "  (API keys etc.) will be requested on first login."
-echo ""

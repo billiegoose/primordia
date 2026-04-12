@@ -146,6 +146,16 @@ Fixed by reordering the remote script preamble: `apt-get install locales`, `loca
 
 Replaced with an HTTP health check: the loop now calls `curl -sf http://localhost:${REVERSE_PROXY_PORT}/` and considers the service ready as soon as it gets any HTTP response. This is more reliable, version-independent, and matches the only thing that actually matters — whether the service is accepting connections.
 
+## Install output cleaned up (2026-04-12 follow-up #5)
+
+The installer output was verbose and repetitive. Cleaned up:
+
+- **DNS pre-resolution removed** — the client-side `/etc/hosts` injection was overly complex; the remote DNS wait loop handles the race condition reliably without needing the local machine to resolve and pass an IP.
+- **Redundant diagnostics removed** — the remote setup script had its own `--- Remote host diagnostics ---` block that duplicated information already printed by `install.sh`'s `--- Server diagnostics ---` block. Removed the duplicate.
+- **Verbose step output captured** — `bun` (installer), `git clone`, `bun install`, and `bun run build` now run silently and only print their output if the command fails, keeping the happy path clean.
+- **Redundant "done" message removed** — `install-for-exe-dev.sh` was printing its own "Primordia is running!" after the SSH session closed, duplicating `install.sh`'s done message. Removed.
+- **Minor diag noise removed** — `Running: ssh exe.dev new ...` and `SSHing into ...` lines removed; the surrounding info/spinner lines already communicate the same thing.
+
 ## Why
 
 The previous design required the script to be run on the server and prompted for API keys upfront. The new installer runs entirely from the user's laptop, orchestrates VM creation automatically, and defers all configuration to the app's own first-run flow.

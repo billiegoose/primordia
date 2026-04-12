@@ -172,29 +172,44 @@ fi
 # ── Install dependencies ──────────────────────────────────────────────────────
 
 _CURRENT_STEP="bun install"
-info "Installing dependencies (bun install)..."
+info "Installing dependencies..."
 cd "${INSTALL_DIR}"
+_bun_log=$(mktemp)
 _BUN_OK=false
 for _attempt in 1 2 3; do
-  if bun install --frozen-lockfile; then
+  if bun install --frozen-lockfile >> "$_bun_log" 2>&1; then
     _BUN_OK=true
     break
   fi
   if [[ $_attempt -lt 3 ]]; then
     warn "bun install failed (attempt ${_attempt}/3) — retrying in 15s..."
     sleep 15
-  else
-    diag "npm registry: $(curl -fsS --max-time 5 https://registry.npmjs.org/ >/dev/null 2>&1 && echo 'reachable' || echo 'UNREACHABLE')"
   fi
 done
-[[ "$_BUN_OK" == "true" ]] || exit 1
+if [[ "$_BUN_OK" != "true" ]]; then
+  diag "npm registry: $(curl -fsS --max-time 5 https://registry.npmjs.org/ >/dev/null 2>&1 && echo 'reachable' || echo 'UNREACHABLE')"
+  echo -e "${DIM}  --- bun install output ---${RESET}" >&2
+  tail -60 "$_bun_log" >&2
+  echo -e "${DIM}  --------------------------${RESET}" >&2
+  rm -f "$_bun_log"
+  exit 1
+fi
+rm -f "$_bun_log"
 success "Dependencies installed"
 
 # ── Build production bundle ───────────────────────────────────────────────────
 
 _CURRENT_STEP="bun run build"
-info "Building production bundle (bun run build)..."
-bun run build
+info "Building..."
+_build_log=$(mktemp)
+if ! bun run build > "$_build_log" 2>&1; then
+  echo -e "${DIM}  --- build output ---${RESET}" >&2
+  cat "$_build_log" >&2
+  echo -e "${DIM}  --------------------${RESET}" >&2
+  rm -f "$_build_log"
+  exit 1
+fi
+rm -f "$_build_log"
 success "Build complete"
 
 # ── Install systemd service ───────────────────────────────────────────────────
