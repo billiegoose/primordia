@@ -1,39 +1,34 @@
-# Add curl-pipe install script
+# Add curl-pipe install script for exe.dev
 
-Added `scripts/install.sh` — a one-command installer for Primordia on exe.dev servers.
+Added `scripts/install-for-exe-dev.sh` — a one-command installer that runs on the user's **personal computer** and sets up a new Primordia instance in their exe.dev account end-to-end.
 
 ## What changed
 
-New script: `scripts/install.sh`
+- **New**: `scripts/install-for-exe-dev.sh` — the client-side entry point
+- **Updated**: `scripts/install.sh` — simplified to a server-side setup script (runs inside the cloned repo)
 
-Users with an exe.dev account can now install Primordia with a single command run in their server's shell:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/boldsoftware/primordia/main/scripts/install.sh | bash
-```
-
-Or with a personal fork:
+## Usage
 
 ```bash
-PRIMORDIA_REPO=your-username/primordia \
-  curl -fsSL https://raw.githubusercontent.com/boldsoftware/primordia/main/scripts/install.sh | bash
+curl -fsSL https://primordia.exe.xyz/install-for-exe-dev.sh | bash
 ```
+
+Run this on your personal computer — the machine that already has SSH keys for your exe.dev account.
 
 ## What the script does
 
-1. **Detects the exe.dev environment** — recognises `*.exe.xyz` hostnames and sets the app URL accordingly; warns if running outside exe.dev (SSO and the LLM gateway won't be available).
-2. **Installs git and bun** if not already present (via `apt-get` or `yum`).
-3. **Checks for an existing install** — exits gracefully if `~/primordia` already has a `.git` directory.
-4. **Prompts interactively** for:
-   - `ANTHROPIC_API_KEY` (required for Evolve / Claude Code; warns and continues without it so the user can add it later)
-   - `GITHUB_REPO` + `GITHUB_TOKEN` (optional, enables the Git Sync dialog)
-5. **Clones the repo** into `~/primordia` (or `$INSTALL_DIR`).
-6. **Writes `.env.local`** with the provided values.
-7. **Runs `bun install --frozen-lockfile` and `bun run build`**.
-8. **Runs `scripts/install-service.sh`** to install and start the `primordia-proxy` systemd service.
-9. **Waits up to 60 s** for the Next.js server to emit its "Ready" signal.
-10. **Prints the app URL** and next steps (sign in with exe.dev SSO, or register a passkey on other hosts).
+1. **Checks SSH access** to exe.dev (`ssh exe.dev help`) and exits with clear instructions if not configured.
+2. **Prompts for a VM name** (default: `primordia`) — works interactively even when the script is piped through bash.
+3. **Creates the VM** via `ssh exe.dev new <name> --json`.
+4. **Sets port 3000 as the public port** via `ssh exe.dev share port` + `ssh exe.dev share set-public`.
+5. **SSHes into the new VM** and runs a self-contained setup:
+   - Installs `git` and `bun` if missing.
+   - Clones Primordia from `https://primordia.exe.xyz/api/git`.
+   - Runs `scripts/install.sh` inside the cloned repo to build and start the service.
+6. **Prints the app URL** (`https://<vmname>.exe.xyz/`) when done.
+
+No API keys are collected during install — the app's `check_keys` flow prompts the owner for any missing configuration on first login.
 
 ## Why
 
-The previous setup flow required users to fork the repo, configure `.env.local`, and run a local deploy script. The new installer runs entirely on the server and removes the need for any local setup, making it far easier for exe.dev users to spin up their own Primordia instance.
+The previous design required the script to be run on the server and prompted for API keys upfront. The new installer runs entirely from the user's laptop, orchestrates VM creation automatically, and defers all configuration to the app's own first-run flow.
