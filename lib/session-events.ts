@@ -26,8 +26,7 @@ export type SessionEvent =
   | { type: 'log_line'; content: string; ts: number }
   | { type: 'initial_request'; request: string; attachments?: string[]; ts: number }
   | { type: 'followup_request'; request: string; attachments?: string[]; ts: number }
-  | { type: 'decision'; action: 'accepted' | 'rejected'; detail: string; ts: number }
-  | { type: 'legacy_text'; content: string };
+  | { type: 'decision'; action: 'accepted' | 'rejected'; detail: string; ts: number };
 
 export function getSessionNdjsonPath(worktreePath: string): string {
   return path.join(worktreePath, '.primordia-session.ndjson');
@@ -159,7 +158,6 @@ function buildSessionFromWorktreePath(
     branch,
     worktreePath,
     status,
-    progressText: '',
     port,
     previewUrl,
     request,
@@ -241,61 +239,4 @@ export function listSessionsFromFilesystem(repoRoot: string): EvolveSession[] {
   processBlock(); // handle last block (no trailing blank line)
 
   return sessions.sort((a, b) => b.createdAt - a.createdAt);
-}
-
-/**
- * Attempts to reconstruct an EvolveSession record from the NDJSON log alone.
- * Useful when the session exists in a sibling worktree but not in the local DB
- * (e.g. the DB was copied before this session was created in a parent worktree).
- * Returns null if no log file exists or it contains no parseable events.
- *
- * @deprecated Prefer getSessionFromFilesystem() which also reads git metadata.
- */
-export function deriveSessionFromLog(
-  id: string,
-  worktreePath: string,
-): EvolveSession | null {
-  const ndjsonPath = getSessionNdjsonPath(worktreePath);
-  if (!fs.existsSync(ndjsonPath)) return null;
-
-  const { events } = readSessionEvents(ndjsonPath);
-  if (events.length === 0) return null;
-
-  const status = inferStatusFromEvents(events);
-  const previewUrl = status === 'ready' ? `/preview/${id}` : null;
-
-  let request = '';
-  let createdAt = 0;
-  let durationMs: number | null = null;
-  let inputTokens: number | null = null;
-  let outputTokens: number | null = null;
-  let costUsd: number | null = null;
-
-  for (const event of events) {
-    if (!createdAt && 'ts' in event) createdAt = (event as { ts: number }).ts;
-    if (event.type === 'initial_request') {
-      request = event.request;
-    } else if (event.type === 'metrics') {
-      durationMs = event.durationMs;
-      inputTokens = event.inputTokens;
-      outputTokens = event.outputTokens;
-      costUsd = event.costUsd;
-    }
-  }
-
-  return {
-    id,
-    branch: id,
-    worktreePath,
-    status,
-    progressText: '',
-    port: null,
-    previewUrl,
-    request,
-    createdAt: createdAt || Date.now(),
-    durationMs,
-    inputTokens,
-    outputTokens,
-    costUsd,
-  };
 }

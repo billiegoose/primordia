@@ -57,8 +57,6 @@ export interface EvolveSession {
   worktreePath: string;
   /** One of the LocalSessionStatus values serialised as a string. */
   status: string;
-  /** Accumulated markdown progress text shown in the session UI. */
-  progressText: string;
   port: number | null;
   previewUrl: string | null;
   /** The original change request submitted by the user. */

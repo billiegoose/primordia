@@ -43,6 +43,16 @@ Request text, timestamps, and metrics are still read from the NDJSON log.
 
 The POST handler now writes the `initial_request` event synchronously before returning, so the session is immediately discoverable via `getSessionFromFilesystem()` with no race window.
 
+### Cleanup: remove legacy rendering fallbacks
+
+After eliminating the SQLite table and supplementary files, the remaining `progressText`-based legacy rendering path was also removed:
+
+- **`components/EvolveSessionView.tsx`**: Removed `parseProgressSections`, `parseMetricsFromContent`, `splitClaudeContent`, and `LegacyLogSection` (markdown-based legacy rendering). Removed all `legacyTextEvent` branching — only the structured NDJSON event rendering path remains.
+- **`lib/session-events.ts`**: Removed deprecated `deriveSessionFromLog()` function. Removed `legacy_text` from the `SessionEvent` union type.
+- **`lib/db/types.ts`**: Removed `progressText` field from `EvolveSession` interface.
+- **`app/evolve/session/[id]/page.tsx`**: Removed the `else if (session.progressText)` fallback — server-side loading now only reads NDJSON.
+- **`app/api/evolve/route.ts`**: Removed `progressText` from the GET response payload.
+
 ## Why
 
 The three supplementary state files (`.primordia-status`, `.primordia-preview-url`, `.primordia-branch`) were redundant:

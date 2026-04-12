@@ -7,7 +7,7 @@
 //
 // GET — poll session status.
 //   Query: ?sessionId=<id>
-//   Returns: { status, progressText, port, previewUrl, branch }
+//   Returns: { status, port, previewUrl, branch }
 
 import * as path from 'path';
 import * as fs from 'fs';
@@ -203,7 +203,6 @@ export async function GET(request: Request) {
 
   return Response.json({
     status: session.status,
-    progressText: session.progressText,
     port: session.port,
     previewUrl: session.previewUrl,
     branch: session.branch,

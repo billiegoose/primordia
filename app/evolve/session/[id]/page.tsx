@@ -139,8 +139,7 @@ export default async function EvolveSessionPage({
   const upstreamCommitCount = getUpstreamCommitCount(session.branch);
   const diffSummary = getGitDiffSummary(session.branch);
 
-  // Load initial events from the NDJSON log (new sessions) or fall back to
-  // legacy progressText so old sessions still render correctly.
+  // Load initial events from the NDJSON log.
   let initialEvents: SessionEvent[] = [];
   let initialLineCount = 0;
   const ndjsonPath = getSessionNdjsonPath(session.worktreePath);
@@ -148,8 +147,6 @@ export default async function EvolveSessionPage({
     const result = readSessionEvents(ndjsonPath);
     initialEvents = result.events;
     initialLineCount = result.totalLines;
-  } else if (session.progressText) {
-    initialEvents = [{ type: 'legacy_text', content: session.progressText }];
   }
 
   return (
