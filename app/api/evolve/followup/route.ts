@@ -7,11 +7,13 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import { getSessionUser } from '../../../../lib/auth';
-import { getDb } from '../../../../lib/db';
 import {
   runFollowupInWorktree,
   type LocalSession,
 } from '../../../../lib/evolve-sessions';
+import {
+  getSessionFromFilesystem,
+} from '../../../../lib/session-events';
 
 export async function POST(request: Request) {
   const user = await getSessionUser();
@@ -63,8 +65,8 @@ export async function POST(request: Request) {
     requestText = body.request;
   }
 
-  const db = await getDb();
-  const record = await db.getEvolveSession(sessionId);
+  const repoRoot = process.cwd();
+  const record = getSessionFromFilesystem(sessionId, repoRoot);
   if (!record) {
     return Response.json({ error: 'Session not found' }, { status: 404 });
   }
@@ -76,7 +78,7 @@ export async function POST(request: Request) {
     );
   }
 
-  // Build the LocalSession object from the DB record.
+  // Build the LocalSession object from the filesystem record.
   const session: LocalSession = {
     id: record.id,
     branch: record.branch,
@@ -89,12 +91,9 @@ export async function POST(request: Request) {
     createdAt: record.createdAt,
   };
 
-  // Update DB status immediately so the UI transitions without waiting.
-  await db.updateEvolveSession(session.id, { status: 'running-claude' });
-
   // Fire-and-forget — runFollowupInWorktree handles all state transitions and
-  // error cases internally, persisting each change to SQLite.
-  void runFollowupInWorktree(session, requestText, process.cwd(), 'running-claude', undefined, false, savedAttachmentPaths);
+  // error cases internally, writing events to the NDJSON log.
+  void runFollowupInWorktree(session, requestText, repoRoot, 'running-claude', undefined, false, savedAttachmentPaths);
 
   return Response.json({ ok: true });
 }

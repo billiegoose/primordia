@@ -2,6 +2,15 @@
 // Structured event types for session progress logs.
 // Events are stored as NDJSON (one JSON object per line) in
 // {worktreePath}/.primordia-session.ndjson
+//
+// Session state is derived entirely from the filesystem and git:
+//   .primordia-session.ndjson — structured event log (also serves as session existence marker)
+//   git config branch.<name>.port — ephemeral dev-server port
+//   git worktree list --porcelain — maps worktree paths to branch names
+//
+// Status is inferred from the NDJSON log via inferStatusFromEvents().
+// Preview URL is always /preview/<sessionId> once the session is ready.
+// Branch name is read from the git worktree list (or git symbolic-ref HEAD).
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -17,8 +26,7 @@ export type SessionEvent =
   | { type: 'log_line'; content: string; ts: number }
   | { type: 'initial_request'; request: string; attachments?: string[]; ts: number }
   | { type: 'followup_request'; request: string; attachments?: string[]; ts: number }
-  | { type: 'decision'; action: 'accepted' | 'rejected'; detail: string; ts: number }
-  | { type: 'legacy_text'; content: string };
+  | { type: 'decision'; action: 'accepted' | 'rejected'; detail: string; ts: number };
 
 export function getSessionNdjsonPath(worktreePath: string): string {
   return path.join(worktreePath, '.primordia-session.ndjson');
@@ -47,8 +55,49 @@ export function readSessionEvents(
   }
 }
 
+// ─── Status inference ─────────────────────────────────────────────────────────
+
 /**
- * Returns the candidate worktree path for a session that isn't in the database.
+ * Infer the current session status from the NDJSON event log.
+ *
+ * Rules (checked in priority order):
+ *   1. A `decision` event is terminal → 'accepted' or 'rejected'
+ *   2. A `result` event with no `section_start` after it → 'ready'
+ *   3. Last `section_start` type:
+ *        'deploy'    → 'accepting'
+ *        'type_fix'  → 'fixing-types'
+ *        'claude'    → 'running-claude'
+ *        'followup'  → 'running-claude' (immediately followed by 'claude' in practice)
+ *   4. Default → 'starting'
+ */
+export function inferStatusFromEvents(events: SessionEvent[]): string {
+  let lastResultIdx = -1;
+  let lastSectionStartIdx = -1;
+  let lastSectionType: string | null = null;
+  let decisionAction: string | null = null;
+
+  for (let i = 0; i < events.length; i++) {
+    const event = events[i];
+    if (event.type === 'result') lastResultIdx = i;
+    if (event.type === 'section_start') {
+      lastSectionStartIdx = i;
+      lastSectionType = event.sectionType;
+    }
+    if (event.type === 'decision') decisionAction = event.action;
+  }
+
+  if (decisionAction) return decisionAction; // 'accepted' or 'rejected'
+  if (lastResultIdx >= 0 && lastSectionStartIdx <= lastResultIdx) return 'ready';
+  if (lastSectionType === 'deploy') return 'accepting';
+  if (lastSectionType === 'type_fix') return 'fixing-types';
+  if (lastSectionType === 'claude' || lastSectionType === 'followup') return 'running-claude';
+  return 'starting';
+}
+
+// ─── Session lookup / enumeration ────────────────────────────────────────────
+
+/**
+ * Returns the candidate worktree path for a session.
  * Uses the sibling-directory convention of the flat worktree layout:
  * all worktrees live alongside the current one under the same parent directory.
  */
@@ -57,20 +106,21 @@ export function getCandidateWorktreePath(sessionId: string): string {
 }
 
 /**
- * Attempts to reconstruct an EvolveSession record from the NDJSON log alone.
- * Useful when the session exists in a sibling worktree but not in the local DB
- * (e.g. the DB was copied before this session was created in a parent worktree).
- * Returns null if no log file exists or it contains no parseable events.
+ * Build an EvolveSession from the NDJSON log and git metadata.
+ * Returns null if the worktree doesn't have a session log.
  */
-export function deriveSessionFromLog(
+function buildSessionFromWorktreePath(
   id: string,
   worktreePath: string,
+  branch: string,
+  repoRoot: string,
 ): EvolveSession | null {
   const ndjsonPath = getSessionNdjsonPath(worktreePath);
   if (!fs.existsSync(ndjsonPath)) return null;
 
   const { events } = readSessionEvents(ndjsonPath);
-  if (events.length === 0) return null;
+  const status = inferStatusFromEvents(events);
+  const previewUrl = status === 'ready' ? `/preview/${id}` : null;
 
   let request = '';
   let createdAt = 0;
@@ -78,12 +128,9 @@ export function deriveSessionFromLog(
   let inputTokens: number | null = null;
   let outputTokens: number | null = null;
   let costUsd: number | null = null;
-  let status = 'ready';
 
   for (const event of events) {
-    // Use the timestamp of the first timestamped event as createdAt
     if (!createdAt && 'ts' in event) createdAt = (event as { ts: number }).ts;
-
     if (event.type === 'initial_request') {
       request = event.request;
     } else if (event.type === 'metrics') {
@@ -91,21 +138,28 @@ export function deriveSessionFromLog(
       inputTokens = event.inputTokens;
       outputTokens = event.outputTokens;
       costUsd = event.costUsd;
-    } else if (event.type === 'result') {
-      if (event.subtype === 'success') status = 'ready';
-    } else if (event.type === 'decision') {
-      status = event.action === 'accepted' ? 'accepted' : 'rejected';
     }
   }
 
+  // Read port from git config (stored when the worktree was created).
+  let port: number | null = null;
+  try {
+    const { execFileSync } = require('child_process') as typeof import('child_process');
+    const out = execFileSync('git', ['config', '--get', `branch.${branch}.port`], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    if (out) port = parseInt(out, 10);
+  } catch { /* not set */ }
+
   return {
     id,
-    branch: id,
+    branch,
     worktreePath,
     status,
-    progressText: '',
-    port: null,
-    previewUrl: null,
+    port,
+    previewUrl,
     request,
     createdAt: createdAt || Date.now(),
     durationMs,
@@ -113,4 +167,76 @@ export function deriveSessionFromLog(
     outputTokens,
     costUsd,
   };
+}
+
+/**
+ * Look up a session by ID from the filesystem.
+ * Uses the sibling-directory convention to find the worktree.
+ * Returns null if the session doesn't exist on disk.
+ */
+export function getSessionFromFilesystem(id: string, repoRoot: string): EvolveSession | null {
+  const worktreePath = getCandidateWorktreePath(id);
+  // Get branch name via git symbolic-ref HEAD in the worktree.
+  // For from-branch sessions, the branch differs from the session ID.
+  let branch = id;
+  try {
+    const { execFileSync } = require('child_process') as typeof import('child_process');
+    const ref = execFileSync('git', ['symbolic-ref', 'HEAD'], {
+      cwd: worktreePath,
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    if (ref.startsWith('refs/heads/')) {
+      branch = ref.slice('refs/heads/'.length);
+    }
+  } catch { /* worktree may not exist or be in detached HEAD */ }
+  return buildSessionFromWorktreePath(id, worktreePath, branch, repoRoot);
+}
+
+/**
+ * Enumerate all active sessions by scanning git worktrees.
+ * A worktree is considered a session if it has a .primordia-session.ndjson file.
+ * Returns sessions sorted by createdAt descending.
+ */
+export function listSessionsFromFilesystem(repoRoot: string): EvolveSession[] {
+  const { execFileSync } = require('child_process') as typeof import('child_process');
+  let porcelain: string;
+  try {
+    porcelain = execFileSync('git', ['worktree', 'list', '--porcelain'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch {
+    return [];
+  }
+
+  const sessions: EvolveSession[] = [];
+
+  // Parse porcelain output: blocks are separated by blank lines.
+  let currentPath: string | null = null;
+  let currentBranch: string | null = null;
+
+  const processBlock = () => {
+    if (!currentPath) return;
+    const branch = currentBranch ?? path.basename(currentPath);
+    const session = buildSessionFromWorktreePath(path.basename(currentPath), currentPath, branch, repoRoot);
+    if (session) sessions.push(session);
+    currentPath = null;
+    currentBranch = null;
+  };
+
+  for (const line of porcelain.split('\n')) {
+    if (line.startsWith('worktree ')) {
+      currentPath = line.slice('worktree '.length).trim();
+      currentBranch = null;
+    } else if (line.startsWith('branch refs/heads/')) {
+      currentBranch = line.slice('branch refs/heads/'.length).trim();
+    } else if (line === '') {
+      processBlock();
+    }
+  }
+  processBlock(); // handle last block (no trailing blank line)
+
+  return sessions.sort((a, b) => b.createdAt - a.createdAt);
 }

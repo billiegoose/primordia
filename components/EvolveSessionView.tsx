@@ -17,269 +17,6 @@ import type { DiffFileSummary } from "../app/evolve/session/[id]/page";
 import { DiffFileExpander } from "./DiffFileExpander";
 import type { SessionEvent } from "../lib/session-events";
 
-// ─── Old markdown-based section rendering (legacy fallback) ───────────────────
-
-interface ParsedSection {
-  heading: string;
-  content: string;
-}
-
-function parseProgressSections(text: string): ParsedSection[] {
-  if (!text.trim()) return [];
-  const chunks = text.split(/\n(?=### [^\u0000-\u007F])/u);
-  return chunks
-    .map((chunk, i) => {
-      if (i === 0) {
-        const content = chunk
-          .replace(/\n\n---\s*$/, "")
-          .replace(/\n---\s*$/, "")
-          .trim();
-        return { heading: "Setup", content };
-      }
-      const newlineIdx = chunk.indexOf("\n");
-      const heading =
-        newlineIdx === -1
-          ? chunk.replace(/^### /, "").trim()
-          : chunk.slice(0, newlineIdx).replace(/^### /, "").trim();
-      const rawContent = newlineIdx === -1 ? "" : chunk.slice(newlineIdx + 1);
-      const content = rawContent
-        .replace(/\n\n---\s*$/, "")
-        .replace(/\n---\s*$/, "")
-        .trim();
-      return { heading, content };
-    })
-    .filter((s) => s.heading || s.content);
-}
-
-const METRICS_RE = /\n?<!-- metrics: (\{[^}]*\}) -->\n?/;
-function parseMetricsFromContent(content: string): {
-  metrics: SectionMetrics | null;
-  strippedContent: string;
-} {
-  const match = content.match(METRICS_RE);
-  if (!match) return { metrics: null, strippedContent: content };
-  try {
-    const metrics = JSON.parse(match[1]) as SectionMetrics;
-    return { metrics, strippedContent: content.replace(METRICS_RE, "").trim() };
-  } catch {
-    return { metrics: null, strippedContent: content };
-  }
-}
-
-function splitClaudeContent(content: string): {
-  detailsContent: string;
-  finalItem: string;
-  toolCallCount: number;
-} {
-  const stripped = content
-    .replace(/\n*---\n+(?:✅ \*\*Accepted\*\*|🗑️ \*\*Rejected\*\*)[^\n]*\n?$/, "")
-    .replace(/\n?✅ \*\*Claude Code finished\.\*\*\s*$/, "")
-    .replace(/\n?✅ \*\*Follow-up complete\. Preview server will reload automatically\.\*\*\s*$/, "")
-    .trim();
-  const toolCallCount = (stripped.match(/^- 🔧 /gm) ?? []).length;
-  const lines = stripped.split("\n");
-  let lastToolIdx = -1;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (lines[i].startsWith("- 🔧 ")) { lastToolIdx = i; break; }
-  }
-  if (lastToolIdx === -1) return { detailsContent: "", finalItem: stripped, toolCallCount };
-  return {
-    detailsContent: lines.slice(0, lastToolIdx + 1).join("\n").trim(),
-    finalItem: lines.slice(lastToolIdx + 1).join("\n").trim(),
-    toolCallCount,
-  };
-}
-
-function LegacyLogSection({
-  section,
-  isActive,
-  previewUrl,
-}: {
-  section: ParsedSection;
-  isActive: boolean;
-  previewUrl?: string | null;
-}) {
-  const { heading, content } = section;
-  const isFollowupSection = heading.includes("Follow-up Request");
-  const isClaudeSection = heading.includes("Claude Code");
-  const isTypeFixSection = heading.includes("Fixing type errors");
-  const isServerSection =
-    heading.includes("Starting preview server") ||
-    heading.includes("Restarting preview server");
-  const isDeploySection =
-    heading.includes("Deploying to production") ||
-    heading.includes("Merging into");
-
-  if (isFollowupSection) {
-    const requestText = content.replace(/^> /m, "").trim();
-    return (
-      <div className="px-4 py-3 rounded-lg bg-gray-900 border border-gray-700 text-sm">
-        <p className="text-gray-400 text-xs mb-1 font-medium uppercase tracking-wide">Follow-up request</p>
-        <p className="text-gray-100 leading-relaxed whitespace-pre-wrap">{requestText}</p>
-      </div>
-    );
-  }
-
-  if (isClaudeSection || isTypeFixSection) {
-    const borderClass = isTypeFixSection ? "border-orange-700/50" : "border-blue-700/50";
-    const headingClass = isTypeFixSection ? "text-orange-300" : "text-blue-300";
-    const hasFinishMarker =
-      content.includes("✅ **Claude Code finished.**") ||
-      content.includes("✅ **Follow-up complete. Preview server will reload automatically.**");
-    const hasErrorMarker =
-      content.includes("❌ **Error**:") ||
-      content.includes("❌ **Auto-fix failed");
-    const isRunning = isActive && !hasFinishMarker && !hasErrorMarker;
-
-    if (isRunning) {
-      return (
-        <div className={`rounded-lg border ${borderClass} bg-gray-900 text-sm overflow-hidden`}>
-          <div className="px-4 py-2.5 border-b border-gray-800 flex items-center gap-2">
-            <span className={`font-semibold text-xs ${headingClass}`}>{heading}</span>
-            <span className="ml-auto flex items-center gap-1.5 text-gray-500 text-xs animate-pulse">
-              <span className="w-1.5 h-1.5 rounded-full bg-current inline-block" />
-              Running…
-            </span>
-          </div>
-          <div className="px-4 py-3"><MarkdownContent text={content || " "} /></div>
-        </div>
-      );
-    }
-
-    const { metrics: sectionMetrics, strippedContent } = parseMetricsFromContent(content);
-    const { detailsContent, finalItem, toolCallCount } = splitClaudeContent(strippedContent);
-    const doneBorderClass = hasErrorMarker ? "border-red-700/50" : borderClass;
-    const doneHeadingClass = hasErrorMarker ? "text-red-400" : headingClass;
-    const doneTitle = hasErrorMarker
-      ? (isTypeFixSection ? "❌ Auto-fix failed" : "❌ Claude Code failed")
-      : (isTypeFixSection ? "🔧 Type errors fixed" : "🤖 Claude Code finished");
-    return (
-      <div className={`rounded-lg border ${doneBorderClass} bg-gray-900 text-sm overflow-hidden`}>
-        <div className="px-4 py-2.5 border-b border-gray-800">
-          <span className={`font-semibold text-xs ${doneHeadingClass}`}>{doneTitle}</span>
-        </div>
-        {detailsContent && (
-          <details className="group border-b border-gray-800">
-            <summary className="flex items-center gap-2 px-4 py-2 cursor-pointer select-none hover:bg-gray-800/40 transition-colors list-none text-xs">
-              <span className="text-gray-600 group-open:rotate-90 transition-transform">▶</span>
-              <span className="text-gray-500">🔧 {toolCallCount} tool call{toolCallCount !== 1 ? "s" : ""} made</span>
-            </summary>
-            <div className="px-4 py-3 border-t border-gray-800"><MarkdownContent text={detailsContent} /></div>
-          </details>
-        )}
-        {finalItem && <div className="px-4 py-3"><MarkdownContent text={finalItem} /></div>}
-        {sectionMetrics && <MetricsRow metrics={sectionMetrics} />}
-      </div>
-    );
-  }
-
-  if (isServerSection) {
-    if (isActive) {
-      return (
-        <div className="rounded-lg border border-emerald-700/50 bg-gray-900 text-sm overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-gray-800 flex items-center gap-2">
-            <span className="font-semibold text-xs text-emerald-300">{heading}</span>
-            <span className="ml-auto flex items-center gap-1.5 text-gray-500 text-xs animate-pulse">
-              <span className="w-1.5 h-1.5 rounded-full bg-current inline-block" />
-              Starting…
-            </span>
-          </div>
-          <div className="px-4 py-3"><MarkdownContent text={content || " "} /></div>
-        </div>
-      );
-    }
-    return (
-      <div className="rounded-lg border border-emerald-700/50 bg-gray-900 text-sm overflow-hidden">
-        <div className="px-4 py-2.5 border-b border-gray-800">
-          <span className="font-semibold text-xs text-emerald-300">🚀 Preview ready</span>
-        </div>
-        {content && (
-          <details className="group border-b border-gray-800">
-            <summary className="flex items-center gap-2 px-4 py-2 cursor-pointer select-none hover:bg-gray-800/40 transition-colors list-none text-xs">
-              <span className="text-gray-600 group-open:rotate-90 transition-transform">▶</span>
-              <span className="text-gray-500">🪵 Server logs</span>
-            </summary>
-            <div className="px-4 py-3 border-t border-gray-800"><MarkdownContent text={content} /></div>
-          </details>
-        )}
-        {previewUrl && (
-          <div className="px-4 py-3">
-            <a href={previewUrl} target="_blank" rel="noopener noreferrer"
-              className="text-emerald-400 hover:text-emerald-200 underline break-all">{previewUrl}</a>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  if (isDeploySection) {
-    if (isActive) {
-      return (
-        <div className="rounded-lg border border-gray-700 bg-gray-900 text-sm overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-gray-800 flex items-center gap-2">
-            <span className="font-semibold text-xs text-gray-300">{heading}</span>
-            <span className="ml-auto flex items-center gap-1.5 text-gray-500 text-xs animate-pulse">
-              <span className="w-1.5 h-1.5 rounded-full bg-current inline-block" />
-              Running…
-            </span>
-          </div>
-          <div className="px-4 py-3"><MarkdownContent text={content || " "} /></div>
-        </div>
-      );
-    }
-    const isProduction = heading.includes("Deploying to production");
-    const mergedIntoBranch = !isProduction ? (heading.match(/Merging into `([^`]+)`/) ?? [])[1] ?? null : null;
-    const doneTitle = isProduction ? "🚀 Deployed to production" : heading.replace(/🚀\s*Merging into/, "✅ Merged into");
-    return (
-      <div className="rounded-lg bg-green-900/40 border border-green-700/50 text-sm overflow-hidden">
-        <div className="px-4 py-4">
-          <p className="text-green-200 font-semibold">{doneTitle}</p>
-          <p className="text-green-300/80 text-xs mt-1">
-            {isProduction ? "The branch was deployed to production."
-              : mergedIntoBranch
-                ? <>The branch was merged into <code className="bg-green-950/60 px-1 rounded">{mergedIntoBranch}</code> and the worktree has been removed.</>
-                : "The branch was accepted and the worktree has been removed."}
-          </p>
-        </div>
-        {content && (
-          <details className="group border-t border-green-800/50">
-            <summary className="flex items-center gap-2 px-4 py-2 cursor-pointer select-none hover:bg-green-900/30 transition-colors list-none text-xs">
-              <span className="text-green-700 group-open:rotate-90 transition-transform">▶</span>
-              <span className="text-green-700/80">Deploy log</span>
-            </summary>
-            <div className="px-4 py-3 border-t border-green-800/50"><MarkdownContent text={content} /></div>
-          </details>
-        )}
-      </div>
-    );
-  }
-
-  if (isActive) {
-    return (
-      <div className="rounded-lg border border-gray-700 bg-gray-900 text-sm overflow-hidden">
-        <div className="px-4 py-2.5 border-b border-gray-800 flex items-center gap-2">
-          <span className="font-semibold text-xs text-gray-300">{heading}</span>
-          <span className="ml-auto flex items-center gap-1.5 text-gray-500 text-xs animate-pulse">
-            <span className="w-1.5 h-1.5 rounded-full bg-current inline-block" />
-            Running…
-          </span>
-        </div>
-        <div className="px-4 py-3"><MarkdownContent text={content || " "} /></div>
-      </div>
-    );
-  }
-
-  return (
-    <details className="group rounded-lg border border-gray-800 overflow-hidden">
-      <summary className="flex items-center gap-2 px-4 py-2.5 cursor-pointer select-none hover:bg-gray-800/40 transition-colors list-none">
-        <span className="text-gray-600 group-open:rotate-90 transition-transform flex-shrink-0 text-xs">▶</span>
-        <span className="font-semibold text-xs flex-shrink-0 text-gray-300">{heading}</span>
-      </summary>
-      <div className="px-4 py-3 border-t border-gray-800"><MarkdownContent text={content} /></div>
-    </details>
-  );
-}
-
 // ─── Metrics ──────────────────────────────────────────────────────────────────
 
 interface SectionMetrics {
@@ -904,14 +641,8 @@ export default function EvolveSessionView({
             };
 
             if (parsed.events && parsed.events.length > 0) {
-              // legacy_text events carry the full progressText — replace state entirely
-              if (parsed.events.some((e) => e.type === 'legacy_text')) {
-                setEvents(parsed.events);
-                lineCountRef.current = 0;
-              } else {
-                setEvents((prev) => [...prev, ...parsed.events!]);
-                if (parsed.lineCount != null) lineCountRef.current = parsed.lineCount;
-              }
+              setEvents((prev) => [...prev, ...parsed.events!]);
+              if (parsed.lineCount != null) lineCountRef.current = parsed.lineCount;
             } else if (parsed.lineCount != null) {
               lineCountRef.current = parsed.lineCount;
             }
@@ -1227,41 +958,14 @@ export default function EvolveSessionView({
 
   // ─── Derive setup/content sections from events ───────────────────────────
 
-  // Check if this is a legacy session (no NDJSON, only progressText string)
-  const legacyTextEvent = events.find((e): e is Extract<SessionEvent, { type: 'legacy_text' }> => e.type === 'legacy_text');
-
-  // Legacy rendering path
-  let legacySections: ParsedSection[] = [];
-  let legacySetupSection: ParsedSection | null = null;
-  let legacyContentSections: ParsedSection[] = [];
-  let legacyIsSetupActive = false;
-  let legacySetupStepCount = 0;
-
-  // Structured rendering path
-  let sections: SectionGroup[] = [];
-  let setupSection: SectionGroup | null = null;
-  let contentSections: SectionGroup[] = [];
-  let isSetupActive = false;
-  let setupStepCount = 0;
-
-  if (legacyTextEvent) {
-    legacySections = parseProgressSections(legacyTextEvent.content);
-    legacySetupSection = legacySections.length > 0 && legacySections[0].heading === "Setup" ? legacySections[0] : null;
-    legacyContentSections = legacySections.filter((s) => s.heading !== "Setup");
-    legacyIsSetupActive = !isTerminal && (legacySections.length === 0 || (legacySections.length === 1 && legacySections[0].heading === "Setup"));
-    legacySetupStepCount = legacySetupSection
-      ? (legacySetupSection.content.match(/^- \[x\]/gm) ?? []).length
-      : 0;
-  } else {
-    sections = groupEventsIntoSections(events);
-    setupSection = sections[0] ?? null;
-    contentSections = sections.slice(1);
-    // Setup is active while it's the only section and session isn't terminal
-    isSetupActive = !isTerminal && contentSections.length === 0;
-    setupStepCount = setupSection
-      ? setupSection.events.filter((e): e is Extract<SessionEvent, { type: 'setup_step' }> => e.type === 'setup_step' && e.done).length
-      : 0;
-  }
+  const sections = groupEventsIntoSections(events);
+  const setupSection = sections[0] ?? null;
+  const contentSections = sections.slice(1);
+  // Setup is active while it's the only section and session isn't terminal
+  const isSetupActive = !isTerminal && contentSections.length === 0;
+  const setupStepCount = setupSection
+    ? setupSection.events.filter((e): e is Extract<SessionEvent, { type: 'setup_step' }> => e.type === 'setup_step' && e.done).length
+    : 0;
 
   return (
     <main className="flex flex-col w-full max-w-3xl mx-auto px-4 py-6 min-h-dvh">
@@ -1320,7 +1024,7 @@ export default function EvolveSessionView({
             <circle cx="6" cy="18" r="3"/>
             <path d="M18 9a9 9 0 0 1-9 9"/>
           </svg>
-          {(legacyTextEvent ? legacyIsSetupActive : isSetupActive) ? (
+          {isSetupActive ? (
             <>
               Creating branch…
               <span className="ml-1 flex items-center gap-1 text-amber-600/70 text-xs animate-pulse">
@@ -1333,8 +1037,8 @@ export default function EvolveSessionView({
         </p>
         <code className="font-mono text-amber-200 text-sm">{sessionBranch}</code>
 
-        {/* Structured setup steps */}
-        {!isSetupActive && !legacyTextEvent && setupSection && setupStepCount > 0 && (
+        {/* Setup steps */}
+        {!isSetupActive && setupSection && setupStepCount > 0 && (
           <details className="group mt-2">
             <summary className="flex items-center gap-1.5 cursor-pointer select-none text-xs text-amber-600/80 hover:text-amber-400 transition-colors list-none">
               <span className="group-open:rotate-90 transition-transform inline-block">▶</span>
@@ -1352,53 +1056,22 @@ export default function EvolveSessionView({
           </details>
         )}
 
-        {/* Legacy setup steps (markdown) */}
-        {!legacyIsSetupActive && legacySetupSection && (
-          <details className="group mt-2">
-            <summary className="flex items-center gap-1.5 cursor-pointer select-none text-xs text-amber-600/80 hover:text-amber-400 transition-colors list-none">
-              <span className="group-open:rotate-90 transition-transform inline-block">▶</span>
-              ✅ {legacySetupStepCount} step{legacySetupStepCount !== 1 ? "s" : ""} completed
-            </summary>
-            <div className="mt-2 pl-2 border-l border-amber-700/30">
-              <MarkdownContent text={legacySetupSection.content} />
-            </div>
-          </details>
-        )}
       </div>
 
       {/* Progress sections */}
       <div className="mb-6 flex flex-col gap-6">
-        {legacyTextEvent ? (
-          // Legacy rendering: use old markdown-based section components
-          legacyContentSections.map((section, i) => {
-            const isSectionActive = i === legacyContentSections.length - 1 && !isTerminal;
-            const isServer =
-              section.heading.includes("Starting preview server") ||
-              section.heading.includes("Restarting preview server");
-            return (
-              <LegacyLogSection
-                key={i}
-                section={section}
-                isActive={isSectionActive}
-                previewUrl={isServer ? previewUrl : undefined}
-              />
-            );
-          })
-        ) : (
-          // Structured rendering: use event-based section components
-          contentSections.map((section, i) => {
-            const isSectionActive = i === contentSections.length - 1 && !isTerminal;
-            return (
-              <StructuredSection
-                key={i}
-                section={section}
-                isActive={isSectionActive}
-                sessionId={sessionId}
-                worktreePath={worktreePath}
-              />
-            );
-          })
-        )}
+        {contentSections.map((section, i) => {
+          const isSectionActive = i === contentSections.length - 1 && !isTerminal;
+          return (
+            <StructuredSection
+              key={i}
+              section={section}
+              isActive={isSectionActive}
+              sessionId={sessionId}
+              worktreePath={worktreePath}
+            />
+          );
+        })}
 
         {/* Rejected banner — inline with other sections */}
         {status === "rejected" && (

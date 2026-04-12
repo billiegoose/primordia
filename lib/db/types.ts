@@ -57,8 +57,6 @@ export interface EvolveSession {
   worktreePath: string;
   /** One of the LocalSessionStatus values serialised as a string. */
   status: string;
-  /** Accumulated markdown progress text shown in the session UI. */
-  progressText: string;
   port: number | null;
   previewUrl: string | null;
   /** The original change request submitted by the user. */
@@ -121,12 +119,4 @@ export interface DbAdapter {
   getUserRoles(userId: string): Promise<string[]>;
   getUsersWithRole(roleName: string): Promise<string[]>;
 
-  // Evolve sessions
-  createEvolveSession(session: EvolveSession): Promise<void>;
-  updateEvolveSession(
-    id: string,
-    updates: Partial<Pick<EvolveSession, "status" | "port" | "previewUrl" | "worktreePath" | "durationMs" | "inputTokens" | "outputTokens" | "costUsd">>,
-  ): Promise<void>;
-  getEvolveSession(id: string): Promise<EvolveSession | null>;
-  listEvolveSessions(limit?: number): Promise<EvolveSession[]>;
 }

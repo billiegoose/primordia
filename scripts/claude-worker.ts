@@ -8,60 +8,29 @@
 //   • Writes PID to {worktreePath}/.primordia-worker.pid on startup
 //   • Deletes the PID file on exit (any exit path)
 //   • Writes structured events to {worktreePath}/.primordia-session.ndjson
-//   • SIGTERM → graceful abort: Claude is stopped, session marked 'ready'
+//   • SIGTERM → graceful abort: Claude is stopped, 'aborted' result event written
 //   • Timeout  → same effect as SIGTERM
-//   • Success  → sets session 'ready' (+ previewUrl) if setReadyOnSuccess=true
-//   • Error    → sets session 'ready' with error event
+//   • Success  → 'success' result event written
+//   • Error    → 'error' result event written
+//
+// Session status is inferred from the NDJSON log by the server — no status
+// files are written by this worker.
 
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { HookCallback, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
-import { Database } from 'bun:sqlite';
 import * as fs from 'fs';
 import * as path from 'path';
-import { appendSessionEvent, getSessionNdjsonPath } from '../lib/session-events';
+import {
+  appendSessionEvent,
+  getSessionNdjsonPath,
+} from '../lib/session-events';
 
 interface WorkerConfig {
   sessionId: string;
   worktreePath: string;
   repoRoot: string;
-  dbPath: string;
   prompt: string;
   timeoutMs?: number;
-  setReadyOnSuccess: boolean;
-  publicOrigin: string | null;
-}
-
-function openDb(dbPath: string) {
-  const db = new Database(dbPath);
-  db.exec('PRAGMA journal_mode=WAL');
-  return db;
-}
-
-type Db = ReturnType<typeof openDb>;
-
-function dbUpdate(
-  db: Db,
-  sessionId: string,
-  updates: {
-    status?: string;
-    previewUrl?: string | null;
-    durationMs?: number | null;
-    inputTokens?: number | null;
-    outputTokens?: number | null;
-    costUsd?: number | null;
-  },
-): void {
-  const sets: string[] = [];
-  const values: unknown[] = [];
-  if (updates.status !== undefined)       { sets.push('status = ?');        values.push(updates.status); }
-  if (updates.previewUrl !== undefined)   { sets.push('preview_url = ?');   values.push(updates.previewUrl); }
-  if (updates.durationMs !== undefined)   { sets.push('duration_ms = ?');   values.push(updates.durationMs); }
-  if (updates.inputTokens !== undefined)  { sets.push('input_tokens = ?');  values.push(updates.inputTokens); }
-  if (updates.outputTokens !== undefined) { sets.push('output_tokens = ?'); values.push(updates.outputTokens); }
-  if (updates.costUsd !== undefined)      { sets.push('cost_usd = ?');      values.push(updates.costUsd); }
-  if (sets.length === 0) return;
-  values.push(sessionId);
-  db.prepare(`UPDATE evolve_sessions SET ${sets.join(', ')} WHERE id = ?`).run(...values);
 }
 
 function makeWorktreeBoundaryHook(worktreePath: string, repoRoot: string): HookCallback {
@@ -118,7 +87,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const { sessionId, worktreePath, repoRoot, dbPath, prompt, publicOrigin, setReadyOnSuccess } = config;
+  const { sessionId, worktreePath, repoRoot, prompt } = config;
   const timeoutMs = config.timeoutMs ?? 20 * 60 * 1000;
 
   const ndjsonPath = getSessionNdjsonPath(worktreePath);
@@ -131,11 +100,8 @@ async function main(): Promise<void> {
     process.stderr.write(`Warning: could not write PID file: ${err}\n`);
   }
 
-  const db = openDb(dbPath);
-
   function cleanup(): void {
     try { fs.rmSync(pidFile, { force: true }); } catch { /* best-effort */ }
-    try { db.close(); } catch { /* best-effort */ }
   }
 
   const abortController = new AbortController();
@@ -158,6 +124,10 @@ async function main(): Promise<void> {
   let capturedInputTokens: number | null = null;
   let capturedOutputTokens: number | null = null;
   let capturedCostUsd: number | null = null;
+
+  // sessionId is available in config but not used directly here — status/previewUrl
+  // are now inferred from events by the server, not written by the worker.
+  void sessionId;
 
   try {
     const run = query({
@@ -224,14 +194,12 @@ async function main(): Promise<void> {
       if (timedOut) {
         appendSessionEvent(ndjsonPath, { type: 'result', subtype: 'timeout', message: 'Claude Code timed out after 20 minutes.', ts: ts() });
         appendSessionEvent(ndjsonPath, { type: 'metrics', durationMs: capturedDurationMs, inputTokens: capturedInputTokens, outputTokens: capturedOutputTokens, costUsd: capturedCostUsd, ts: ts() });
-        dbUpdate(db, sessionId, { status: 'ready', durationMs: capturedDurationMs, inputTokens: capturedInputTokens, outputTokens: capturedOutputTokens, costUsd: capturedCostUsd });
         clearTimeout(timeoutId);
         cleanup();
         process.exit(0);
       } else if (userAborted) {
         appendSessionEvent(ndjsonPath, { type: 'result', subtype: 'aborted', message: 'Claude Code was aborted by user.', ts: ts() });
         appendSessionEvent(ndjsonPath, { type: 'metrics', durationMs: capturedDurationMs, inputTokens: capturedInputTokens, outputTokens: capturedOutputTokens, costUsd: capturedCostUsd, ts: ts() });
-        dbUpdate(db, sessionId, { status: 'ready', durationMs: capturedDurationMs, inputTokens: capturedInputTokens, outputTokens: capturedOutputTokens, costUsd: capturedCostUsd });
         clearTimeout(timeoutId);
         cleanup();
         process.exit(0);
@@ -246,21 +214,10 @@ async function main(): Promise<void> {
       clearTimeout(timeoutId);
     }
 
-    // Successful completion
-    const metrics = { durationMs: capturedDurationMs, inputTokens: capturedInputTokens, outputTokens: capturedOutputTokens, costUsd: capturedCostUsd };
+    // Successful completion — write result and metrics events.
+    // Status ('ready') is inferred by the server from the presence of this result event.
     appendSessionEvent(ndjsonPath, { type: 'result', subtype: 'success', ts: ts() });
-    appendSessionEvent(ndjsonPath, { type: 'metrics', ...metrics, ts: ts() });
-
-    if (setReadyOnSuccess) {
-      const previewUrl = publicOrigin ? `${publicOrigin}/preview/${sessionId}` : null;
-      dbUpdate(db, sessionId, {
-        status: 'ready',
-        ...(previewUrl !== null ? { previewUrl } : {}),
-        ...metrics,
-      });
-    } else {
-      dbUpdate(db, sessionId, { ...metrics });
-    }
+    appendSessionEvent(ndjsonPath, { type: 'metrics', durationMs: capturedDurationMs, inputTokens: capturedInputTokens, outputTokens: capturedOutputTokens, costUsd: capturedCostUsd, ts: ts() });
 
     cleanup();
     process.exit(0);
@@ -273,7 +230,6 @@ async function main(): Promise<void> {
         : '';
     appendSessionEvent(ndjsonPath, { type: 'result', subtype: 'error', message: msg + causeMsg, ts: ts() });
     appendSessionEvent(ndjsonPath, { type: 'metrics', durationMs: capturedDurationMs, inputTokens: capturedInputTokens, outputTokens: capturedOutputTokens, costUsd: capturedCostUsd, ts: ts() });
-    dbUpdate(db, sessionId, { status: 'ready', durationMs: capturedDurationMs, inputTokens: capturedInputTokens, outputTokens: capturedOutputTokens, costUsd: capturedCostUsd });
     cleanup();
     process.exit(1);
   }

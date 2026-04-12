@@ -1,17 +1,16 @@
 // app/evolve/session/[id]/page.tsx
 // Dedicated session-tracking page for a single local evolve run.
 //
-// The server component reads the initial session state from SQLite and passes
-// it to the EvolveSessionView client component, which polls for live updates.
+// The server component reads the initial session state from the filesystem and
+// passes it to the EvolveSessionView client component, which polls for live updates.
 
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { execSync } from "child_process";
 import * as fs from "fs";
 import { getSessionUser, hasEvolvePermission } from "@/lib/auth";
-import { getDb } from "@/lib/db";
 import { buildPageTitle } from "@/lib/page-title";
-import { readSessionEvents, getSessionNdjsonPath, getCandidateWorktreePath, deriveSessionFromLog, type SessionEvent } from "@/lib/session-events";
+import { readSessionEvents, getSessionNdjsonPath, getSessionFromFilesystem, type SessionEvent } from "@/lib/session-events";
 import EvolveSessionView from "@/components/EvolveSessionView";
 
 export function generateMetadata(): Metadata {
@@ -124,15 +123,8 @@ export default async function EvolveSessionPage({
 
   const { id } = await params;
 
-  const db = await getDb();
-  let session = await db.getEvolveSession(id);
-  if (!session) {
-    // The session isn't in the local DB — this can happen when the DB was
-    // copied before the session was created (e.g. viewing a parent worktree's
-    // session from a child worktree). Try to reconstruct from the NDJSON log.
-    session = deriveSessionFromLog(id, getCandidateWorktreePath(id));
-    if (!session) notFound();
-  }
+  const session = getSessionFromFilesystem(id, process.cwd());
+  if (!session) notFound();
 
   const branch = readGitBranch();
 
@@ -147,8 +139,7 @@ export default async function EvolveSessionPage({
   const upstreamCommitCount = getUpstreamCommitCount(session.branch);
   const diffSummary = getGitDiffSummary(session.branch);
 
-  // Load initial events from the NDJSON log (new sessions) or fall back to
-  // legacy progressText so old sessions still render correctly.
+  // Load initial events from the NDJSON log.
   let initialEvents: SessionEvent[] = [];
   let initialLineCount = 0;
   const ndjsonPath = getSessionNdjsonPath(session.worktreePath);
@@ -156,8 +147,6 @@ export default async function EvolveSessionPage({
     const result = readSessionEvents(ndjsonPath);
     initialEvents = result.events;
     initialLineCount = result.totalLines;
-  } else if (session.progressText) {
-    initialEvents = [{ type: 'legacy_text', content: session.progressText }];
   }
 
   return (
