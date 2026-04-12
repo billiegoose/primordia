@@ -75,7 +75,7 @@ command -v ssh &>/dev/null || die "ssh is required but not found."
 
 _CURRENT_STEP="check exe.dev SSH"
 info "Checking exe.dev SSH access..."
-SSH_TEST_OUTPUT=$(ssh -o BatchMode=yes -o ConnectTimeout=10 exe.dev help 2>&1) || {
+SSH_TEST_OUTPUT=$(ssh -n -o BatchMode=yes -o ConnectTimeout=10 exe.dev help 2>&1) || {
   echo ""
   echo -e "${DIM}  ssh output: ${SSH_TEST_OUTPUT}${RESET}" >&2
   die "Cannot connect to exe.dev via SSH.
@@ -105,7 +105,7 @@ echo ""
 _CURRENT_STEP="create VM"
 info "Creating VM '${VM_NAME}' on exe.dev..."
 diag "Running: ssh exe.dev new ${VM_NAME} --json"
-VM_JSON=$(ssh -o BatchMode=yes exe.dev new "${VM_NAME}" --json 2>&1) || {
+VM_JSON=$(ssh -n -o BatchMode=yes exe.dev new "${VM_NAME}" --json 2>&1) || {
   echo -e "${DIM}  Raw output:\n${VM_JSON}${RESET}" >&2
   die "Failed to create VM — see raw output above."
 }
@@ -131,14 +131,14 @@ diag "Resolved hostname: ${VM_HOST}"
 _CURRENT_STEP="configure public port"
 info "Setting port 3000 as the public port..."
 diag "Running: ssh exe.dev share port ${VM_NAME} 3000"
-SHARE_OUTPUT=$(ssh -o BatchMode=yes exe.dev share port "${VM_NAME}" 3000 2>&1) || {
+SHARE_OUTPUT=$(ssh -n -o BatchMode=yes exe.dev share port "${VM_NAME}" 3000 2>&1) || {
   echo -e "${DIM}  share port output: ${SHARE_OUTPUT}${RESET}" >&2
   die "Failed to configure shared port."
 }
 diag "share port output: ${SHARE_OUTPUT}"
 
 diag "Running: ssh exe.dev share set-public ${VM_NAME}"
-SET_PUBLIC_OUTPUT=$(ssh -o BatchMode=yes exe.dev share set-public "${VM_NAME}" 2>&1) || {
+SET_PUBLIC_OUTPUT=$(ssh -n -o BatchMode=yes exe.dev share set-public "${VM_NAME}" 2>&1) || {
   echo -e "${DIM}  set-public output: ${SET_PUBLIC_OUTPUT}${RESET}" >&2
   die "Failed to set port as public."
 }

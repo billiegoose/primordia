@@ -36,6 +36,10 @@ When the script is served from a preview URL (e.g. `/preview/curl-pipe-install-s
 
 No API keys are collected during install — the app's `check_keys` flow prompts the owner for any missing configuration on first login.
 
+## Bug fix: silent exit in curl | bash
+
+Fixed a `curl | bash` stdin consumption bug. When `ssh exe.dev help` ran without `-n`, it inherited bash's stdin (the pipe carrying the rest of the script), consuming it — causing bash to silently exit with code 0 after the SSH check line. All intermediate `ssh` invocations (`help`, `new`, `share port`, `share set-public`) now pass `-n` to redirect their stdin from `/dev/null`.
+
 ## Diagnostics
 
 Both scripts are instrumented to make failures easy to debug:
