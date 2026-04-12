@@ -26,7 +26,7 @@ When the script is served from a preview URL (e.g. `/preview/curl-pipe-install-s
 
 1. **Checks SSH access** to exe.dev (`ssh exe.dev help`) and exits with clear instructions if not configured.
 2. **Prompts for a VM name** (default: `primordia`) — works interactively even when the script is piped through bash.
-3. **Creates the VM** via `ssh exe.dev new <name> --json`.
+3. **Creates the VM** via `ssh exe.dev new --name=<name> --json`.
 4. **Sets port 3000 as the public port** via `ssh exe.dev share port` + `ssh exe.dev share set-public`.
 5. **SSHes into the new VM** and runs a self-contained setup:
    - Installs `git` and `bun` if missing.
@@ -41,6 +41,8 @@ No API keys are collected during install — the app's `check_keys` flow prompts
 **Silent exit in `curl | bash`** — When `ssh exe.dev help` ran without `-n`, it inherited bash's stdin (the pipe carrying the rest of the script), consuming it — causing bash to silently exit with code 0 after the SSH check line. All intermediate `ssh` invocations (`help`, `new`, `share port`, `share set-public`) now pass `-n` to redirect their stdin from `/dev/null`.
 
 **Silent hang on VM name prompt** — `read -p "prompt"` sends its prompt to stderr. The prompt was being suppressed by `2>/dev/null` on the `read` call, so the script silently waited for input with nothing on screen. Fixed by writing the prompt explicitly to `/dev/tty` with `printf` and using plain `read -r < /dev/tty`.
+
+**Wrong VM create syntax** — `ssh exe.dev new` does not accept a positional VM name argument. Fixed to use the `--name=<vm>` flag: `ssh exe.dev new --name=${VM_NAME} --json`.
 
 ## Spinner / progress dots
 

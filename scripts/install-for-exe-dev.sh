@@ -124,9 +124,9 @@ echo ""
 # ── Create VM ─────────────────────────────────────────────────────────────────
 
 _CURRENT_STEP="create VM"
-diag "Running: ssh exe.dev new ${VM_NAME} --json"
+diag "Running: ssh exe.dev new --name=${VM_NAME} --json"
 start_spinner "Creating VM '${VM_NAME}' on exe.dev..."
-VM_JSON=$(ssh -n -o BatchMode=yes exe.dev new "${VM_NAME}" --json 2>&1) || {
+VM_JSON=$(ssh -n -o BatchMode=yes exe.dev new "--name=${VM_NAME}" --json 2>&1) || {
   stop_spinner
   echo -e "${DIM}  Raw output:\n${VM_JSON}${RESET}" >&2
   die "Failed to create VM — see raw output above."
