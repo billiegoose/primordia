@@ -24,7 +24,11 @@ Same fallback applied in the SSE polling loop: if the session is not in the DB, 
 
 ### Updated `components/EvolveSessionView.tsx`
 
-The **⬆ Upstream Changes** box is now gated on `canAcceptReject` in addition to `canEvolve`. When viewing a session where `branch === sessionBranch` (e.g. viewing your own current branch's session from within that worktree), the box would nonsensically display "`session-logs-without-db` is 1 commit ahead of `session-logs-without-db`". Since you can only apply upstream updates to sessions you can accept/reject, gating on `canAcceptReject` prevents this message from appearing.
+The **⬆ Upstream Changes** box is now gated on `canAcceptReject` in addition to `canEvolve`. Additionally, the label in the upstream-changes message now shows the session branch's actual parent (from `git config branch.<name>.parent`) rather than the currently-checked-out branch of the running instance. Previously, if the running instance's branch differed from the session's real parent, the message would nonsensically read "`session-logs-without-db` is 1 commit ahead of `session-logs-without-db`". The session page now passes an explicit `parentBranch` prop derived from git config, and the component displays it in preference to `branch`.
+
+### Updated `app/evolve/session/[id]/page.tsx` (branch comparison)
+
+`isSessionBranchChildOfCurrent` has been replaced by `getSessionParentBranch`, which reads `git config branch.<sessionBranch>.parent` once and returns the parent branch name directly. `canAcceptReject` is now derived from a simple `branch === parentBranch` comparison, and `parentBranch` is forwarded to `EvolveSessionView` as its own prop so the upstream-changes label always names the correct branch regardless of which worktree is running.
 
 ## Why
 

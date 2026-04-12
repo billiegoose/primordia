@@ -647,8 +647,10 @@ interface EvolveSessionViewProps {
   initialLineCount: number;
   initialStatus: string;
   initialPreviewUrl: string | null;
-  /** The currently checked-out branch (parent). Used in confirmation copy and NavHeader. */
+  /** The currently checked-out branch in this instance. Used in confirmation copy and NavHeader. */
   branch?: string | null;
+  /** The branch this session was branched from (from git config). Used in upstream-changes display. */
+  parentBranch?: string | null;
   /** The preview branch name created for this session. */
   sessionBranch: string;
   /** True when the session branch is a direct child of the current branch, so Accept/Reject are safe to show. */
@@ -675,6 +677,7 @@ export default function EvolveSessionView({
   initialStatus,
   initialPreviewUrl,
   branch,
+  parentBranch,
   sessionBranch,
   canAcceptReject,
   upstreamCommitCount,
@@ -1423,7 +1426,7 @@ export default function EvolveSessionView({
                 ⬆ Upstream Changes
               </p>
               <p className="text-blue-200/70 text-xs">
-                <code className="bg-blue-950/60 px-1 rounded">{branch ?? "parent"}</code> is{" "}
+                <code className="bg-blue-950/60 px-1 rounded">{parentBranch ?? branch ?? "parent"}</code> is{" "}
                 <strong>{remainingUpstream}</strong> commit{remainingUpstream === 1 ? "" : "s"} ahead
                 of <code className="bg-blue-950/60 px-1 rounded">{sessionBranch}</code>.
                 Bring those changes into the session branch before accepting.
