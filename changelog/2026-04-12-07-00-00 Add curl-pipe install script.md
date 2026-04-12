@@ -5,7 +5,10 @@ Added `scripts/install-for-exe-dev.sh` — a one-command installer that runs on 
 ## What changed
 
 - **New**: `scripts/install-for-exe-dev.sh` — the client-side entry point
+- **New**: `app/install-for-exe-dev.sh/route.ts` — dynamic route that serves the script with the git-clone branch injected from the current `NEXT_BASE_PATH`
+- **New**: `components/CopyButton.tsx` — one-click copy button used on the landing page
 - **Updated**: `scripts/install.sh` — simplified to a server-side setup script (runs inside the cloned repo)
+- **Updated**: `app/page.tsx` — curl install command is now the primary call-to-action on the landing page
 
 ## Usage
 
@@ -14,6 +17,10 @@ curl -fsSL https://primordia.exe.xyz/install-for-exe-dev.sh | bash
 ```
 
 Run this on your personal computer — the machine that already has SSH keys for your exe.dev account.
+
+## Branch-aware installs
+
+When the script is served from a preview URL (e.g. `/preview/curl-pipe-install-script/install-for-exe-dev.sh`), the dynamic route automatically injects `--branch curl-pipe-install-script` into the `git clone` command. This means preview installs clone the same branch that the preview is serving, making it easy to test install changes end-to-end.
 
 ## What the script does
 
