@@ -32,6 +32,24 @@ warn()    { echo -e "${YELLOW}⚠${RESET} $*"; }
 die()     { echo -e "${RED}✗ $*${RESET}" >&2; exit 1; }
 diag()    { echo -e "${DIM}  $*${RESET}"; }
 
+# Spinner: start_spinner "message"  → sets _SPINNER_PID; stop_spinner cleans up.
+_SPINNER_PID=""
+start_spinner() {
+  local msg="$*"
+  ( while true; do printf "."; sleep 1; done ) &
+  _SPINNER_PID=$!
+  disown "$_SPINNER_PID" 2>/dev/null || true
+  printf "${CYAN}▸${RESET} %s" "$msg"
+}
+stop_spinner() {
+  if [[ -n "$_SPINNER_PID" ]]; then
+    kill "$_SPINNER_PID" 2>/dev/null || true
+    wait "$_SPINNER_PID" 2>/dev/null || true
+    _SPINNER_PID=""
+  fi
+  echo ""
+}
+
 # ── ERR trap ──────────────────────────────────────────────────────────────────
 # Prints context when any command exits with a non-zero status.
 
@@ -93,8 +111,11 @@ echo ""
 _CURRENT_STEP="prompt VM name"
 VM_NAME="primordia"
 if [[ -e /dev/tty ]]; then
-  # Read from the terminal even when the script is piped through bash
-  read -rp "  VM name [primordia]: " _input </dev/tty 2>/dev/null || true
+  # Read from the terminal even when the script is piped through bash.
+  # Print the prompt explicitly to /dev/tty — 'read -p' sends its prompt to
+  # stderr, which we suppress elsewhere, so the user would see nothing.
+  printf "  VM name [primordia]: " >/dev/tty
+  read -r _input </dev/tty || true
   VM_NAME="${_input:-primordia}"
 fi
 info "VM name: ${BOLD}${VM_NAME}${RESET}"
@@ -103,14 +124,16 @@ echo ""
 # ── Create VM ─────────────────────────────────────────────────────────────────
 
 _CURRENT_STEP="create VM"
-info "Creating VM '${VM_NAME}' on exe.dev..."
 diag "Running: ssh exe.dev new ${VM_NAME} --json"
+start_spinner "Creating VM '${VM_NAME}' on exe.dev..."
 VM_JSON=$(ssh -n -o BatchMode=yes exe.dev new "${VM_NAME}" --json 2>&1) || {
+  stop_spinner
   echo -e "${DIM}  Raw output:\n${VM_JSON}${RESET}" >&2
   die "Failed to create VM — see raw output above."
 }
+stop_spinner
 diag "VM JSON response: ${VM_JSON}"
-success "VM created"
+success "VM '${VM_NAME}' created"
 
 # Parse the public hostname from the JSON response
 _CURRENT_STEP="parse VM hostname"
@@ -129,9 +152,10 @@ diag "Resolved hostname: ${VM_HOST}"
 # ── Set port 3000 as the public port ──────────────────────────────────────────
 
 _CURRENT_STEP="configure public port"
-info "Setting port 3000 as the public port..."
 diag "Running: ssh exe.dev share port ${VM_NAME} 3000"
+start_spinner "Setting port 3000 as the public port..."
 SHARE_OUTPUT=$(ssh -n -o BatchMode=yes exe.dev share port "${VM_NAME}" 3000 2>&1) || {
+  stop_spinner
   echo -e "${DIM}  share port output: ${SHARE_OUTPUT}${RESET}" >&2
   die "Failed to configure shared port."
 }
@@ -139,9 +163,11 @@ diag "share port output: ${SHARE_OUTPUT}"
 
 diag "Running: ssh exe.dev share set-public ${VM_NAME}"
 SET_PUBLIC_OUTPUT=$(ssh -n -o BatchMode=yes exe.dev share set-public "${VM_NAME}" 2>&1) || {
+  stop_spinner
   echo -e "${DIM}  set-public output: ${SET_PUBLIC_OUTPUT}${RESET}" >&2
   die "Failed to set port as public."
 }
+stop_spinner
 diag "set-public output: ${SET_PUBLIC_OUTPUT}"
 success "Port 3000 is public at ${BOLD}https://${VM_HOST}/${RESET}"
 echo ""
@@ -149,13 +175,15 @@ echo ""
 # ── Install Primordia on the VM ───────────────────────────────────────────────
 
 _CURRENT_STEP="install Primordia on VM"
-info "Installing Primordia on ${VM_HOST} (this takes a few minutes)..."
+info "Installing Primordia on ${VM_HOST} (this may take a few minutes)..."
 diag "SSHing into ${VM_HOST} to run remote setup..."
 echo ""
 
 # Run the full setup remotely.  The heredoc is a temporary file created by the
 # local shell — it does not consume the pipe that feeds this script, so the
 # install works correctly when run as `curl … | bash`.
+# Note: -tt allocates a pseudo-TTY so remote output is streamed in real time.
+# No spinner here — remote output streams live, so the user can see progress.
 ssh -o StrictHostKeyChecking=accept-new -tt "${VM_HOST}" bash << 'REMOTE'
 set -euo pipefail
 

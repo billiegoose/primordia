@@ -36,9 +36,19 @@ When the script is served from a preview URL (e.g. `/preview/curl-pipe-install-s
 
 No API keys are collected during install — the app's `check_keys` flow prompts the owner for any missing configuration on first login.
 
-## Bug fix: silent exit in curl | bash
+## Bug fixes
 
-Fixed a `curl | bash` stdin consumption bug. When `ssh exe.dev help` ran without `-n`, it inherited bash's stdin (the pipe carrying the rest of the script), consuming it — causing bash to silently exit with code 0 after the SSH check line. All intermediate `ssh` invocations (`help`, `new`, `share port`, `share set-public`) now pass `-n` to redirect their stdin from `/dev/null`.
+**Silent exit in `curl | bash`** — When `ssh exe.dev help` ran without `-n`, it inherited bash's stdin (the pipe carrying the rest of the script), consuming it — causing bash to silently exit with code 0 after the SSH check line. All intermediate `ssh` invocations (`help`, `new`, `share port`, `share set-public`) now pass `-n` to redirect their stdin from `/dev/null`.
+
+**Silent hang on VM name prompt** — `read -p "prompt"` sends its prompt to stderr. The prompt was being suppressed by `2>/dev/null` on the `read` call, so the script silently waited for input with nothing on screen. Fixed by writing the prompt explicitly to `/dev/tty` with `printf` and using plain `read -r < /dev/tty`.
+
+## Spinner / progress dots
+
+Long-running steps now print dots to the terminal so the user can tell the script is running (not hung):
+
+- **Creating VM** — dots while `ssh exe.dev new` runs.
+- **Configuring public port** — dots while `ssh exe.dev share port` + `share set-public` run.
+- Remote install output is streamed live (via `-tt` SSH), so no spinner is needed there.
 
 ## Diagnostics
 
