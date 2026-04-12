@@ -11,7 +11,7 @@ import * as fs from "fs";
 import { getSessionUser, hasEvolvePermission } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { buildPageTitle } from "@/lib/page-title";
-import { readSessionEvents, getSessionNdjsonPath, type SessionEvent } from "@/lib/session-events";
+import { readSessionEvents, getSessionNdjsonPath, getCandidateWorktreePath, deriveSessionFromLog, type SessionEvent } from "@/lib/session-events";
 import EvolveSessionView from "@/components/EvolveSessionView";
 
 export function generateMetadata(): Metadata {
@@ -129,8 +129,14 @@ export default async function EvolveSessionPage({
   const { id } = await params;
 
   const db = await getDb();
-  const session = await db.getEvolveSession(id);
-  if (!session) notFound();
+  let session = await db.getEvolveSession(id);
+  if (!session) {
+    // The session isn't in the local DB — this can happen when the DB was
+    // copied before the session was created (e.g. viewing a parent worktree's
+    // session from a child worktree). Try to reconstruct from the NDJSON log.
+    session = deriveSessionFromLog(id, getCandidateWorktreePath(id));
+    if (!session) notFound();
+  }
 
   const branch = readGitBranch();
 
