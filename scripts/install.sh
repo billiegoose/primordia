@@ -20,18 +20,34 @@ if [[ -t 1 ]]; then
   CYAN="\033[0;36m"
   YELLOW="\033[0;33m"
   RED="\033[0;31m"
+  DIM="\033[2m"
   RESET="\033[0m"
 else
-  BOLD="" GREEN="" CYAN="" YELLOW="" RED="" RESET=""
+  BOLD="" GREEN="" CYAN="" YELLOW="" RED="" DIM="" RESET=""
 fi
 
 info()    { echo -e "${CYAN}▸${RESET} $*"; }
 success() { echo -e "${GREEN}✓${RESET} $*"; }
 warn()    { echo -e "${YELLOW}⚠${RESET} $*"; }
 die()     { echo -e "${RED}✗ $*${RESET}" >&2; exit 1; }
+diag()    { echo -e "${DIM}  $*${RESET}"; }
+
+# ── ERR trap ──────────────────────────────────────────────────────────────────
+
+_CURRENT_STEP="(initialising)"
+
+trap '_exit_code=$?
+echo -e "\n${RED}✗ Install failed${RESET} at step: ${BOLD}${_CURRENT_STEP}${RESET} (line ${LINENO}, exit ${_exit_code})" >&2
+echo "" >&2
+echo -e "${DIM}  Service logs (last 30 lines):${RESET}" >&2
+journalctl -u primordia-proxy -n 30 --no-pager 2>/dev/null >&2 || true
+echo "" >&2
+echo -e "${DIM}  Service status:${RESET}" >&2
+systemctl status primordia-proxy --no-pager 2>/dev/null >&2 || true' ERR
 
 # ── Locate repo root ──────────────────────────────────────────────────────────
 
+_CURRENT_STEP="locate repo root"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REVERSE_PROXY_PORT="${REVERSE_PROXY_PORT:-3000}"
@@ -41,8 +57,26 @@ echo -e "${BOLD}  Primordia Setup${RESET}"
 echo -e "  Repo: ${INSTALL_DIR}"
 echo ""
 
+# ── System diagnostics ────────────────────────────────────────────────────────
+
+_CURRENT_STEP="diagnostics"
+diag "--- Server diagnostics (paste this if something goes wrong) ---"
+diag "Date:      $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+diag "Hostname:  $(hostname -f 2>/dev/null || hostname)"
+diag "OS:        $(uname -srm)"
+if [[ -f /etc/os-release ]]; then
+  diag "Distro:    $(. /etc/os-release && echo "${PRETTY_NAME:-$ID}")"
+fi
+diag "User:      $(whoami)"
+diag "Disk:      $(df -h "${INSTALL_DIR}" 2>/dev/null | awk 'NR==2{print $4" free of "$2}' || echo 'unknown')"
+diag "Memory:    $(free -h 2>/dev/null | awk '/^Mem:/{print $7" free of "$2}' || echo 'unknown')"
+diag "Repo:      $(git -C "${INSTALL_DIR}" log -1 --oneline 2>/dev/null || echo 'unknown')"
+diag "--------------------------------------------------------------"
+echo ""
+
 # ── Detect exe.dev ────────────────────────────────────────────────────────────
 
+_CURRENT_STEP="detect exe.dev"
 HOSTNAME_FQDN="$(hostname -f 2>/dev/null || hostname)"
 if [[ "$HOSTNAME_FQDN" == *.exe.xyz ]]; then
   info "Detected exe.dev host: ${HOSTNAME_FQDN}"
@@ -55,6 +89,7 @@ echo ""
 
 # ── Install bun ───────────────────────────────────────────────────────────────
 
+_CURRENT_STEP="install bun"
 export PATH="$HOME/.bun/bin:$PATH"
 if ! command -v bun &>/dev/null; then
   info "Installing bun..."
@@ -65,6 +100,7 @@ success "bun $(bun --version)"
 
 # ── Write .env.local ──────────────────────────────────────────────────────────
 
+_CURRENT_STEP="write .env.local"
 ENV_FILE="${INSTALL_DIR}/.env.local"
 if [[ ! -f "${ENV_FILE}" ]]; then
   cat > "${ENV_FILE}" << EOF
@@ -78,6 +114,7 @@ fi
 
 # ── Install dependencies ──────────────────────────────────────────────────────
 
+_CURRENT_STEP="bun install"
 info "Installing dependencies (bun install)..."
 cd "${INSTALL_DIR}"
 bun install --frozen-lockfile
@@ -85,31 +122,49 @@ success "Dependencies installed"
 
 # ── Build production bundle ───────────────────────────────────────────────────
 
+_CURRENT_STEP="bun run build"
 info "Building production bundle (bun run build)..."
 bun run build
 success "Build complete"
 
 # ── Install systemd service ───────────────────────────────────────────────────
 
+_CURRENT_STEP="install systemd service"
 echo ""
 info "Installing systemd service..."
 bash "${INSTALL_DIR}/scripts/install-service.sh"
 
 # ── Wait for ready ────────────────────────────────────────────────────────────
 
+_CURRENT_STEP="wait for service ready"
 echo ""
 info "Waiting for Primordia to be ready (up to 60 s)..."
+SERVICE_READY=false
 for i in $(seq 1 30); do
   sleep 2
   if journalctl -u primordia-proxy -n 100 --no-pager 2>/dev/null | grep -q "Ready"; then
+    SERVICE_READY=true
     echo ""
     success "Primordia is ready!"
     break
   fi
   if [[ $((i % 5)) -eq 0 ]]; then
-    info "$((i * 2))s..."
+    info "$((i * 2))s... (journalctl -u primordia-proxy -f to watch)"
   fi
 done
+
+if [[ "$SERVICE_READY" != "true" ]]; then
+  warn "Service did not report ready within 60 s — it may still be starting."
+  echo ""
+  echo -e "${DIM}  --- Last 40 lines of service log ---${RESET}"
+  journalctl -u primordia-proxy -n 40 --no-pager 2>/dev/null || true
+  echo -e "${DIM}  --- Service status ---${RESET}"
+  systemctl status primordia-proxy --no-pager 2>/dev/null || true
+  echo -e "${DIM}  -------------------------------------${RESET}"
+  echo ""
+  warn "If the log looks healthy, the service may just need more time."
+  warn "Check manually:  journalctl -u primordia-proxy -f"
+fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 

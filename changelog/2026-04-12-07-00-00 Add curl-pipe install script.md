@@ -29,6 +29,17 @@ Run this on your personal computer — the machine that already has SSH keys for
 
 No API keys are collected during install — the app's `check_keys` flow prompts the owner for any missing configuration on first login.
 
+## Diagnostics
+
+Both scripts are instrumented to make failures easy to debug:
+
+- **System info printed at startup** — date, OS, hostname, disk/memory, SSH keys, bun/git versions.
+- **Named steps** — each logical step sets `_CURRENT_STEP` so the ERR trap can print exactly where the script failed (e.g. `✗ Install failed at step: bun run build (line 89)`).
+- **ERR trap on both scripts** — fires on any non-zero exit and prints the step name, line number, and (on the server) the last 30 lines of `journalctl` + `systemctl status`.
+- **Full command output captured** — `ssh exe.dev new`, `share port`, and `share set-public` outputs are shown in dim diagnostic text; on failure the raw output is printed to stderr.
+- **Timeout diagnostic dump** — if the service doesn't report ready within 60 s, the last 40 log lines and `systemctl status` are printed automatically rather than silently failing.
+- **`bash -x` hint** — the ERR trap reminds the user they can re-run with `bash -x` for full trace output.
+
 ## Why
 
 The previous design required the script to be run on the server and prompted for API keys upfront. The new installer runs entirely from the user's laptop, orchestrates VM creation automatically, and defers all configuration to the app's own first-run flow.
