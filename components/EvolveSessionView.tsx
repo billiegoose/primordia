@@ -663,6 +663,9 @@ interface EvolveSessionViewProps {
   isProduction: boolean;
   /** Absolute path to the session's worktree, used to shorten file paths in tool call display. */
   worktreePath: string;
+  /** True when this session was started by (and is managed by) the current instance's proxy.
+   * False for sessions derived from sibling/parent worktree logs — the proxy won't know about them. */
+  hasLocalProxy: boolean;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -682,6 +685,7 @@ export default function EvolveSessionView({
   canEvolve,
   isProduction,
   worktreePath,
+  hasLocalProxy,
 }: EvolveSessionViewProps) {
   const [events, setEvents] = useState<SessionEvent[]>(initialEvents);
   const [status, setStatus] = useState(initialStatus);
@@ -867,7 +871,7 @@ export default function EvolveSessionView({
 
   // Poll the proxy for the real-time preview server status whenever the session is ready.
   useEffect(() => {
-    if (status !== "ready") return;
+    if (status !== "ready" || !hasLocalProxy) return;
     let cancelled = false;
 
     async function poll() {
@@ -928,7 +932,7 @@ export default function EvolveSessionView({
   }
 
   useEffect(() => {
-    if (status !== "ready") return;
+    if (status !== "ready" || !hasLocalProxy) return;
     void startServerLogsStream();
     return () => { proxyLogsControllerRef.current?.abort(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1335,7 +1339,7 @@ export default function EvolveSessionView({
         )}
 
         {/* Preview server status + logs — shown when session is ready and proxy is managing the server */}
-        {status === "ready" && (
+        {status === "ready" && hasLocalProxy && (
           <div className="rounded-lg border border-emerald-700/50 bg-gray-900 text-sm overflow-hidden">
             <div className="px-4 py-2.5 border-b border-gray-800 flex items-center justify-between">
               <span className="font-semibold text-xs text-emerald-300">🚀 Preview server</span>
