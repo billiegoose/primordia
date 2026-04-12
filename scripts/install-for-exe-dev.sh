@@ -172,6 +172,31 @@ diag "set-public output: ${SET_PUBLIC_OUTPUT}"
 success "Port 3000 is public at ${BOLD}https://${VM_HOST}/${RESET}"
 echo ""
 
+# ── Pre-resolve git server hostname ───────────────────────────────────────────
+# The new VM may not be able to resolve primordia.exe.xyz from within the
+# exe.dev network.  Resolve the IP here (on the local machine, which can reach
+# it) and inject it into the remote VM's /etc/hosts.
+
+_CURRENT_STEP="resolve git server hostname"
+PRIMORDIA_GIT_HOST="primordia.exe.xyz"
+PRIMORDIA_GIT_IP=""
+if command -v python3 &>/dev/null; then
+  PRIMORDIA_GIT_IP=$(python3 -c "import socket; print(socket.gethostbyname('${PRIMORDIA_GIT_HOST}'))" 2>/dev/null || true)
+fi
+if [[ -z "$PRIMORDIA_GIT_IP" ]] && command -v dig &>/dev/null; then
+  PRIMORDIA_GIT_IP=$(dig +short "${PRIMORDIA_GIT_HOST}" 2>/dev/null \
+    | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)
+fi
+if [[ -z "$PRIMORDIA_GIT_IP" ]]; then
+  PRIMORDIA_GIT_IP=$(getent hosts "${PRIMORDIA_GIT_HOST}" 2>/dev/null \
+    | awk '{print $1}' | head -1 || true)
+fi
+if [[ -n "$PRIMORDIA_GIT_IP" ]]; then
+  diag "Resolved ${PRIMORDIA_GIT_HOST} → ${PRIMORDIA_GIT_IP} (will inject into remote /etc/hosts)"
+else
+  diag "Warning: could not pre-resolve ${PRIMORDIA_GIT_HOST} — will attempt DNS on remote VM"
+fi
+
 # ── Install Primordia on the VM ───────────────────────────────────────────────
 
 _CURRENT_STEP="install Primordia on VM"
@@ -184,8 +209,23 @@ echo ""
 # install works correctly when run as `curl … | bash`.
 # Note: -tt allocates a pseudo-TTY so remote output is streamed in real time.
 # No spinner here — remote output streams live, so the user can see progress.
-ssh -o StrictHostKeyChecking=accept-new -tt "${VM_HOST}" bash << 'REMOTE'
+#
+# $1 = PRIMORDIA_GIT_HOST, $2 = PRIMORDIA_GIT_IP (may be empty)
+# bash -s reads commands from stdin (the heredoc) and treats extra args as $1/$2.
+ssh -o StrictHostKeyChecking=accept-new -tt "${VM_HOST}" \
+  bash -s -- "${PRIMORDIA_GIT_HOST}" "${PRIMORDIA_GIT_IP:-}" << 'REMOTE'
+# Positional args passed from local machine:
+PRIMORDIA_GIT_HOST="${1:-primordia.exe.xyz}"
+PRIMORDIA_GIT_IP="${2:-}"
+
 set -euo pipefail
+
+# ── Set locale early to avoid garbled box-drawing characters ───────────────────
+export LANG=en_US.UTF-8
+export LC_ALL=en_US.UTF-8
+export LANGUAGE=en_US.UTF-8
+# Generate locale if not already present (non-fatal)
+sudo locale-gen en_US.UTF-8 >/dev/null 2>&1 || true
 
 GREEN="\033[0;32m"; CYAN="\033[0;36m"; RED="\033[0;31m"; DIM="\033[2m"; BOLD="\033[1m"; RESET="\033[0m"
 info()    { echo -e "${CYAN}▸${RESET} $*"; }
@@ -228,6 +268,16 @@ git config --global user.name  "Primordia" 2>/dev/null || true
 git config --global user.email "primordia@localhost" 2>/dev/null || true
 
 echo ""
+
+# ── Ensure git server hostname is resolvable ───────────────────────────────────
+_REMOTE_STEP="ensure git host resolvable"
+if [[ -n "$PRIMORDIA_GIT_IP" ]]; then
+  if ! getent hosts "$PRIMORDIA_GIT_HOST" &>/dev/null; then
+    diag "Adding ${PRIMORDIA_GIT_HOST} → ${PRIMORDIA_GIT_IP} to /etc/hosts..."
+    echo "${PRIMORDIA_GIT_IP} ${PRIMORDIA_GIT_HOST}" | sudo tee -a /etc/hosts >/dev/null
+    diag "DNS injected via /etc/hosts"
+  fi
+fi
 
 # ── Clone Primordia ────────────────────────────────────────────────────────────
 _REMOTE_STEP="clone Primordia"

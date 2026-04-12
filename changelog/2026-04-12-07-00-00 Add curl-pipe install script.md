@@ -63,6 +63,19 @@ Both scripts are instrumented to make failures easy to debug:
 - **Timeout diagnostic dump** — if the service doesn't report ready within 60 s, the last 40 log lines and `systemctl status` are printed automatically rather than silently failing.
 - **`bash -x` hint** — the ERR trap reminds the user they can re-run with `bash -x` for full trace output.
 
+## Additional fixes (2026-04-12 follow-up)
+
+### git clone fails: `Could not resolve host: primordia.exe.xyz`
+
+New exe.dev VMs cannot resolve `primordia.exe.xyz` from within the exe.dev network (the domain routes through the proxy and is not directly resolvable from peer VMs). Fixed by:
+
+1. **Pre-resolving on the local machine** — before SSHing into the new VM, the installer resolves `primordia.exe.xyz` to an IP using `python3`, `dig`, or `getent` (whichever is available on the user's Mac).
+2. **Injecting the IP into `/etc/hosts` on the remote VM** — the resolved IP and hostname are passed as positional args (`bash -s -- HOST IP`) to the remote bash session. If the VM can't resolve the hostname, it's written to `/etc/hosts` before `git clone` runs. This preserves the HTTPS cert check (the hostname still matches; only DNS resolution is bypassed).
+
+### Garbled box-drawing characters in remote output
+
+exe.dev VMs don't have a UTF-8 locale set by default, causing Unicode box-drawing characters (`─`, `✓`, `▸`) to render as garbage. Fixed by setting `LANG`, `LC_ALL`, and `LANGUAGE` to `en_US.UTF-8` at the very start of the remote script section, plus running `sudo locale-gen en_US.UTF-8` (non-fatal if it fails).
+
 ## Why
 
 The previous design required the script to be run on the server and prompted for API keys upfront. The new installer runs entirely from the user's laptop, orchestrates VM creation automatically, and defers all configuration to the app's own first-run flow.
