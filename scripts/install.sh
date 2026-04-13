@@ -105,7 +105,7 @@ else
   warn "Not running on exe.dev — SSO login and the LLM gateway won't be available."
   APP_URL="http://localhost:${REVERSE_PROXY_PORT}"
 fi
-echo ""
+[[ -z "${INSTALL_PREFIX:-}" ]] && echo ""
 
 # ── Install bun ───────────────────────────────────────────────────────────────
 
@@ -216,7 +216,8 @@ _done "Build complete"
 
 _CURRENT_STEP="install systemd service"
 echo ""
-echo "Finally, let's ensure Primordia is automatically started on boot."
+echo "Finally, let's ensure Primordia is automatically started on boot:"
+echo ""
 _step "Running ~/primordia/scripts/install-service.sh..."
 _svc_log=$(mktemp)
 if ! bash "${INSTALL_DIR}/scripts/install-service.sh" > "$_svc_log" 2>&1; then
@@ -247,7 +248,8 @@ for i in $(seq 1 60); do
 done
 
 if [[ "$SERVICE_READY" == "true" ]]; then
-  _done "Primordia is running!"
+  _spin_kill
+  echo -e "${GREEN}✓${RESET} Congratulations! Primordia is running!"
 else
   _spin_kill
   warn "Service did not respond within 120 s — it may still be starting."
@@ -262,14 +264,14 @@ fi
 # ── Done ──────────────────────────────────────────────────────────────────────
 
 echo ""
-echo -e "  Open:     ${BOLD}${APP_URL}${RESET}"
+echo -e "Open:     ${BOLD}${APP_URL}${RESET}"
 echo ""
 if [[ "$HOSTNAME_FQDN" == *.exe.xyz ]]; then
-  echo -e "  Sign in with your exe.dev account on the login page."
-  echo -e "  The first user to sign in is automatically granted the admin role."
-  echo -e "  You will be prompted for additional setup information when required."
+  echo "Sign in with your exe.dev account on the login page."
+  echo "The first user to sign in is automatically granted the admin role."
+  echo "You will be prompted for additional setup information when required."
 else
-  echo -e "  Register a passkey on the login page."
-  echo -e "  The first user to register is automatically granted the admin role."
+  echo "Register a passkey on the login page."
+  echo "The first user to register is automatically granted the admin role."
 fi
 echo ""

@@ -83,7 +83,8 @@ SSH_TEST_OUTPUT=$(ssh -n -o BatchMode=yes -o ConnectTimeout=10 exe.dev help 2>&1
 }
 _done "Connected to exe.dev"
 echo ""
-echo "First let's create a VM to install Primordia on."
+echo "First let's create a VM to install Primordia on:"
+echo ""
 
 # ── Prompt for VM name ────────────────────────────────────────────────────────
 
@@ -94,7 +95,6 @@ if [[ -e /dev/tty ]]; then
   read -r _input </dev/tty || true
   VM_NAME="${_input:-primordia}"
 fi
-echo ""
 
 # ── Create VM ─────────────────────────────────────────────────────────────────
 
@@ -140,7 +140,8 @@ if [[ "$_SSH_READY" != "true" ]]; then
 fi
 _done "VM SSH ready"
 echo ""
-echo "Next, we'll run a short script to install git and clone the Primordia repo."
+echo "Next, we'll run a short script to install git and clone the Primordia repo:"
+echo ""
 
 # ── Upload bootstrap script ───────────────────────────────────────────────────
 # Two-step approach:
@@ -203,7 +204,6 @@ sudo locale-gen en_US.UTF-8 </dev/null >/dev/null 2>&1 || true
 sudo update-locale LANG=en_US.UTF-8 </dev/null >/dev/null 2>&1 || true
 export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 LANGUAGE=en_US.UTF-8
 _done "Updated locale to en_US.UTF-8 for better character support"
-echo ""
 
 # ── Wait for DNS ──────────────────────────────────────────────────────────────
 # Fresh VMs have a race where systemd-resolved starts before the NIC is ready,
@@ -239,7 +239,6 @@ else
   fi
   _done "DNS is ready"
 fi
-echo ""
 
 # ── Install git ───────────────────────────────────────────────────────────────
 _REMOTE_STEP="install git"
@@ -253,7 +252,6 @@ else
 fi
 git config --global user.name  "Primordia" 2>/dev/null || true
 git config --global user.email "primordia@localhost" 2>/dev/null || true
-echo ""
 
 # ── Clone Primordia ───────────────────────────────────────────────────────────
 _REMOTE_STEP="clone Primordia"
@@ -270,26 +268,24 @@ else
   rm -f "$_log"
   _done "Cloned to ~/primordia"
 fi
-echo ""
 
 # ── Run install.sh ────────────────────────────────────────────────────────────
 _REMOTE_STEP="run install.sh"
-echo "Now we install Primordia using its installer."
-echo "Running ~/primordia/scripts/install.sh:"
 echo ""
+echo "Now we install Primordia using its installer:"
+echo ""
+echo "Running ~/primordia/scripts/install.sh:"
 export INSTALL_PREFIX="  "
 REVERSE_PROXY_PORT="$REVERSE_PROXY_PORT" bash "$HOME/primordia/scripts/install.sh"
 REMOTE
 
 _done "Uploaded ./primordia_setup.sh successfully"
-echo ""
 
 # ── Execute bootstrap with live PTY output ────────────────────────────────────
 # -n: keep curl pipe from being fed to remote PTY stdin
 # -tt: allocate PTY so the remote output streams live
 _CURRENT_STEP="run bootstrap"
 echo "Running /tmp/primordia_setup.sh:"
-echo ""
 ssh -n -tt -o StrictHostKeyChecking=accept-new "${VM_HOST}" \
   "bash /tmp/primordia_setup.sh '${PROXY_PORT}'"
 
