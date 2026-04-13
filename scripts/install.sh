@@ -28,10 +28,30 @@ success() { echo -e "${_PREFIX}${GREEN}✓${RESET} $*"; }
 warn()    { echo -e "${_PREFIX}${YELLOW}⚠${RESET} $*"; }
 die()     { echo -e "${RED}✗ $*${RESET}" >&2; exit 1; }
 diag()    { echo -e "${_PREFIX}${DIM}  $*${RESET}"; }
-# _step: print status line (no newline) — replaced by _done on success
-# _done: overwrite current line with ✓ success message
-_step() { printf "${_PREFIX}${CYAN}▸${RESET} %s" "$*"; }
-_done() { printf "\r\033[K${_PREFIX}${GREEN}✓${RESET} %s\n" "$*"; }
+# _step: print spinner line (no newline) — replaced by _done on success
+# _done: stop spinner and overwrite line with ✓
+# _spin_kill: stop spinner without printing a success line
+_SPINNER_PID=""
+_step() {
+  local msg="$*"
+  printf '%s\\ %s' "${_PREFIX}" "$msg"
+  ( local i=1; local c='\|/-'
+    while true; do sleep 0.12; printf '\r%s%s %s' "${_PREFIX}" "${c:$((i % 4)):1}" "$msg"; i=$((i+1)); done ) &
+  _SPINNER_PID=$!
+  disown "$_SPINNER_PID" 2>/dev/null || true
+}
+_done() {
+  if [[ -n "${_SPINNER_PID:-}" ]]; then
+    kill "$_SPINNER_PID" 2>/dev/null || true; wait "$_SPINNER_PID" 2>/dev/null || true; _SPINNER_PID=""
+  fi
+  printf "\r\033[K${_PREFIX}${GREEN}✓${RESET} %s\n" "$*"
+}
+_spin_kill() {
+  if [[ -n "${_SPINNER_PID:-}" ]]; then
+    kill "$_SPINNER_PID" 2>/dev/null || true; wait "$_SPINNER_PID" 2>/dev/null || true; _SPINNER_PID=""
+  fi
+  printf "\r\033[K"
+}
 
 # ── ERR trap ──────────────────────────────────────────────────────────────────
 
@@ -101,9 +121,9 @@ if ! command -v bun &>/dev/null; then
   fi
   rm -f "$_bun_install_log"
   export PATH="$HOME/.bun/bin:$PATH"
-  _done "bun $(bun --version)"
+  _done "Installed bun $(bun --version)"
 else
-  success "bun $(bun --version)"
+  success "bun $(bun --version) already installed"
 fi
 
 # ── Write .env.local ──────────────────────────────────────────────────────────
@@ -205,7 +225,7 @@ if ! bash "${INSTALL_DIR}/scripts/install-service.sh" > "$_svc_log" 2>&1; then
   exit 1
 fi
 rm -f "$_svc_log"
-_done "Installed systemd service and enabled on boot"
+_done "Installed primordia-proxy systemd service and enabled on boot"
 if systemctl is-active --quiet primordia-proxy 2>/dev/null; then
   success "Started primordia-proxy systemd service"
 fi
@@ -215,20 +235,20 @@ fi
 
 _CURRENT_STEP="wait for service ready"
 echo ""
-printf "${_PREFIX}${CYAN}▸${RESET} Waiting for Primordia to be ready"
+_step "Waiting for Primordia to be ready..."
 SERVICE_READY=false
 for i in $(seq 1 60); do
   sleep 2
   if curl -sf --max-time 3 "http://localhost:${REVERSE_PROXY_PORT}/" -o /dev/null 2>/dev/null; then
     SERVICE_READY=true
-    printf "\r\033[K${_PREFIX}${GREEN}✓${RESET} Primordia is ready!\n"
     break
   fi
-  printf "."
 done
 
-if [[ "$SERVICE_READY" != "true" ]]; then
-  printf "\n"
+if [[ "$SERVICE_READY" == "true" ]]; then
+  _done "Primordia is running!"
+else
+  _spin_kill
   warn "Service did not respond within 120 s — it may still be starting."
   echo ""
   echo -e "${DIM}  --- Last 40 lines of service log ---${RESET}"
@@ -240,8 +260,6 @@ fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 
-echo ""
-echo -e "${BOLD}${GREEN}  Primordia is running!${RESET}"
 echo ""
 echo -e "  Open:     ${BOLD}${APP_URL}${RESET}"
 echo ""

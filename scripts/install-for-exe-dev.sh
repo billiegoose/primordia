@@ -16,10 +16,30 @@ else
   BOLD="" GREEN="" CYAN="" YELLOW="" RED="" DIM="" RESET=""
 fi
 
-# _step: print a status line (no newline) — will be replaced by _done on success
-# _done: overwrite the current line with a ✓ success message
-_step() { printf "${CYAN}▸${RESET} %s" "$*"; }
-_done() { printf "\r\033[K${GREEN}✓${RESET} %s\n" "$*"; }
+# _step: print a spinner line (no newline) — replaced by _done on success
+# _done: stop the spinner and overwrite the line with ✓
+# _spin_kill: stop spinner without printing a success line (use before die)
+_SPINNER_PID=""
+_step() {
+  local msg="$*"
+  printf '\\ %s' "$msg"
+  ( local i=1; local c='\|/-'
+    while true; do sleep 0.12; printf '\r%s %s' "${c:$((i % 4)):1}" "$msg"; i=$((i+1)); done ) &
+  _SPINNER_PID=$!
+  disown "$_SPINNER_PID" 2>/dev/null || true
+}
+_done() {
+  if [[ -n "${_SPINNER_PID:-}" ]]; then
+    kill "$_SPINNER_PID" 2>/dev/null || true; wait "$_SPINNER_PID" 2>/dev/null || true; _SPINNER_PID=""
+  fi
+  printf "\r\033[K${GREEN}✓${RESET} %s\n" "$*"
+}
+_spin_kill() {
+  if [[ -n "${_SPINNER_PID:-}" ]]; then
+    kill "$_SPINNER_PID" 2>/dev/null || true; wait "$_SPINNER_PID" 2>/dev/null || true; _SPINNER_PID=""
+  fi
+  printf "\r\033[K"
+}
 info()    { echo -e "${CYAN}▸${RESET} $*"; }
 warn()    { echo -e "${YELLOW}⚠${RESET} $*"; }
 die()     { echo -e "\n${RED}✗ $*${RESET}" >&2; exit 1; }
@@ -78,19 +98,13 @@ echo ""
 # ── Create VM ─────────────────────────────────────────────────────────────────
 
 _CURRENT_STEP="create VM"
-_SPINNER_PID=""
-printf "${CYAN}▸${RESET} Creating VM '${VM_NAME}' on exe.dev"
-( while true; do printf "."; sleep 1; done ) &
-_SPINNER_PID=$!
-disown "$_SPINNER_PID" 2>/dev/null || true
+_step "Creating VM '${VM_NAME}' on exe.dev..."
 VM_JSON=$(ssh -n -o BatchMode=yes exe.dev new "--name=${VM_NAME}" --json 2>&1) || {
-  kill "$_SPINNER_PID" 2>/dev/null || true; wait "$_SPINNER_PID" 2>/dev/null || true
-  printf "\n"
+  _spin_kill
   echo -e "${DIM}  Raw output:\n${VM_JSON}${RESET}" >&2
   die "Failed to create VM — see raw output above."
 }
-kill "$_SPINNER_PID" 2>/dev/null || true; wait "$_SPINNER_PID" 2>/dev/null || true
-printf "\r\033[K${GREEN}✓${RESET} VM '${VM_NAME}' created\n"
+_done "VM '${VM_NAME}' created"
 
 # ── Parse VM JSON ─────────────────────────────────────────────────────────────
 
@@ -111,16 +125,19 @@ fi
 
 _CURRENT_STEP="wait for VM SSH"
 _SSH_READY=false
-printf "${CYAN}▸${RESET} Waiting for VM SSH to be ready"
+_step "Waiting for VM SSH to be ready..."
 for _i in $(seq 1 30); do
   if ssh -n -o BatchMode=yes -o ConnectTimeout=5 \
          -o StrictHostKeyChecking=accept-new "${VM_HOST}" exit 0 2>/dev/null; then
     _SSH_READY=true; break
   fi
-  printf "."; sleep 2
+  sleep 2
 done
-[[ "$_SSH_READY" == "true" ]] || { printf "\n"; die "VM SSH did not become ready after 60 s"; }
-printf "\r\033[K${GREEN}✓${RESET} VM SSH ready\n"
+if [[ "$_SSH_READY" != "true" ]]; then
+  _spin_kill
+  die "VM SSH did not become ready after 60 s"
+fi
+_done "VM SSH ready"
 echo ""
 
 # ── Upload bootstrap script ───────────────────────────────────────────────────
@@ -133,7 +150,7 @@ echo ""
 #         -tt allocates a PTY so output streams live to the local terminal.
 
 _CURRENT_STEP="upload bootstrap"
-_step "Uploading setup script to ${VM_HOST}..."
+_step "Uploading ./primordia_setup.sh to ${VM_HOST}..."
 ssh -o StrictHostKeyChecking=accept-new "${VM_HOST}" \
   'cat > /tmp/primordia_setup.sh' << 'REMOTE'
 REVERSE_PROXY_PORT="${1:-8000}"
@@ -145,10 +162,29 @@ export DEBIAN_FRONTEND=noninteractive
 # Define colors first so we can use them for the locale success message.
 GREEN="\033[0;32m"; CYAN="\033[0;36m"; RED="\033[0;31m"; BOLD="\033[1m"; RESET="\033[0m"
 # All remote output is indented 2 spaces to nest visually under the local steps.
-# _step: print status line (no newline) — replaced by _done on success
-# _done: overwrite current line with ✓ success message
-_step() { printf "  ${CYAN}▸${RESET} %s" "$*"; }
-_done() { printf "\r\033[K  ${GREEN}✓${RESET} %s\n" "$*"; }
+# _step: print spinner line (no newline) — replaced by _done on success
+# _done: stop spinner and overwrite line with ✓
+_SPINNER_PID=""
+_step() {
+  local msg="$*"
+  printf '  \\ %s' "$msg"
+  ( local i=1; local c='\|/-'
+    while true; do sleep 0.12; printf '\r  %s %s' "${c:$((i % 4)):1}" "$msg"; i=$((i+1)); done ) &
+  _SPINNER_PID=$!
+  disown "$_SPINNER_PID" 2>/dev/null || true
+}
+_done() {
+  if [[ -n "${_SPINNER_PID:-}" ]]; then
+    kill "$_SPINNER_PID" 2>/dev/null || true; wait "$_SPINNER_PID" 2>/dev/null || true; _SPINNER_PID=""
+  fi
+  printf "\r\033[K  ${GREEN}✓${RESET} %s\n" "$*"
+}
+_spin_kill() {
+  if [[ -n "${_SPINNER_PID:-}" ]]; then
+    kill "$_SPINNER_PID" 2>/dev/null || true; wait "$_SPINNER_PID" 2>/dev/null || true; _SPINNER_PID=""
+  fi
+  printf "\r\033[K"
+}
 info()    { echo -e "  ${CYAN}▸${RESET} $*"; }
 success() { echo -e "  ${GREEN}✓${RESET} $*"; }
 
@@ -189,12 +225,15 @@ else
   _dns_ok=false
   for _i in $(seq 1 30); do
     if _dns_ready; then _dns_ok=true; break; fi
-    printf "."; sleep 2
+    sleep 2
   done
   if [[ "$_dns_ok" != "true" ]]; then
     printf "\nnameserver 1.1.1.1\nnameserver 8.8.8.8\n" | sudo tee /etc/resolv.conf >/dev/null
     sleep 1
-    _dns_ready || { echo -e "\n${RED}✗ DNS resolution failed — cannot continue${RESET}" >&2; exit 1; }
+    if ! _dns_ready; then
+      _spin_kill
+      echo -e "${RED}✗ DNS resolution failed — cannot continue${RESET}" >&2; exit 1
+    fi
   fi
   _done "DNS is ready"
 fi
@@ -206,9 +245,9 @@ if ! command -v git &>/dev/null; then
   _step "Installing git..."
   sudo apt-get update -qq </dev/null >/dev/null 2>&1
   sudo apt-get install -y git </dev/null >/dev/null 2>&1
-  _done "git $(git --version | awk '{print $3}')"
+  _done "Using git $(git --version | awk '{print $3}')"
 else
-  success "git $(git --version | awk '{print $3}')"
+  success "Using git $(git --version | awk '{print $3}')"
 fi
 git config --global user.name  "Primordia" 2>/dev/null || true
 git config --global user.email "primordia@localhost" 2>/dev/null || true
@@ -219,13 +258,13 @@ _REMOTE_STEP="clone Primordia"
 if [[ -d "$HOME/primordia/.git" ]]; then
   _step "Updating ~/primordia..."
   _log=$(mktemp)
-  git -C "$HOME/primordia" pull >"$_log" 2>&1 || { cat "$_log" >&2; rm -f "$_log"; exit 1; }
+  if ! git -C "$HOME/primordia" pull >"$_log" 2>&1; then _spin_kill; cat "$_log" >&2; rm -f "$_log"; exit 1; fi
   rm -f "$_log"
   _done "Updated ~/primordia"
 else
   _step "Cloning Primordia..."
   _log=$(mktemp)
-  git clone https://primordia.exe.xyz/api/git "$HOME/primordia" >"$_log" 2>&1 || { cat "$_log" >&2; rm -f "$_log"; exit 1; }
+  if ! git clone https://primordia.exe.xyz/api/git "$HOME/primordia" >"$_log" 2>&1; then _spin_kill; cat "$_log" >&2; rm -f "$_log"; exit 1; fi
   rm -f "$_log"
   _done "Cloned to ~/primordia"
 fi
@@ -233,20 +272,20 @@ echo ""
 
 # ── Run install.sh ────────────────────────────────────────────────────────────
 _REMOTE_STEP="run install.sh"
-info "Running ~/primordia/scripts/install.sh..."
+echo "Running ~/primordia/scripts/install.sh:"
 echo ""
 export INSTALL_PREFIX="  "
 REVERSE_PROXY_PORT="$REVERSE_PROXY_PORT" bash "$HOME/primordia/scripts/install.sh"
 REMOTE
 
-_done "Uploaded successfully"
+_done "Uploaded ./primordia_setup.sh successfully"
 echo ""
 
 # ── Execute bootstrap with live PTY output ────────────────────────────────────
 # -n: keep curl pipe from being fed to remote PTY stdin
 # -tt: allocate PTY so the remote output streams live
 _CURRENT_STEP="run bootstrap"
-info "Running setup script..."
+echo "Running /tmp/primordia_setup.sh:"
 echo ""
 ssh -n -tt -o StrictHostKeyChecking=accept-new "${VM_HOST}" \
   "bash /tmp/primordia_setup.sh '${PROXY_PORT}'"

@@ -76,9 +76,3 @@ sudo systemctl enable primordia-proxy
 echo "  Enabled on boot."
 
 sudo systemctl restart primordia-proxy
-echo ""
-echo "Done! Useful commands:"
-echo "  sudo systemctl restart primordia-proxy  # restart proxy (also restarts prod app if down)"
-echo "  sudo systemctl stop primordia-proxy     # stop proxy"
-echo "  sudo systemctl status primordia-proxy   # proxy status"
-echo "  journalctl -u primordia-proxy -f        # tail proxy logs"

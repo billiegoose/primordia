@@ -236,3 +236,19 @@ The remote setup script now shows `✓ Updated locale to en_US.UTF-8 for better 
 ### Removed "Useful commands:" section
 
 The `journalctl`/`systemctl` tips at the end of `install.sh` have been removed — they aren't timely information for a first-run install flow.
+
+## Spinner and label polish (2026-04-13 follow-up)
+
+### ASCII spinner instead of static `▸`
+
+All `_step()` calls now start a background subprocess that cycles `\ | / -` in place at 120 ms intervals. `_done()` kills the subprocess and overwrites the line with `✓`. `_spin_kill()` is used on error paths to stop the spinner cleanly before printing diagnostics. This applies to all three scripts (`install-for-exe-dev.sh` local + remote heredoc, `install.sh`).
+
+### Label changes
+
+- `✓ Uploaded successfully` → `✓ Uploaded ./primordia_setup.sh successfully`
+- `▸ Running setup script...` → `Running /tmp/primordia_setup.sh:` (plain section header, no spinner)
+- `  ✓ git 2.43.0` → `  ✓ Using git 2.43.0`
+- `  ▸ Running ~/primordia/scripts/install.sh...` → `Running ~/primordia/scripts/install.sh:` (plain section header, no spinner)
+- `  ✓ bun 1.3.12` (fresh install) → `  ✓ Installed bun 1.3.12`
+- `  ✓ Installed systemd service and enabled on boot` → `  ✓ Installed primordia-proxy systemd service and enabled on boot`
+- `  ✓ Primordia is ready!\n\n  Primordia is running!` → `  ✓ Primordia is running!` (merged into single line, bold heading removed)
