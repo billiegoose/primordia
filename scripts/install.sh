@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # scripts/install.sh
-# Server-side Primordia setup script.  Run this inside the cloned repo on a VM.
+# Server-side Primordia setup script. Run inside the cloned repo on a VM.
 #
-# Typically invoked by scripts/install-for-exe-dev.sh, which handles VM
-# creation, port setup, and git clone before calling this script.
-# Can also be run manually after cloning:
+# Typically invoked by scripts/install-for-exe-dev.sh (which handles VM creation
+# and git clone). Can also be run manually after cloning:
 #
 #   git clone https://primordia.exe.xyz/api/git ~/primordia
 #   cd ~/primordia
@@ -12,30 +11,27 @@
 
 set -euo pipefail
 
-# ── Colours ───────────────────────────────────────────────────────────────────
+# ── Colours / formatting ──────────────────────────────────────────────────────
 
 if [[ -t 1 ]]; then
-  BOLD="\033[1m"
-  GREEN="\033[0;32m"
-  CYAN="\033[0;36m"
-  YELLOW="\033[0;33m"
-  RED="\033[0;31m"
-  DIM="\033[2m"
-  RESET="\033[0m"
+  BOLD="\033[1m"; GREEN="\033[0;32m"; CYAN="\033[0;36m"
+  YELLOW="\033[0;33m"; RED="\033[0;31m"; DIM="\033[2m"; RESET="\033[0m"
 else
   BOLD="" GREEN="" CYAN="" YELLOW="" RED="" DIM="" RESET=""
 fi
 
-info()    { echo -e "${CYAN}▸${RESET} $*"; }
-success() { echo -e "${GREEN}✓${RESET} $*"; }
-warn()    { echo -e "${YELLOW}⚠${RESET} $*"; }
+# When called from install-for-exe-dev.sh, INSTALL_PREFIX="  " for visual nesting.
+_PREFIX="${INSTALL_PREFIX:-}"
+
+info()    { echo -e "${_PREFIX}${CYAN}▸${RESET} $*"; }
+success() { echo -e "${_PREFIX}${GREEN}✓${RESET} $*"; }
+warn()    { echo -e "${_PREFIX}${YELLOW}⚠${RESET} $*"; }
 die()     { echo -e "${RED}✗ $*${RESET}" >&2; exit 1; }
-diag()    { echo -e "${DIM}  $*${RESET}"; }
+diag()    { echo -e "${_PREFIX}${DIM}  $*${RESET}"; }
 
 # ── ERR trap ──────────────────────────────────────────────────────────────────
 
 _CURRENT_STEP="(initialising)"
-
 trap '_exit_code=$?
 echo -e "\n${RED}✗ Install failed${RESET} at step: ${BOLD}${_CURRENT_STEP}${RESET} (line ${LINENO}, exit ${_exit_code})" >&2
 echo "" >&2
@@ -52,29 +48,27 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REVERSE_PROXY_PORT="${REVERSE_PROXY_PORT:-3000}"
 
-echo ""
-echo -e "${BOLD}  Primordia Setup${RESET}"
-echo -e "  Repo: ${INSTALL_DIR}"
-echo ""
+# ── Header (standalone mode only) ─────────────────────────────────────────────
 
-# ── System diagnostics ────────────────────────────────────────────────────────
-
-_CURRENT_STEP="diagnostics"
-diag "--- Server diagnostics (paste this if something goes wrong) ---"
-diag "Date:      $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-diag "Hostname:  $(hostname -f 2>/dev/null || hostname)"
-diag "OS:        $(uname -srm)"
-if [[ -f /etc/os-release ]]; then
-  diag "Distro:    $(. /etc/os-release && echo "${PRETTY_NAME:-$ID}")"
+if [[ -z "${INSTALL_PREFIX:-}" ]]; then
+  echo ""
+  echo -e "${BOLD}  Primordia Setup${RESET}"
+  echo -e "  Repo: ${INSTALL_DIR}"
+  echo ""
+  diag "--- Server diagnostics (paste this if something goes wrong) ---"
+  diag "Date:      $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+  diag "Hostname:  $(hostname -f 2>/dev/null || hostname)"
+  diag "OS:        $(uname -srm)"
+  if [[ -f /etc/os-release ]]; then
+    diag "Distro:    $(. /etc/os-release && echo "${PRETTY_NAME:-$ID}")"
+  fi
+  diag "User:      $(whoami)"
+  diag "Disk:      $(df -h "${INSTALL_DIR}" 2>/dev/null | awk 'NR==2{print $4" free of "$2}' || echo 'unknown')"
+  diag "Memory:    $(free -h 2>/dev/null | awk '/^Mem:/{print $7" free of "$2}' || echo 'unknown')"
+  diag "Repo:      $(git -C "${INSTALL_DIR}" log -1 --oneline 2>/dev/null || echo 'unknown')"
+  diag "--------------------------------------------------------------"
+  echo ""
 fi
-diag "User:      $(whoami)"
-diag "Disk:      $(df -h "${INSTALL_DIR}" 2>/dev/null | awk 'NR==2{print $4" free of "$2}' || echo 'unknown')"
-diag "Memory:    $(free -h 2>/dev/null | awk '/^Mem:/{print $7" free of "$2}' || echo 'unknown')"
-diag "Repo:      $(git -C "${INSTALL_DIR}" log -1 --oneline 2>/dev/null || echo 'unknown')"
-diag "resolv.conf: $(grep -v '^#' /etc/resolv.conf 2>/dev/null | tr '\n' ' ' || echo 'missing')"
-diag "DNS scopes:  $(resolvectl status 2>/dev/null | grep 'Current Scopes' | head -3 | tr '\n' ' ' || echo 'n/a')"
-diag "--------------------------------------------------------------"
-echo ""
 
 # ── Detect exe.dev ────────────────────────────────────────────────────────────
 
@@ -95,7 +89,13 @@ _CURRENT_STEP="install bun"
 export PATH="$HOME/.bun/bin:$PATH"
 if ! command -v bun &>/dev/null; then
   info "Installing bun..."
-  curl -fsSL https://bun.sh/install | bash
+  _bun_install_log=$(mktemp)
+  if ! curl -fsSL https://bun.sh/install | bash >"$_bun_install_log" 2>&1; then
+    cat "$_bun_install_log" >&2
+    rm -f "$_bun_install_log"
+    die "bun installation failed"
+  fi
+  rm -f "$_bun_install_log"
   export PATH="$HOME/.bun/bin:$PATH"
 fi
 success "bun $(bun --version)"
@@ -109,15 +109,12 @@ if [[ ! -f "${ENV_FILE}" ]]; then
 # Generated by Primordia installer — $(date -u '+%Y-%m-%d %H:%M:%S UTC')
 REVERSE_PROXY_PORT=${REVERSE_PROXY_PORT}
 EOF
-  success "Wrote ${ENV_FILE}"
-else
-  info "Using existing ${ENV_FILE}"
+  success "Wrote ${ENV_FILE/#$HOME/~}"
 fi
 
 # ── Wait for DNS / outbound internet ─────────────────────────────────────────
-# Fresh VMs have a known race: systemd-resolved starts before the NIC is ready,
-# leaving DNS broken for up to 120 s.  We detect this and try to fix it before
-# running bun install (which would fail with ConnectionRefused on every package).
+# Fresh VMs: systemd-resolved starts before the NIC is ready, leaving DNS
+# broken for up to 120 s. Detect and fix before running bun install.
 
 _CURRENT_STEP="wait for DNS"
 _dns_check() { getent hosts registry.npmjs.org >/dev/null 2>&1; }
@@ -125,43 +122,25 @@ _dns_check() { getent hosts registry.npmjs.org >/dev/null 2>&1; }
 if ! _dns_check; then
   info "DNS not ready — attempting to fix (systemd-resolved race on fresh VMs)..."
 
-  # 1. Use systemd-networkd-wait-online to cleanly wait for the NIC to be
-  #    fully configured before doing anything else.
   if command -v systemd-networkd-wait-online &>/dev/null; then
-    diag "Waiting for network via systemd-networkd-wait-online (up to 30 s)..."
     sudo systemd-networkd-wait-online --timeout=30 2>/dev/null || true
   fi
-
-  # 2. Flush stale cache now that the interface is up
   sudo resolvectl flush-caches 2>/dev/null || true
-
-  # 3. Restore stub-resolver symlink if missing
   if ! grep -q "127.0.0.53" /etc/resolv.conf 2>/dev/null; then
     sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf 2>/dev/null || true
   fi
-
-  # 4. Restart resolved if it still reports no scopes
   if resolvectl status 2>/dev/null | grep -q "Current Scopes: none"; then
-    diag "Current Scopes: none — restarting systemd-networkd + systemd-resolved"
     sudo systemctl restart systemd-networkd 2>/dev/null || true
     sudo systemd-networkd-wait-online --timeout=15 2>/dev/null || sleep 5
     sudo systemctl restart systemd-resolved 2>/dev/null || true
     sleep 2
   fi
 
-  # 5. Poll up to 60 s as a final safety net
   _DNS_OK=false
-  printf "${CYAN}▸${RESET} Waiting for DNS"
   for _i in $(seq 1 30); do
-    if _dns_check; then
-      _DNS_OK=true
-      break
-    fi
-    printf "."
+    if _dns_check; then _DNS_OK=true; break; fi
     sleep 2
   done
-  echo ""
-
   if [[ "$_DNS_OK" != "true" ]]; then
     warn "DNS still broken — falling back to public DNS (1.1.1.1 / 8.8.8.8)"
     echo -e "nameserver 1.1.1.1\nnameserver 8.8.8.8" | sudo tee /etc/resolv.conf >/dev/null
@@ -172,27 +151,22 @@ fi
 # ── Install dependencies ──────────────────────────────────────────────────────
 
 _CURRENT_STEP="bun install"
-info "Installing dependencies..."
+info "bun install..."
 cd "${INSTALL_DIR}"
 _bun_log=$(mktemp)
 _BUN_OK=false
 for _attempt in 1 2 3; do
   if bun install --frozen-lockfile >> "$_bun_log" 2>&1; then
-    _BUN_OK=true
-    break
+    _BUN_OK=true; break
   fi
-  if [[ $_attempt -lt 3 ]]; then
-    warn "bun install failed (attempt ${_attempt}/3) — retrying in 15s..."
-    sleep 15
-  fi
+  if [[ $_attempt -lt 3 ]]; then sleep 15; fi
 done
 if [[ "$_BUN_OK" != "true" ]]; then
   diag "npm registry: $(curl -fsS --max-time 5 https://registry.npmjs.org/ >/dev/null 2>&1 && echo 'reachable' || echo 'UNREACHABLE')"
   echo -e "${DIM}  --- bun install output ---${RESET}" >&2
   tail -60 "$_bun_log" >&2
   echo -e "${DIM}  --------------------------${RESET}" >&2
-  rm -f "$_bun_log"
-  exit 1
+  rm -f "$_bun_log"; exit 1
 fi
 rm -f "$_bun_log"
 success "Dependencies installed"
@@ -200,14 +174,13 @@ success "Dependencies installed"
 # ── Build production bundle ───────────────────────────────────────────────────
 
 _CURRENT_STEP="bun run build"
-info "Building..."
+info "bun run build..."
 _build_log=$(mktemp)
 if ! bun run build > "$_build_log" 2>&1; then
   echo -e "${DIM}  --- build output ---${RESET}" >&2
   cat "$_build_log" >&2
   echo -e "${DIM}  --------------------${RESET}" >&2
-  rm -f "$_build_log"
-  exit 1
+  rm -f "$_build_log"; exit 1
 fi
 rm -f "$_build_log"
 success "Build complete"
@@ -216,27 +189,32 @@ success "Build complete"
 
 _CURRENT_STEP="install systemd service"
 echo ""
-info "Installing systemd service..."
-bash "${INSTALL_DIR}/scripts/install-service.sh"
+info "Running ~/primordia/scripts/install-service.sh..."
+_svc_log=$(mktemp)
+if ! bash "${INSTALL_DIR}/scripts/install-service.sh" > "$_svc_log" 2>&1; then
+  cat "$_svc_log" >&2
+  rm -f "$_svc_log"
+  exit 1
+fi
+rm -f "$_svc_log"
+success "Installed systemd service and enabled on boot"
+if systemctl is-active --quiet primordia-proxy 2>/dev/null; then
+  success "Started primordia-proxy systemd service"
+fi
 
 # ── Wait for ready ────────────────────────────────────────────────────────────
-# Poll the HTTP port directly — this is more reliable than scraping logs, which
-# depend on specific log messages that may change between Next.js versions.
+# Poll HTTP directly — more reliable than scraping logs.
 
 _CURRENT_STEP="wait for service ready"
 echo ""
-info "Waiting for Primordia to be ready (up to 120 s)..."
+info "Waiting for Primordia to be ready..."
 SERVICE_READY=false
 for i in $(seq 1 60); do
   sleep 2
   if curl -sf --max-time 3 "http://localhost:${REVERSE_PROXY_PORT}/" -o /dev/null 2>/dev/null; then
     SERVICE_READY=true
-    echo ""
     success "Primordia is ready!"
     break
-  fi
-  if [[ $((i % 5)) -eq 0 ]]; then
-    info "$((i * 2))s... (journalctl -u primordia-proxy -f to watch)"
   fi
 done
 
@@ -248,9 +226,6 @@ if [[ "$SERVICE_READY" != "true" ]]; then
   echo -e "${DIM}  --- Service status ---${RESET}"
   systemctl status primordia-proxy --no-pager 2>/dev/null || true
   echo -e "${DIM}  -------------------------------------${RESET}"
-  echo ""
-  warn "If the log looks healthy, the service may just need more time."
-  warn "Check manually:  journalctl -u primordia-proxy -f"
 fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────
@@ -263,7 +238,7 @@ echo ""
 if [[ "$HOSTNAME_FQDN" == *.exe.xyz ]]; then
   echo -e "  Sign in with your exe.dev account on the login page."
   echo -e "  The first user to sign in is automatically granted the admin role."
-  echo -e "  You will be prompted for any missing API keys on first login."
+  echo -e "  You will be prompted for additional setup information when required."
 else
   echo -e "  Register a passkey on the login page."
   echo -e "  The first user to register is automatically granted the admin role."

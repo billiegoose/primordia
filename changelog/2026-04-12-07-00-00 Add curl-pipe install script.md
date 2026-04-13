@@ -185,3 +185,26 @@ Bun was installed twice: once in the remote heredoc in `install-for-exe-dev.sh` 
 ## Why
 
 The previous design required the script to be run on the server and prompted for API keys upfront. The new installer runs entirely from the user's laptop, orchestrates VM creation automatically, and defers all configuration to the app's own first-run flow.
+
+## Installer output redesigned (2026-04-13 follow-up)
+
+The installer output was redesigned to be cleaner and more readable:
+
+### Visual hierarchy
+- Local script steps use `▸` / `✓` at the top level
+- Remote bootstrap steps use `  ▸` / `  ✓` (2-space indent), visually nested under the local script
+- `▸ Running ~/primordia/scripts/install.sh...` acts as a section divider between the bootstrap phase and the install.sh phase
+- install.sh respects `INSTALL_PREFIX` env var — when set to `"  "` by the bootstrap, all output is indented for visual nesting
+
+### Changes
+- **ASCII art banner**: PRIMORDIA rendered in figlet-style ASCII art at the top
+- **Interactive prompt**: `? Choose VM name` prefix instead of plain text
+- **`✓ VM SSH ready`**: explicit success message after the SSH readiness check
+- **Upload step**: now shows `▸ Uploading /tmp/primordia_setup.sh...` / `✓ Uploaded successfully`
+- **Removed**: `--- Diagnostics ---` block from happy path (ERR trap still shows diagnostics on failure)
+- **Removed**: `VM JSON response:` dump, `Resolved hostname:` and `Proxy port:` diag lines
+- **Removed**: `--- Server diagnostics ---` block from install.sh happy path (shown only in standalone mode)
+- **Captured**: verbose output from `bun` installer, `git clone`, `bun install`, `bun run build`, and `install-service.sh` — only shown on failure
+- **Simplified**: `install-service.sh` output replaced with `✓ Installed systemd service and enabled on boot` / `✓ Started primordia-proxy systemd service`
+- **Removed**: intermediate `10s... 20s...` messages from readiness wait
+- **Fixed**: stray `ssh -n ...` command text appearing in output — caused by the curl pipe's remaining content flowing into the remote PTY's stdin. Fixed by adding `-n` to `ssh -n -tt` in the execute step.
