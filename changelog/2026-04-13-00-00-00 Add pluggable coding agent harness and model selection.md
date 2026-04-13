@@ -8,13 +8,13 @@
   - **Harness** — which coding agent to use (currently just "Claude Code")
   - **Model** — which model the harness runs on (Sonnet 4 default, Opus 4, Haiku 4)
 
-  The paperclip icon in the Attach button is now a Lucide-style stroke SVG, matching the icon set used in the navbar menu (previously a Heroicons fill SVG). A `compact` prop adjusts sizing for the floating dialog. Harness and model option labels are shown without descriptions to keep the UI terse.
+  The paperclip icon in the Attach button is now a Lucide-style stroke SVG, matching the icon set used in the navbar menu (previously a Heroicons fill SVG). A `compact` prop adjusts sizing for the floating dialog. Harness and model option labels are shown without descriptions to keep the UI terse. The outer border and background have been removed from the form element itself — parent containers are now responsible for borders, eliminating double-border issues in the floating dialog and follow-up panel. The textarea uses a visible `bg-gray-800` background with a `border-gray-700` border and amber focus ring for clear delineation.
 
 - **`components/EvolveSessionView.tsx`**: The follow-up changes panel now uses `EvolveRequestForm` directly, eliminating the previously duplicated inline form. All followup-specific state, refs, and event handlers have been removed from this component. The `onSubmit` callback posts to `/api/evolve/followup` and triggers status/streaming updates on success.
 
 - **`app/api/evolve/followup/route.ts`**: Now reads optional `harness` and `model` fields from the multipart form data and attaches them to the `LocalSession` object, so the follow-up worker runs with the user's chosen agent configuration.
 
-- **`components/EvolveForm.tsx`**: Simplified to just the page chrome (header, nav, description banner); the form itself is now `<EvolveRequestForm />`.
+- **`components/EvolveForm.tsx`**: Simplified to just the page chrome (header, nav, description banner); the form itself is now `<EvolveRequestForm />` wrapped in a `border border-gray-800 rounded-xl bg-gray-900` container (since the page has no outer container of its own).
 
 - **`components/FloatingEvolveDialog.tsx`**: Simplified to just the floating dialog chrome (title bar, dock buttons, resize handle); the form is now `<EvolveRequestForm compact />`.
 

@@ -187,7 +187,7 @@ export function EvolveRequestForm({
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        className={`flex flex-col gap-3 border rounded-xl bg-gray-900 ${compact ? "p-3 flex-1 min-h-0" : "p-4"} transition-colors ${isDragging ? "border-amber-500/70 bg-amber-950/20" : "border-gray-800"}`}
+        className={`flex flex-col gap-3 rounded-xl ${compact ? "p-3 flex-1 min-h-0" : "p-4"} transition-colors ${isDragging ? "bg-amber-950/10" : ""}`}
       >
         <textarea
           ref={textareaRef}
@@ -200,7 +200,7 @@ export function EvolveRequestForm({
           disabled={isLoading}
           // eslint-disable-next-line jsx-a11y/no-autofocus
           autoFocus={autoFocus}
-          className={`resize-none bg-transparent text-sm text-gray-100 placeholder-gray-600 outline-none leading-relaxed${compact ? " flex-1 min-h-0" : " max-h-64"}`}
+          className={`w-full resize-none bg-gray-800 text-sm text-gray-100 placeholder-gray-500 border border-gray-700 rounded-lg px-3 py-2 leading-relaxed outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50${compact ? " flex-1 min-h-0" : " max-h-64"}`}
         />
 
         {attachedFiles.length > 0 && (
