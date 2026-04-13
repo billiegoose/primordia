@@ -858,7 +858,6 @@ export default function EvolveSessionView({
   const toggleAction = useCallback((action: "accept" | "reject" | "followup") => {
     setActiveAction(prev => (prev === action ? null : action));
     setAcceptRejectError(null);
-    setFollowupError(null);
   }, []);
 
   const isTerminal =

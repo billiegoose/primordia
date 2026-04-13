@@ -48,7 +48,7 @@ export default function EvolveForm({ branch }: EvolveFormProps = {}) {
         Describe a change you want to make to this app.
       </div>
 
-      <div className="border border-gray-800 rounded-xl bg-gray-900">
+      <div className="border border-gray-800 rounded-xl bg-gray-900 p-4">
         <EvolveRequestForm />
       </div>
     </main>
