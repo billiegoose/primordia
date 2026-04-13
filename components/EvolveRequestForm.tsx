@@ -1,8 +1,8 @@
 "use client";
 
 // components/EvolveRequestForm.tsx
-// Shared evolve request form body used by both the /evolve page (EvolveForm)
-// and the floating dialog (FloatingEvolveDialog).
+// Shared evolve request form body used by the /evolve page, the floating
+// dialog, and the follow-up panel on session detail pages.
 
 import { useState, useRef, useEffect, useCallback, FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -22,11 +22,43 @@ interface EvolveRequestFormProps {
    * and tighter button sizing. Defaults to false (page layout).
    */
   compact?: boolean;
+  /** Textarea placeholder text. */
+  placeholder?: string;
+  /** Submit button label. */
+  submitLabel?: string;
+  /**
+   * When provided, called on submit instead of POSTing to /api/evolve and
+   * navigating to the new session. Should throw on error (message shown in the
+   * form). On success the form resets automatically.
+   */
+  onSubmit?: (data: {
+    request: string;
+    harness: string;
+    model: string;
+    files: File[];
+  }) => Promise<void>;
+  /**
+   * Extra disabled condition (e.g. Claude is already running in the session).
+   * When true the submit button is disabled and shows `disabledLabel`.
+   */
+  disabled?: boolean;
+  /** Label to show on the submit button when `disabled` is true. */
+  disabledLabel?: string;
+  /** Auto-focus the textarea on mount. */
+  autoFocus?: boolean;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function EvolveRequestForm({ compact = false }: EvolveRequestFormProps) {
+export function EvolveRequestForm({
+  compact = false,
+  placeholder = "Describe the change you want to make to this app…",
+  submitLabel = "Submit Request",
+  onSubmit,
+  disabled = false,
+  disabledLabel,
+  autoFocus = false,
+}: EvolveRequestFormProps) {
   const router = useRouter();
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -53,30 +85,46 @@ export function EvolveRequestForm({ compact = false }: EvolveRequestFormProps) {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     const trimmed = input.trim();
-    if (!trimmed || isLoading) return;
+    if (!trimmed || isLoading || disabled) return;
 
     setIsLoading(true);
     setError(null);
 
     try {
-      const formData = new FormData();
-      formData.append("request", trimmed);
-      formData.append("harness", selectedHarness);
-      formData.append("model", selectedModel);
-      for (const file of attachedFiles) {
-        formData.append("attachments", file);
+      if (onSubmit) {
+        await onSubmit({
+          request: trimmed,
+          harness: selectedHarness,
+          model: selectedModel,
+          files: attachedFiles,
+        });
+        // Reset form on success.
+        setInput("");
+        setAttachedFiles([]);
+        setShowAdvanced(false);
+        setSelectedHarness(DEFAULT_HARNESS);
+        setSelectedModel(DEFAULT_MODEL);
+      } else {
+        const formData = new FormData();
+        formData.append("request", trimmed);
+        formData.append("harness", selectedHarness);
+        formData.append("model", selectedModel);
+        for (const file of attachedFiles) {
+          formData.append("attachments", file);
+        }
+
+        const res = await fetch(withBasePath("/api/evolve"), { method: "POST", body: formData });
+        const data = (await res.json()) as { sessionId?: string; error?: string };
+
+        if (!res.ok) {
+          throw new Error(data.error ?? `API error: ${res.statusText}`);
+        }
+
+        router.push(`/evolve/session/${data.sessionId}`);
       }
-
-      const res = await fetch(withBasePath("/api/evolve"), { method: "POST", body: formData });
-      const data = (await res.json()) as { sessionId?: string; error?: string };
-
-      if (!res.ok) {
-        throw new Error(data.error ?? `API error: ${res.statusText}`);
-      }
-
-      router.push(`/evolve/session/${data.sessionId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
       setIsLoading(false);
     }
   }
@@ -122,6 +170,10 @@ export function EvolveRequestForm({ compact = false }: EvolveRequestFormProps) {
 
   // ── Render ────────────────────────────────────────────────────────────────
 
+  const isSubmitDisabled = isLoading || disabled || !input.trim();
+  const buttonLabel =
+    disabled && disabledLabel ? disabledLabel : isLoading ? "Submitting…" : submitLabel;
+
   return (
     <div className={`flex flex-col gap-2${compact ? " flex-1 min-h-0" : ""}`}>
       {error && (
@@ -143,9 +195,11 @@ export function EvolveRequestForm({ compact = false }: EvolveRequestFormProps) {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
-          placeholder="Describe the change you want to make to this app…"
+          placeholder={placeholder}
           rows={compact ? undefined : 4}
           disabled={isLoading}
+          // eslint-disable-next-line jsx-a11y/no-autofocus
+          autoFocus={autoFocus}
           className={`resize-none bg-transparent text-sm text-gray-100 placeholder-gray-600 outline-none leading-relaxed${compact ? " flex-1 min-h-0" : " max-h-64"}`}
         />
 
@@ -188,17 +242,18 @@ export function EvolveRequestForm({ compact = false }: EvolveRequestFormProps) {
             disabled={isLoading}
             className={`flex items-center gap-1.5 ${compact ? "px-2.5" : "px-3"} py-1.5 rounded-lg text-xs text-gray-400 hover:text-gray-200 hover:bg-gray-800 border border-gray-700 transition-colors disabled:opacity-50`}
           >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5" aria-hidden="true">
-              <path fillRule="evenodd" d="M15.621 4.379a3 3 0 0 0-4.242 0l-7 7a1.5 1.5 0 0 0 2.122 2.121l7-7a.5.5 0 0 1 .707.708l-7 7a2.5 2.5 0 0 1-3.536-3.536l7-7a4.5 4.5 0 0 1 6.364 6.364l-7 7A6.5 6.5 0 0 1 2.45 9.955l7-7a.5.5 0 1 1 .707.708l-7 7A5.5 5.5 0 0 0 10.95 18.92l7-7a3 3 0 0 0 0-4.242Z" clipRule="evenodd" />
+            {/* Lucide paperclip — matches the navbar menu icon style */}
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
             </svg>
             {compact ? "Attach" : "Attach files"}
           </button>
           <button
             type="submit"
-            disabled={isLoading || !input.trim()}
+            disabled={isSubmitDisabled}
             className={`px-4 ${compact ? "py-1.5 text-xs" : "py-2 text-sm"} rounded-lg font-medium transition-colors bg-amber-600 hover:bg-amber-500 disabled:bg-amber-900 text-white disabled:cursor-not-allowed`}
           >
-            {isLoading ? "Submitting…" : "Submit Request"}
+            {buttonLabel}
           </button>
         </div>
 

@@ -4,13 +4,13 @@
 
 - **`lib/agent-config.ts`** (new): Central registry of supported coding agent harnesses and the models each harness offers. Currently defines one harness (`claude-code`) with three model options (Sonnet 4 default, Opus 4, Haiku 4). Adding future harnesses only requires extending this file.
 
-- **`components/EvolveRequestForm.tsx`** (new): Shared form component used by both the `/evolve` page and the floating dialog. Contains the textarea, file attachments, submit button, and a collapsible **"Advanced"** section (gear icon toggle) with two dropdowns:
+- **`components/EvolveRequestForm.tsx`** (new): Shared form component used by the `/evolve` page, the floating dialog, **and the follow-up panel** on session detail pages. Accepts optional props (`onSubmit`, `placeholder`, `submitLabel`, `disabled`, `disabledLabel`, `autoFocus`) so callers can customise behaviour without duplicating markup. Contains the textarea, file attachments (drag-and-drop / paste / picker), submit button, and a collapsible **"Advanced"** section (gear icon toggle) with two dropdowns:
   - **Harness** — which coding agent to use (currently just "Claude Code")
   - **Model** — which model the harness runs on (Sonnet 4 default, Opus 4, Haiku 4)
 
-  A `compact` prop adjusts sizing for the floating dialog. Harness and model option labels are shown without descriptions to keep the UI terse.
+  The paperclip icon in the Attach button is now a Lucide-style stroke SVG, matching the icon set used in the navbar menu (previously a Heroicons fill SVG). A `compact` prop adjusts sizing for the floating dialog. Harness and model option labels are shown without descriptions to keep the UI terse.
 
-- **`components/EvolveSessionView.tsx`**: The follow-up changes panel now includes the same collapsible **"Advanced"** section, letting users choose harness and model for a follow-up pass. The panel layout mirrors the evolve form: Attach files button (left) and Submit button (right) on one row, followed by a horizontal separator and the Advanced toggle. The selected harness and model are sent to the `/api/evolve/followup` endpoint and applied to the worker spawned for that follow-up. The advanced options reset to defaults after each successful submission.
+- **`components/EvolveSessionView.tsx`**: The follow-up changes panel now uses `EvolveRequestForm` directly, eliminating the previously duplicated inline form. All followup-specific state, refs, and event handlers have been removed from this component. The `onSubmit` callback posts to `/api/evolve/followup` and triggers status/streaming updates on success.
 
 - **`app/api/evolve/followup/route.ts`**: Now reads optional `harness` and `model` fields from the multipart form data and attaches them to the `LocalSession` object, so the follow-up worker runs with the user's chosen agent configuration.
 
