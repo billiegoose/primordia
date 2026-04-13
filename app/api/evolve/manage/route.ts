@@ -286,12 +286,21 @@ async function moveMainAndPush(
   const pushResult = await runGit(pushArgs, mainRepoRoot);
   if (pushResult.code !== 0) {
     await onStep(`  ⚠ Could not push main branch: ${pushResult.stderr.trim()}\n`);
+  } else if (remoteUrl) {
+    // When pushing to an explicit URL (rather than a named remote), git does
+    // not update the local remote-tracking ref, so `git status` shows
+    // "ahead of origin/main by N commits". Sync it manually to avoid that.
+    await runGit(
+      ['update-ref', 'refs/remotes/origin/main', 'refs/heads/main'],
+      mainRepoRoot,
+    );
   }
 
   // Check out `main` in the main repo dir (~/primordia) so it tracks the
   // latest production code and doesn't stay on a detached HEAD or old branch.
+  // --force discards any local modifications so the checkout always succeeds.
   await onStep('- Checking out main in ~/primordia…\n');
-  const checkoutResult = await runGit(['checkout', 'main'], mainRepoRoot);
+  const checkoutResult = await runGit(['checkout', '--force', 'main'], mainRepoRoot);
   if (checkoutResult.code !== 0) {
     await onStep(`  ⚠ Could not checkout main in ${mainRepoRoot}: ${checkoutResult.stderr.trim()}\n`);
   }
