@@ -3,6 +3,7 @@
 ## What changed
 
 - Removed `scripts/deploy-to-exe-dev.sh`
+- Removed stale references to `deploy-to-exe-dev.sh` in `CLAUDE.md`; replaced with references to `install-for-exe-dev.sh` where appropriate
 
 ## Why
 
