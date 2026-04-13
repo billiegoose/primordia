@@ -83,6 +83,7 @@ export function EvolveRequestForm({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [selectedHarness, setSelectedHarness] = useState(DEFAULT_HARNESS);
   const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
+  const [cavemanMode, setCavemanMode] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -105,10 +106,12 @@ export function EvolveRequestForm({
     setIsLoading(true);
     setError(null);
 
+    const effectiveRequest = cavemanMode ? `/caveman\n\n${trimmed}` : trimmed;
+
     try {
       if (onSubmit) {
         await onSubmit({
-          request: trimmed,
+          request: effectiveRequest,
           harness: selectedHarness,
           model: selectedModel,
           files: attachedFiles,
@@ -119,9 +122,10 @@ export function EvolveRequestForm({
         setShowAdvanced(false);
         setSelectedHarness(DEFAULT_HARNESS);
         setSelectedModel(DEFAULT_MODEL);
+        setCavemanMode(false);
       } else {
         const formData = new FormData();
-        formData.append("request", trimmed);
+        formData.append("request", effectiveRequest);
         formData.append("harness", selectedHarness);
         formData.append("model", selectedModel);
         for (const file of attachedFiles) {
@@ -328,6 +332,21 @@ export function EvolveRequestForm({
                     <option key={m.id} value={m.id}>{m.label}</option>
                   ))}
                 </select>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-gray-400 w-14 flex-shrink-0">Caveman</span>
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={cavemanMode}
+                    onChange={(e) => setCavemanMode(e.target.checked)}
+                    disabled={isLoading}
+                    className="accent-amber-500 disabled:opacity-50"
+                  />
+                  <span className="text-xs text-gray-400">
+                    Caveman mode — cuts ~75% output tokens
+                  </span>
+                </label>
               </div>
             </div>
           )}
