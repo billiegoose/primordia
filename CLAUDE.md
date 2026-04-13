@@ -50,7 +50,7 @@ primordia/
 │   └── *.md                       ← Filename = short description; body = full what+why detail
 │
 ├── scripts/
-│   ├── deploy-to-exe-dev.sh      ← `bun run deploy-to-exe.dev <server>`: SSH deploy to <server>.exe.xyz
+│   ├── install-for-exe-dev.sh    ← Run on your local machine to provision a new exe.dev VM and install Primordia on it (curl-pipe installer)
 │   ├── install-service.sh        ← First-time install of the proxy systemd service; copies reverse-proxy.ts to ~/primordia-proxy.ts; initialises primordia.productionBranch in git config; enables and starts the service
 │   ├── update-service.sh         ← Run automatically on every blue-green prod deploy; updates ~/primordia-proxy.ts and the systemd symlink only when they changed; runs daemon-reload only if the service unit changed; runs systemctl restart primordia-proxy only if the proxy script changed
 │   ├── reverse-proxy.ts          ← HTTP reverse proxy for zero-downtime blue/green AND preview servers; listens on REVERSE_PROXY_PORT; reads production branch from git config (primordia.productionBranch), then looks up branch.{name}.port; discovers main repo from any worktree in PRIMORDIA_WORKTREES_DIR; on startup spawns the production Next.js server if not already running and tracks the process; captures prod server stdout/stderr in a 50 KB ring buffer; exposes POST /_proxy/prod/spawn (SSE, body: { branch }) — looks up port and worktree path from git config/worktree list, then spawns, health-checks, updates git config, and SIGTERMs old server; exposes GET /_proxy/prod/logs (SSE) — streams prod server log buffer + live output; watches .git/config for instant cutover; routes /preview/{sessionId} paths to session preview servers; installed to ~/primordia-proxy.ts by install-service.sh
@@ -344,7 +344,7 @@ bun run deploy-to-exe.dev <server-name>
 
 These must be set in:
 - **Local development**: `.env.local` (copy from `.env.example`)
-- **exe.dev**: `.env.local` is copied automatically by `scripts/deploy-to-exe-dev.sh`
+- **exe.dev**: `.env.local` must be created manually on the VM after running `scripts/install-for-exe-dev.sh`
 
 | Variable | Required | Description |
 |---|---|---|
