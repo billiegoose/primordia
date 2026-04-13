@@ -7,6 +7,7 @@ import { headers } from "next/headers";
 import { buildPageTitle } from "@/lib/page-title";
 import { basePath, withBasePath } from "@/lib/base-path";
 import CopyButton from "@/components/CopyButton";
+import { MessageSquare, RefreshCw, GitBranch, ArrowRight, Edit, ChevronDown } from "lucide-react";
 
 export function generateMetadata(): Metadata {
   return { title: buildPageTitle() };
@@ -16,11 +17,7 @@ export function generateMetadata(): Metadata {
 
 const FEATURES = [
   {
-    icon: (
-      <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-      </svg>
-    ),
+    icon: <MessageSquare size={28} strokeWidth={1.5} aria-hidden="true" />,
     accent: "text-blue-400",
     ring: "ring-blue-500/20",
     bg: "bg-blue-500/5",
@@ -29,13 +26,7 @@ const FEATURES = [
       "Talk to Claude — Anthropic's latest model — directly in your browser. Ask questions, explore ideas, or just have a conversation.",
   },
   {
-    icon: (
-      <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <polyline points="23 4 23 10 17 10"/>
-        <polyline points="1 20 1 14 7 14"/>
-        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-      </svg>
-    ),
+    icon: <RefreshCw size={28} strokeWidth={1.5} aria-hidden="true" />,
     accent: "text-violet-400",
     ring: "ring-violet-500/20",
     bg: "bg-violet-500/5",
@@ -44,14 +35,7 @@ const FEATURES = [
       "Don't like something? Describe the change you want in plain English. Claude Code rewrites the app and spins up a live preview — no coding required.",
   },
   {
-    icon: (
-      <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <circle cx="18" cy="18" r="3"/>
-        <circle cx="6" cy="6" r="3"/>
-        <path d="M13 6h3a2 2 0 0 1 2 2v7"/>
-        <line x1="6" y1="9" x2="6" y2="21"/>
-      </svg>
-    ),
+    icon: <GitBranch size={28} strokeWidth={1.5} aria-hidden="true" />,
     accent: "text-fuchsia-400",
     ring: "ring-fuchsia-500/20",
     bg: "bg-fuchsia-500/5",
@@ -162,28 +146,20 @@ export default async function LandingPage() {
             className="group inline-flex items-center gap-2 px-6 py-3 rounded-xl font-mono font-semibold text-sm bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-gray-300 hover:text-white transition-all hover:-translate-y-0.5"
           >
             Start chatting
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="transition-transform group-hover:translate-x-0.5" aria-hidden="true">
-              <line x1="5" y1="12" x2="19" y2="12"/>
-              <polyline points="12 5 19 12 12 19"/>
-            </svg>
+            <ArrowRight size={16} strokeWidth={2.5} className="transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
           </Link>
           <Link
             href="/evolve"
             className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-mono font-semibold text-sm bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-gray-300 hover:text-white transition-all hover:-translate-y-0.5"
           >
             Propose a change
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-            </svg>
+            <Edit size={16} strokeWidth={2} aria-hidden="true" />
           </Link>
         </div>
 
         {/* Scroll hint */}
         <div className="animate-fade-in absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 text-gray-600">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <polyline points="6 9 12 15 18 9"/>
-          </svg>
+          <ChevronDown size={16} strokeWidth={2} aria-hidden="true" />
         </div>
       </section>
 
@@ -263,10 +239,7 @@ export default async function LandingPage() {
               className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl font-mono font-semibold text-sm bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white transition-all"
             >
               Already have an instance? Open Primordia
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <line x1="5" y1="12" x2="19" y2="12"/>
-                <polyline points="12 5 19 12 12 19"/>
-              </svg>
+              <ArrowRight size={16} strokeWidth={2.5} aria-hidden="true" />
             </Link>
           </div>
         </div>

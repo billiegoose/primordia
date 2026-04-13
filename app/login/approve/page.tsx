@@ -13,6 +13,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { Check } from "lucide-react";
 import { withBasePath } from "@/lib/base-path";
 
 type Phase =
@@ -134,7 +135,7 @@ function ApprovePageInner() {
                 onClick={handleApprove}
                 className="w-full px-4 py-2.5 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white transition-colors flex items-center justify-center gap-2"
               >
-                <CheckIcon />
+                <Check size={15} strokeWidth={2} aria-hidden="true" />
                 Approve sign-in
               </button>
               <button
@@ -190,21 +191,3 @@ export default function ApprovePage() {
   );
 }
 
-function CheckIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
-  );
-}

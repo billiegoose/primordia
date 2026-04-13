@@ -10,6 +10,7 @@
 
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { EvolveRequestForm } from "./EvolveRequestForm";
+import { X } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -221,10 +222,7 @@ export function FloatingEvolveDialog({
           className="w-6 h-6 rounded flex items-center justify-center text-gray-500 hover:text-white hover:bg-gray-700 transition-colors"
           aria-label="Close"
         >
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-            <line x1="1" y1="1" x2="11" y2="11"/>
-            <line x1="11" y1="1" x2="1" y2="11"/>
-          </svg>
+          <X size={12} strokeWidth={2} aria-hidden="true" />
         </button>
       </div>
 

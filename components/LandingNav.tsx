@@ -8,6 +8,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { withBasePath } from "@/lib/base-path";
+import { X, Menu } from "lucide-react";
 
 export function LandingNav() {
   const [open, setOpen] = useState(false);
@@ -57,40 +58,9 @@ export function LandingNav() {
           onClick={() => setOpen((prev) => !prev)}
         >
           {open ? (
-            // X icon
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
+            <X size={20} strokeWidth={2} aria-hidden="true" />
           ) : (
-            // Hamburger icon
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <line x1="3" y1="6" x2="21" y2="6" />
-              <line x1="3" y1="12" x2="21" y2="12" />
-              <line x1="3" y1="18" x2="21" y2="18" />
-            </svg>
+            <Menu size={20} strokeWidth={2} aria-hidden="true" />
           )}
         </button>
       </div>

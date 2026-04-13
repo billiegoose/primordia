@@ -14,6 +14,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { SessionUser } from "../lib/hooks";
+import { MessageSquare, Edit, CloudUpload, Shield, Terminal, X, Menu, LogOut, LogIn } from "lucide-react";
 
 export type { SessionUser };
 
@@ -59,34 +60,19 @@ export function buildStandardMenuItems({
       label: "Go to chat",
       hoverColor: "hover:text-blue-400",
       href: "/chat",
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-        </svg>
-      ),
+      icon: <MessageSquare size={16} strokeWidth={2} aria-hidden="true" />,
     },
     {
       label: "Propose a change",
       hoverColor: "hover:text-amber-400",
       ...(onEvolveClick ? { onClick: onEvolveClick } : { href: "/evolve" }),
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-        </svg>
-      ),
+      icon: <Edit size={16} strokeWidth={2} aria-hidden="true" />,
     },
     {
       label: "Sync with GitHub",
       hoverColor: "hover:text-green-400",
       onClick: onSyncClick,
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <polyline points="16 16 12 12 8 16"/>
-          <line x1="12" y1="12" x2="12" y2="21"/>
-          <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
-        </svg>
-      ),
+      icon: <CloudUpload size={16} strokeWidth={2} aria-hidden="true" />,
     },
   ];
   if (isAdmin) {
@@ -94,22 +80,13 @@ export function buildStandardMenuItems({
       label: "Admin",
       hoverColor: "hover:text-purple-400",
       href: "/admin",
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-        </svg>
-      ),
+      icon: <Shield size={16} strokeWidth={2} aria-hidden="true" />,
     });
     items.push({
       label: "Shell",
       hoverColor: "hover:text-orange-400",
       href: "/oops",
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <polyline points="4 17 10 11 4 5"/>
-          <line x1="12" y1="19" x2="20" y2="19"/>
-        </svg>
-      ),
+      icon: <Terminal size={16} strokeWidth={2} aria-hidden="true" />,
     });
   }
   return items.filter((item) => !item.href || item.href !== currentPath);
@@ -143,18 +120,9 @@ export function HamburgerMenu({ sessionUser, onLogout, items, containerRef }: Ha
         className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
       >
         {menuOpen ? (
-          /* X icon */
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <line x1="18" y1="6" x2="6" y2="18"/>
-            <line x1="6" y1="6" x2="18" y2="18"/>
-          </svg>
+          <X size={20} strokeWidth={2} aria-hidden="true" />
         ) : (
-          /* Hamburger icon */
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <line x1="3" y1="6" x2="21" y2="6"/>
-            <line x1="3" y1="12" x2="21" y2="12"/>
-            <line x1="3" y1="18" x2="21" y2="18"/>
-          </svg>
+          <Menu size={20} strokeWidth={2} aria-hidden="true" />
         )}
       </button>
 
@@ -172,11 +140,7 @@ export function HamburgerMenu({ sessionUser, onLogout, items, containerRef }: Ha
                 onClick={() => { setMenuOpen(false); onLogout(); }}
                 className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-300 hover:text-red-400 hover:bg-gray-800 transition-colors"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                  <polyline points="16 17 21 12 16 7"/>
-                  <line x1="21" y1="12" x2="9" y2="12"/>
-                </svg>
+                <LogOut size={16} strokeWidth={2} aria-hidden="true" />
                 Sign out
               </button>
             </>
@@ -186,11 +150,7 @@ export function HamburgerMenu({ sessionUser, onLogout, items, containerRef }: Ha
               onClick={() => setMenuOpen(false)}
               className="flex items-center gap-3 px-4 py-3 text-sm text-gray-300 hover:text-blue-400 hover:bg-gray-800 transition-colors"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
-                <polyline points="10 17 15 12 10 7"/>
-                <line x1="15" y1="12" x2="3" y2="12"/>
-              </svg>
+              <LogIn size={16} strokeWidth={2} aria-hidden="true" />
               Log in
             </Link>
           )}
