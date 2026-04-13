@@ -2,12 +2,12 @@
 // Utility for computing standardized page <title> values.
 //
 // Production mode (NODE_ENV === "production"):
-//   Format:  {pageName} — Primordia
+//   Format:  {pageName}
 //   Landing: Primordia
 //
 // Development mode:
-//   Format:  {pageName} — Primordia — :{port} — {branch}
-//   Landing: Primordia — :{port} — {branch}
+//   Format:  {pageName} — {branch}
+//   Landing: {branch}
 
 import { execSync } from "child_process";
 
@@ -27,20 +27,19 @@ function getCurrentBranch(): string | null {
 /**
  * Returns a page title in the standardized Primordia format.
  *
- *   Production, with page name:    "{pageName} — Primordia"
+ *   Production, with page name:    "{pageName}"
  *   Production, landing page:      "Primordia"
- *   Development, with page name:   "{pageName} — Primordia — :{port} — {branch}"
- *   Development, landing page:     "Primordia — :{port} — {branch}"
+ *   Development, with page name:   "{pageName} — {branch}"
+ *   Development, landing page:     "{branch}"
  */
 export function buildPageTitle(pageName?: string): string {
   if (process.env.NODE_ENV === "production") {
-    return pageName ? `${pageName} — Primordia` : `Primordia`;
+    return pageName ?? "Primordia";
   }
 
-  // Development mode: include port and branch for diagnostics.
+  // Development mode: include branch slug for diagnostics.
   const branch = getCurrentBranch();
-  const port = process.env.PORT ?? "3000";
   return pageName
-    ? `${pageName} — Primordia — :${port} — ${branch ?? "unknown"}`
-    : `Primordia — :${port} — ${branch ?? "unknown"}`;
+    ? `${pageName} — ${branch ?? "unknown"}`
+    : (branch ?? "unknown");
 }
