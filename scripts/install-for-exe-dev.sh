@@ -7,7 +7,8 @@
 
 set -euo pipefail
 
-# Colors
+# ── Colors ────────────────────────────────────────────────────────────────────
+
 if [[ -t 1 ]] || [[ -e /dev/tty ]]; then
   BOLD="\033[1m"; GREEN="\033[0;32m"; CYAN="\033[0;36m"
   YELLOW="\033[0;33m"; RED="\033[0;31m"; DIM="\033[2m"; RESET="\033[0m"
@@ -15,36 +16,43 @@ else
   BOLD="" GREEN="" CYAN="" YELLOW="" RED="" DIM="" RESET=""
 fi
 
+# _step: print a status line (no newline) — will be replaced by _done on success
+# _done: overwrite the current line with a ✓ success message
+_step() { printf "${CYAN}▸${RESET} %s" "$*"; }
+_done() { printf "\r\033[K${GREEN}✓${RESET} %s\n" "$*"; }
 info()    { echo -e "${CYAN}▸${RESET} $*"; }
-success() { echo -e "${GREEN}✓${RESET} $*"; }
 warn()    { echo -e "${YELLOW}⚠${RESET} $*"; }
-die()     { echo -e "${RED}✗ $*${RESET}" >&2; exit 1; }
+die()     { echo -e "\n${RED}✗ $*${RESET}" >&2; exit 1; }
 
 _CURRENT_STEP="(initialising)"
 trap 'echo -e "\n${RED}✗ Install failed${RESET} at step: ${BOLD}${_CURRENT_STEP}${RESET} (line ${LINENO})" >&2
 echo -e "${DIM}  Re-run with:  bash -x install-for-exe-dev.sh  for verbose output${RESET}" >&2' ERR
 
-# Banner: ASCII art PRIMORDIA
-echo ""
-printf "${BOLD}"
-cat << 'ASCII'
- ____  ____  ___ __  __  ___  ____  ____  ___ _
-|  _ \|  _ \|_ _|  \/  |/ _ \|  _ \|  _ \|_ _/ \
-| |_) | |_) || || |\/| | | | | |_) | | | || / _ \
-|  __/|  _ < | || |  | | |_| ||  _ <| |_| |/ ___ \
-|_|   |_| \_\___|_|  |_|\___/ |_| \_\____/_/_/   \_\
-ASCII
-printf "${RESET}\n  for exe.dev\n\n"
+# ── Banner ────────────────────────────────────────────────────────────────────
 
-# Check prerequisites
+echo ""
+cat << 'ASCII'
+  ___     _                  _ _
+ | _ \_ _(_)_ __  ___ _ _ __| (_)__ _
+ |  _/ '_| | '  \/ _ \ '_/ _` | / _` |
+ |_| |_| |_|_|_|_\___/_| \__,_|_\__,_|
+
+          . _  __|_ _ || _  _
+          || |_\ | (_|||(/_|   for exe.dev
+
+ASCII
+
+# ── Check prerequisites ───────────────────────────────────────────────────────
+
 _CURRENT_STEP="check prerequisites"
 command -v ssh &>/dev/null || die "ssh is required but not found."
 
-# Test exe.dev SSH access
+# ── Test exe.dev SSH access ───────────────────────────────────────────────────
+
 _CURRENT_STEP="check exe.dev SSH"
-info "Checking exe.dev SSH access..."
+_step "Checking exe.dev SSH access..."
 SSH_TEST_OUTPUT=$(ssh -n -o BatchMode=yes -o ConnectTimeout=10 exe.dev help 2>&1) || {
-  echo ""
+  printf "\n"
   echo -e "${DIM}  ssh output: ${SSH_TEST_OUTPUT}${RESET}" >&2
   die "Cannot connect to exe.dev via SSH.
 
@@ -53,10 +61,11 @@ SSH_TEST_OUTPUT=$(ssh -n -o BatchMode=yes -o ConnectTimeout=10 exe.dev help 2>&1
     2. Add it at:       https://exe.dev/settings
     3. Test it:         ssh exe.dev help"
 }
-success "Connected to exe.dev"
+_done "Connected to exe.dev"
 echo ""
 
-# Prompt for VM name
+# ── Prompt for VM name ────────────────────────────────────────────────────────
+
 _CURRENT_STEP="prompt VM name"
 VM_NAME="primordia"
 if [[ -e /dev/tty ]]; then
@@ -64,10 +73,10 @@ if [[ -e /dev/tty ]]; then
   read -r _input </dev/tty || true
   VM_NAME="${_input:-primordia}"
 fi
-info "VM name: ${BOLD}${VM_NAME}${RESET}"
 echo ""
 
-# Create VM
+# ── Create VM ─────────────────────────────────────────────────────────────────
+
 _CURRENT_STEP="create VM"
 _SPINNER_PID=""
 printf "${CYAN}▸${RESET} Creating VM '${VM_NAME}' on exe.dev"
@@ -75,14 +84,16 @@ printf "${CYAN}▸${RESET} Creating VM '${VM_NAME}' on exe.dev"
 _SPINNER_PID=$!
 disown "$_SPINNER_PID" 2>/dev/null || true
 VM_JSON=$(ssh -n -o BatchMode=yes exe.dev new "--name=${VM_NAME}" --json 2>&1) || {
-  kill "$_SPINNER_PID" 2>/dev/null || true; wait "$_SPINNER_PID" 2>/dev/null || true; echo ""
+  kill "$_SPINNER_PID" 2>/dev/null || true; wait "$_SPINNER_PID" 2>/dev/null || true
+  printf "\n"
   echo -e "${DIM}  Raw output:\n${VM_JSON}${RESET}" >&2
   die "Failed to create VM — see raw output above."
 }
-kill "$_SPINNER_PID" 2>/dev/null || true; wait "$_SPINNER_PID" 2>/dev/null || true; echo ""
-success "VM '${VM_NAME}' created"
+kill "$_SPINNER_PID" 2>/dev/null || true; wait "$_SPINNER_PID" 2>/dev/null || true
+printf "\r\033[K${GREEN}✓${RESET} VM '${VM_NAME}' created\n"
 
-# Parse VM JSON for hostname and proxy port
+# ── Parse VM JSON ─────────────────────────────────────────────────────────────
+
 _CURRENT_STEP="parse VM JSON"
 VM_HOST="" PROXY_PORT=""
 if command -v python3 &>/dev/null; then
@@ -93,10 +104,11 @@ if [[ -z "$VM_HOST" ]] && command -v jq &>/dev/null; then
   VM_HOST=$(jq -r '.ssh_dest // empty' <<< "$VM_JSON" 2>/dev/null || true)
   PROXY_PORT=$(jq -r '.proxy_port // empty' <<< "$VM_JSON" 2>/dev/null || true)
 fi
-[[ -z "$VM_HOST" ]] && VM_HOST="${VM_NAME}.exe.xyz"
+[[ -z "$VM_HOST" ]]    && VM_HOST="${VM_NAME}.exe.xyz"
 [[ -z "$PROXY_PORT" ]] && PROXY_PORT="8000"
 
-# Wait for VM SSH to be ready (new VMs take 15-30 s to start sshd)
+# ── Wait for VM SSH ───────────────────────────────────────────────────────────
+
 _CURRENT_STEP="wait for VM SSH"
 _SSH_READY=false
 printf "${CYAN}▸${RESET} Waiting for VM SSH to be ready"
@@ -107,12 +119,11 @@ for _i in $(seq 1 30); do
   fi
   printf "."; sleep 2
 done
-echo ""
-[[ "$_SSH_READY" == "true" ]] || die "VM SSH did not become ready after 60 s"
-success "VM SSH ready"
+[[ "$_SSH_READY" == "true" ]] || { printf "\n"; die "VM SSH did not become ready after 60 s"; }
+printf "\r\033[K${GREEN}✓${RESET} VM SSH ready\n"
 echo ""
 
-# Upload bootstrap script
+# ── Upload bootstrap script ───────────────────────────────────────────────────
 # Two-step approach:
 # Step 1: upload via `ssh host 'cat > file' << HEREDOC` (no PTY).
 #         The heredoc is consumed cleanly by cat; no subprocess races with stdin.
@@ -120,36 +131,51 @@ echo ""
 #         -n prevents the curl pipe's remaining content from flowing into the
 #         remote PTY's stdin (which would echo as garbled text).
 #         -tt allocates a PTY so output streams live to the local terminal.
+
 _CURRENT_STEP="upload bootstrap"
-info "Uploading /tmp/primordia_setup.sh to ${VM_HOST}..."
+_step "Uploading setup script to ${VM_HOST}..."
 ssh -o StrictHostKeyChecking=accept-new "${VM_HOST}" \
   'cat > /tmp/primordia_setup.sh' << 'REMOTE'
 REVERSE_PROXY_PORT="${1:-8000}"
 
 set -euo pipefail
-
 export DEBIAN_FRONTEND=noninteractive
-# Install and generate locale BEFORE exporting LC_ALL (avoids bash setlocale warning)
-sudo apt-get install -y locales </dev/null >/dev/null 2>&1 || true
-sudo locale-gen en_US.UTF-8 </dev/null >/dev/null 2>&1 || true
-sudo update-locale LANG=en_US.UTF-8 </dev/null >/dev/null 2>&1 || true
-export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 LANGUAGE=en_US.UTF-8
 
+# ── Colors & helpers ──────────────────────────────────────────────────────────
+# Define colors first so we can use them for the locale success message.
 GREEN="\033[0;32m"; CYAN="\033[0;36m"; RED="\033[0;31m"; BOLD="\033[1m"; RESET="\033[0m"
-# 2-space indented formatters — visually nested under local script output
+# All remote output is indented 2 spaces to nest visually under the local steps.
+# _step: print status line (no newline) — replaced by _done on success
+# _done: overwrite current line with ✓ success message
+_step() { printf "  ${CYAN}▸${RESET} %s" "$*"; }
+_done() { printf "\r\033[K  ${GREEN}✓${RESET} %s\n" "$*"; }
 info()    { echo -e "  ${CYAN}▸${RESET} $*"; }
 success() { echo -e "  ${GREEN}✓${RESET} $*"; }
 
 _REMOTE_STEP="(initialising)"
 trap 'echo -e "\n${RED}✗ Remote setup failed${RESET} at step: ${BOLD}${_REMOTE_STEP}${RESET} (line ${LINENO})" >&2' ERR
 
+# ── Set locale ────────────────────────────────────────────────────────────────
+# Install and generate en_US.UTF-8 BEFORE exporting LC_ALL to avoid the
+# "setlocale: LC_ALL: cannot change locale" bash warning.
+_REMOTE_STEP="set locale"
+_step "Setting locale..."
+sudo apt-get install -y locales </dev/null >/dev/null 2>&1 || true
+sudo locale-gen en_US.UTF-8 </dev/null >/dev/null 2>&1 || true
+sudo update-locale LANG=en_US.UTF-8 </dev/null >/dev/null 2>&1 || true
+export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 LANGUAGE=en_US.UTF-8
+_done "Updated locale to en_US.UTF-8 for better character support"
+echo ""
+
 # ── Wait for DNS ──────────────────────────────────────────────────────────────
 # Fresh VMs have a race where systemd-resolved starts before the NIC is ready,
 # leaving DNS broken for up to 120 s.
 _REMOTE_STEP="wait for DNS"
 _dns_ready() { getent hosts registry.npmjs.org >/dev/null 2>&1; }
-if ! _dns_ready; then
-  info "Waiting for DNS resolver..."
+if _dns_ready; then
+  success "DNS is ready"
+else
+  _step "Waiting for DNS resolver..."
   sudo resolvectl flush-caches 2>/dev/null || true
   if ! grep -q "127.0.0.53" /etc/resolv.conf 2>/dev/null; then
     sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf 2>/dev/null || true
@@ -163,60 +189,64 @@ if ! _dns_ready; then
   _dns_ok=false
   for _i in $(seq 1 30); do
     if _dns_ready; then _dns_ok=true; break; fi
-    sleep 2
+    printf "."; sleep 2
   done
   if [[ "$_dns_ok" != "true" ]]; then
-    printf "nameserver 1.1.1.1\nnameserver 8.8.8.8\n" | sudo tee /etc/resolv.conf >/dev/null
+    printf "\nnameserver 1.1.1.1\nnameserver 8.8.8.8\n" | sudo tee /etc/resolv.conf >/dev/null
     sleep 1
-    _dns_ready || { echo -e "${RED}✗ DNS resolution failed — cannot continue${RESET}" >&2; exit 1; }
+    _dns_ready || { echo -e "\n${RED}✗ DNS resolution failed — cannot continue${RESET}" >&2; exit 1; }
   fi
+  _done "DNS is ready"
 fi
-success "DNS is ready"
+echo ""
 
 # ── Install git ───────────────────────────────────────────────────────────────
 _REMOTE_STEP="install git"
 if ! command -v git &>/dev/null; then
-  info "Installing git..."
+  _step "Installing git..."
   sudo apt-get update -qq </dev/null >/dev/null 2>&1
   sudo apt-get install -y git </dev/null >/dev/null 2>&1
+  _done "git $(git --version | awk '{print $3}')"
+else
+  success "git $(git --version | awk '{print $3}')"
 fi
-info "git $(git --version | awk '{print $3}')"
 git config --global user.name  "Primordia" 2>/dev/null || true
 git config --global user.email "primordia@localhost" 2>/dev/null || true
+echo ""
 
 # ── Clone Primordia ───────────────────────────────────────────────────────────
 _REMOTE_STEP="clone Primordia"
 if [[ -d "$HOME/primordia/.git" ]]; then
-  info "Pulling latest changes..."
+  _step "Updating ~/primordia..."
   _log=$(mktemp)
   git -C "$HOME/primordia" pull >"$_log" 2>&1 || { cat "$_log" >&2; rm -f "$_log"; exit 1; }
   rm -f "$_log"
-  success "Updated ~/primordia"
+  _done "Updated ~/primordia"
 else
-  info "Cloning Primordia..."
+  _step "Cloning Primordia..."
   _log=$(mktemp)
   git clone https://primordia.exe.xyz/api/git "$HOME/primordia" >"$_log" 2>&1 || { cat "$_log" >&2; rm -f "$_log"; exit 1; }
   rm -f "$_log"
-  success "Cloned to ~/primordia"
+  _done "Cloned to ~/primordia"
 fi
+echo ""
 
 # ── Run install.sh ────────────────────────────────────────────────────────────
 _REMOTE_STEP="run install.sh"
-echo ""
-echo -e "${CYAN}▸${RESET} Running ~/primordia/scripts/install.sh..."
+info "Running ~/primordia/scripts/install.sh..."
 echo ""
 export INSTALL_PREFIX="  "
 REVERSE_PROXY_PORT="$REVERSE_PROXY_PORT" bash "$HOME/primordia/scripts/install.sh"
 REMOTE
 
-success "Uploaded successfully"
+_done "Uploaded successfully"
 echo ""
 
-# Execute bootstrap with live PTY output
+# ── Execute bootstrap with live PTY output ────────────────────────────────────
 # -n: keep curl pipe from being fed to remote PTY stdin
 # -tt: allocate PTY so the remote output streams live
 _CURRENT_STEP="run bootstrap"
-info "Running /tmp/primordia_setup.sh..."
+info "Running setup script..."
 echo ""
 ssh -n -tt -o StrictHostKeyChecking=accept-new "${VM_HOST}" \
   "bash /tmp/primordia_setup.sh '${PROXY_PORT}'"

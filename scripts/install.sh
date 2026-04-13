@@ -28,6 +28,10 @@ success() { echo -e "${_PREFIX}${GREEN}✓${RESET} $*"; }
 warn()    { echo -e "${_PREFIX}${YELLOW}⚠${RESET} $*"; }
 die()     { echo -e "${RED}✗ $*${RESET}" >&2; exit 1; }
 diag()    { echo -e "${_PREFIX}${DIM}  $*${RESET}"; }
+# _step: print status line (no newline) — replaced by _done on success
+# _done: overwrite current line with ✓ success message
+_step() { printf "${_PREFIX}${CYAN}▸${RESET} %s" "$*"; }
+_done() { printf "\r\033[K${_PREFIX}${GREEN}✓${RESET} %s\n" "$*"; }
 
 # ── ERR trap ──────────────────────────────────────────────────────────────────
 
@@ -88,7 +92,7 @@ echo ""
 _CURRENT_STEP="install bun"
 export PATH="$HOME/.bun/bin:$PATH"
 if ! command -v bun &>/dev/null; then
-  info "Installing bun..."
+  _step "Installing bun..."
   _bun_install_log=$(mktemp)
   if ! curl -fsSL https://bun.sh/install | bash >"$_bun_install_log" 2>&1; then
     cat "$_bun_install_log" >&2
@@ -97,8 +101,10 @@ if ! command -v bun &>/dev/null; then
   fi
   rm -f "$_bun_install_log"
   export PATH="$HOME/.bun/bin:$PATH"
+  _done "bun $(bun --version)"
+else
+  success "bun $(bun --version)"
 fi
-success "bun $(bun --version)"
 
 # ── Write .env.local ──────────────────────────────────────────────────────────
 
@@ -151,7 +157,7 @@ fi
 # ── Install dependencies ──────────────────────────────────────────────────────
 
 _CURRENT_STEP="bun install"
-info "bun install..."
+_step "bun install..."
 cd "${INSTALL_DIR}"
 _bun_log=$(mktemp)
 _BUN_OK=false
@@ -169,35 +175,37 @@ if [[ "$_BUN_OK" != "true" ]]; then
   rm -f "$_bun_log"; exit 1
 fi
 rm -f "$_bun_log"
-success "Dependencies installed"
+_done "Dependencies installed"
 
 # ── Build production bundle ───────────────────────────────────────────────────
 
 _CURRENT_STEP="bun run build"
-info "bun run build..."
+_step "bun run build..."
 _build_log=$(mktemp)
 if ! bun run build > "$_build_log" 2>&1; then
+  printf "\n"
   echo -e "${DIM}  --- build output ---${RESET}" >&2
   cat "$_build_log" >&2
   echo -e "${DIM}  --------------------${RESET}" >&2
   rm -f "$_build_log"; exit 1
 fi
 rm -f "$_build_log"
-success "Build complete"
+_done "Build complete"
 
 # ── Install systemd service ───────────────────────────────────────────────────
 
 _CURRENT_STEP="install systemd service"
 echo ""
-info "Running ~/primordia/scripts/install-service.sh..."
+_step "Running ~/primordia/scripts/install-service.sh..."
 _svc_log=$(mktemp)
 if ! bash "${INSTALL_DIR}/scripts/install-service.sh" > "$_svc_log" 2>&1; then
+  printf "\n"
   cat "$_svc_log" >&2
   rm -f "$_svc_log"
   exit 1
 fi
 rm -f "$_svc_log"
-success "Installed systemd service and enabled on boot"
+_done "Installed systemd service and enabled on boot"
 if systemctl is-active --quiet primordia-proxy 2>/dev/null; then
   success "Started primordia-proxy systemd service"
 fi
@@ -207,18 +215,20 @@ fi
 
 _CURRENT_STEP="wait for service ready"
 echo ""
-info "Waiting for Primordia to be ready..."
+printf "${_PREFIX}${CYAN}▸${RESET} Waiting for Primordia to be ready"
 SERVICE_READY=false
 for i in $(seq 1 60); do
   sleep 2
   if curl -sf --max-time 3 "http://localhost:${REVERSE_PROXY_PORT}/" -o /dev/null 2>/dev/null; then
     SERVICE_READY=true
-    success "Primordia is ready!"
+    printf "\r\033[K${_PREFIX}${GREEN}✓${RESET} Primordia is ready!\n"
     break
   fi
+  printf "."
 done
 
 if [[ "$SERVICE_READY" != "true" ]]; then
+  printf "\n"
   warn "Service did not respond within 120 s — it may still be starting."
   echo ""
   echo -e "${DIM}  --- Last 40 lines of service log ---${RESET}"
@@ -243,9 +253,4 @@ else
   echo -e "  Register a passkey on the login page."
   echo -e "  The first user to register is automatically granted the admin role."
 fi
-echo ""
-echo -e "  Useful commands:"
-echo -e "    journalctl -u primordia-proxy -f         # tail proxy logs"
-echo -e "    sudo systemctl restart primordia-proxy   # restart"
-echo -e "    sudo systemctl stop primordia-proxy      # stop"
 echo ""

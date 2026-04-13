@@ -208,3 +208,31 @@ The installer output was redesigned to be cleaner and more readable:
 - **Simplified**: `install-service.sh` output replaced with `✓ Installed systemd service and enabled on boot` / `✓ Started primordia-proxy systemd service`
 - **Removed**: intermediate `10s... 20s...` messages from readiness wait
 - **Fixed**: stray `ssh -n ...` command text appearing in output — caused by the curl pipe's remaining content flowing into the remote PTY's stdin. Fixed by adding `-n` to `ssh -n -tt` in the execute step.
+
+## Installer polish (2026-04-13 follow-up)
+
+### In-place status line replacement
+
+Status lines now replace themselves with the success result — `▸ Checking exe.dev SSH access...` becomes `✓ Connected to exe.dev` on the same line (using `\r\033[K` + reprint). Both the local script and all remote steps (bootstrap + install.sh) use this pattern via `_step()` / `_done()` helpers.
+
+### New ASCII banner
+
+The banner at the top of the installer is now the user-specified design:
+
+```
+  ___     _                  _ _
+ | _ \_ _(_)_ __  ___ _ _ __| (_)__ _
+ |  _/ '_| | '  \/ _ \ '_/ _` | / _` |
+ |_| |_| |_|_|_|_\___/_| \__,_|_\__,_|
+
+          . _  __|_ _ || _  _
+          || |_\ | (_|||(/_|   for exe.dev
+```
+
+### Locale success message in bootstrap
+
+The remote setup script now shows `✓ Updated locale to en_US.UTF-8 for better character support` after the locale install step (which runs before any UTF-8 output), rather than silently setting the locale.
+
+### Removed "Useful commands:" section
+
+The `journalctl`/`systemctl` tips at the end of `install.sh` have been removed — they aren't timely information for a first-run install flow.
