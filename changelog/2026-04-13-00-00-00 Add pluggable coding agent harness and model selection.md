@@ -4,11 +4,15 @@
 
 - **`lib/agent-config.ts`** (new): Central registry of supported coding agent harnesses and the models each harness offers. Currently defines one harness (`claude-code`) with three model options (Sonnet 4 default, Opus 4, Haiku 4). Adding future harnesses only requires extending this file.
 
-- **`components/EvolveForm.tsx`**: Added a collapsible **"Advanced"** section (gear icon toggle) beneath the submit row. It exposes two dropdowns:
+- **`components/EvolveRequestForm.tsx`** (new): Shared form component used by both the `/evolve` page and the floating dialog. Contains the textarea, file attachments, submit button, and a collapsible **"Advanced"** section (gear icon toggle) with two dropdowns:
   - **Harness** — which coding agent to use (currently just "Claude Code")
   - **Model** — which model the harness runs on (Sonnet 4 default, Opus 4, Haiku 4)
 
-  The selected harness and model are appended to the form submission payload.
+  A `compact` prop adjusts sizing for the floating dialog. Harness and model option labels are shown without descriptions to keep the UI terse.
+
+- **`components/EvolveForm.tsx`**: Simplified to just the page chrome (header, nav, description banner); the form itself is now `<EvolveRequestForm />`.
+
+- **`components/FloatingEvolveDialog.tsx`**: Simplified to just the floating dialog chrome (title bar, dock buttons, resize handle); the form is now `<EvolveRequestForm compact />`.
 
 - **`app/api/evolve/route.ts`**: Reads `harness` and `model` fields from the multipart form data and attaches them to the `LocalSession` object passed to `startLocalEvolve`.
 
