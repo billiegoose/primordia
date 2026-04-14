@@ -80,6 +80,13 @@ export interface Role {
   createdAt: number;
 }
 
+export interface UserPreferences {
+  userId: string;
+  key: string;
+  value: string;
+  updatedAt: number;
+}
+
 export interface DbAdapter {
   // Users
   createUser(user: User): Promise<void>;
@@ -118,5 +125,9 @@ export interface DbAdapter {
   revokeRole(userId: string, roleName: string): Promise<void>;
   getUserRoles(userId: string): Promise<string[]>;
   getUsersWithRole(roleName: string): Promise<string[]>;
+
+  // User preferences (key-value store per user)
+  getUserPreferences(userId: string, keys: string[]): Promise<Record<string, string>>;
+  setUserPreferences(userId: string, prefs: Record<string, string>): Promise<void>;
 
 }

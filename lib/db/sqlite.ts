@@ -59,6 +59,13 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
       description TEXT NOT NULL DEFAULT '',
       created_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS user_preferences (
+      user_id TEXT NOT NULL REFERENCES users(id),
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, key)
+    );
     CREATE TABLE IF NOT EXISTS user_roles (
       user_id TEXT NOT NULL REFERENCES users(id),
       role_name TEXT NOT NULL REFERENCES roles(name),
@@ -371,6 +378,37 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
         .prepare("SELECT user_id FROM user_roles WHERE role_name = ?")
         .all(roleName) as Array<{ user_id: string }>;
       return rows.map((r) => r.user_id);
+    },
+
+    // ── User preferences ─────────────────────────────────────────────────────
+
+    async getUserPreferences(userId: string, keys: string[]) {
+      if (keys.length === 0) return {};
+      const placeholders = keys.map(() => '?').join(', ');
+      const rows = db
+        .prepare(`SELECT key, value FROM user_preferences WHERE user_id = ? AND key IN (${placeholders})`)
+        .all(userId, ...keys) as Array<{ key: string; value: string }>;
+      const result: Record<string, string> = {};
+      for (const r of rows) result[r.key] = r.value;
+      return result;
+    },
+    async setUserPreferences(userId: string, prefs: Record<string, string>) {
+      const now = Date.now();
+      const upsert = db.prepare(
+        `INSERT INTO user_preferences (user_id, key, value, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT (user_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+      );
+      db.exec('BEGIN');
+      try {
+        for (const [key, value] of Object.entries(prefs)) {
+          upsert.run(userId, key, value, now);
+        }
+        db.exec('COMMIT');
+      } catch (err) {
+        db.exec('ROLLBACK');
+        throw err;
+      }
     },
 
   };

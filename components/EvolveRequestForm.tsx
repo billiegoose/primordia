@@ -16,30 +16,41 @@ import {
   DEFAULT_MODEL,
 } from "../lib/agent-config";
 
-// ─── Sticky preference storage ────────────────────────────────────────────────
+// ─── Preference persistence (server-side DB via API) ─────────────────────────────
 
-const STORAGE_KEY_HARNESS = 'evolve:preferred-harness';
-const STORAGE_KEY_MODEL = 'evolve:preferred-model';
+const PREF_HARNESS = 'evolve:preferred-harness';
+const PREF_MODEL = 'evolve:preferred-model';
 
-function readStoredHarness(): string | null {
+/** Load harness+model prefs from the server. Returns null on error (e.g. not logged in). */
+async function loadPreferences(): Promise<{ harness: string | null; model: string | null }> {
   try {
-    const v = localStorage.getItem(STORAGE_KEY_HARNESS);
-    return v && HARNESS_OPTIONS.find((h) => h.id === v) ? v : null;
-  } catch { return null; }
+    const res = await fetch(`/api/user/preferences?keys=${PREF_HARNESS},${PREF_MODEL}`);
+    if (!res.ok) return { harness: null, model: null };
+    const data = (await res.json()) as { prefs?: Record<string, string> };
+    const prefs = data.prefs ?? {};
+    const harness = prefs[PREF_HARNESS] ?? null;
+    const model = prefs[PREF_MODEL] ?? null;
+    // Validate against known options so stale DB values don't break the UI.
+    const validHarness = harness && HARNESS_OPTIONS.find((h) => h.id === harness) ? harness : null;
+    const validModel =
+      validHarness && model && MODEL_OPTIONS_BY_HARNESS[validHarness]?.find((m) => m.id === model)
+        ? model
+        : validHarness
+        ? (MODEL_OPTIONS_BY_HARNESS[validHarness]?.[0]?.id ?? null)
+        : null;
+    return { harness: validHarness, model: validModel };
+  } catch {
+    return { harness: null, model: null };
+  }
 }
 
-function readStoredModel(harness: string): string | null {
-  try {
-    const v = localStorage.getItem(STORAGE_KEY_MODEL);
-    return v && MODEL_OPTIONS_BY_HARNESS[harness]?.find((m) => m.id === v) ? v : null;
-  } catch { return null; }
-}
-
-function saveStoredPreference(harness: string, model: string) {
-  try {
-    localStorage.setItem(STORAGE_KEY_HARNESS, harness);
-    localStorage.setItem(STORAGE_KEY_MODEL, model);
-  } catch { /* ignore */ }
+/** Persist harness+model prefs to the server (fire-and-forget). */
+function savePreferences(harness: string, model: string) {
+  fetch('/api/user/preferences', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prefs: { [PREF_HARNESS]: harness, [PREF_MODEL]: model } }),
+  }).catch(() => { /* ignore network errors */ });
 }
 
 // ─── ImagePreview ─────────────────────────────────────────────────────────────
@@ -130,20 +141,15 @@ export function EvolveRequestForm({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load sticky harness/model from localStorage on first render.
+  // Load sticky harness/model from the server DB on first render.
   // Skipped when explicit defaults are provided (e.g. follow-up inherits from
   // the previous agent run — the caller's value takes priority over the sticky).
   useEffect(() => {
     if (defaultHarness !== undefined) return;
-    const storedHarness = readStoredHarness();
-    if (storedHarness) {
-      setSelectedHarness(storedHarness);
-      const storedModel = readStoredModel(storedHarness);
-      setSelectedModel(storedModel ?? (MODEL_OPTIONS_BY_HARNESS[storedHarness]?.[0]?.id ?? DEFAULT_MODEL));
-    } else {
-      const storedModel = readStoredModel(DEFAULT_HARNESS);
-      if (storedModel) setSelectedModel(storedModel);
-    }
+    void loadPreferences().then(({ harness, model }) => {
+      if (harness) setSelectedHarness(harness);
+      if (model) setSelectedModel(model);
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -176,15 +182,11 @@ export function EvolveRequestForm({
           model: selectedModel,
           files: attachedFiles,
         });
-        // Reset form on success — restore to the caller-provided defaults or
-        // whatever is stored in localStorage (whichever applies to this instance).
-        const resetHarness = defaultHarness ?? readStoredHarness() ?? DEFAULT_HARNESS;
-        const resetModel = defaultModel ?? readStoredModel(resetHarness) ?? (MODEL_OPTIONS_BY_HARNESS[resetHarness]?.[0]?.id ?? DEFAULT_MODEL);
+        // Reset form on success — keep harness/model as-is (they were just
+        // saved to the DB and reflect the user's current preference).
         setInput("");
         setAttachedFiles([]);
         setShowAdvanced(false);
-        setSelectedHarness(resetHarness);
-        setSelectedModel(resetModel);
         setCavemanMode(false);
       } else {
         const formData = new FormData();
@@ -379,7 +381,7 @@ export function EvolveRequestForm({
                     const newModel = models?.[0]?.id ?? DEFAULT_MODEL;
                     setSelectedHarness(harness);
                     setSelectedModel(newModel);
-                    saveStoredPreference(harness, newModel);
+                    savePreferences(harness, newModel);
                   }}
                   disabled={isLoading}
                   className="flex-1 text-xs bg-gray-800 text-gray-200 border border-gray-700 rounded px-2 py-1.5 focus:outline-none focus:border-gray-500 disabled:opacity-50"
@@ -395,7 +397,7 @@ export function EvolveRequestForm({
                   value={selectedModel}
                   onChange={(e) => {
                     setSelectedModel(e.target.value);
-                    saveStoredPreference(selectedHarness, e.target.value);
+                    savePreferences(selectedHarness, e.target.value);
                   }}
                   disabled={isLoading}
                   className="flex-1 text-xs bg-gray-800 text-gray-200 border border-gray-700 rounded px-2 py-1.5 focus:outline-none focus:border-gray-500 disabled:opacity-50"
