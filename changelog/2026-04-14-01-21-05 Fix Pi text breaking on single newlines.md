@@ -2,20 +2,20 @@
 
 ## What changed
 
-In `components/SimpleMarkdown.tsx`, the `MarkdownContent` block renderer was inserting a `<br />` element between every line within a paragraph. This caused Pi's (Claude Code's) response text to break at each raw newline in the source, producing visually broken output like:
+Fixed two related issues in how Pi's (Claude Code agent) response text is rendered in the evolve session view.
 
-> "I can see the curl command is getting truncated with an ellipsis. The fix
-> is to increase the `max-w-xl` container width…"
+### Root cause
 
-or even breaking inline code tokens mid-token:
+Pi streams its text output as many small delta chunks. Each chunk is stored as a separate `{ type: "text" }` event in the session NDJSON log. In `EvolveSessionView.tsx`, each `text` event was rendered as its own `<MarkdownContent>` component, which wraps its output in a `<div>`. This caused every streaming chunk boundary to become a block-level break, fragmenting prose mid-sentence (sometimes even mid-word across an inline code span).
 
-> "…from `max-w-xl` (576px) to `max-w-
-> -2xl` (672px)…"
+### Fix 1 — Merge consecutive text events before rendering (`EvolveSessionView.tsx`)
 
-## Why
+Added a `mergeConsecutiveTextEvents()` helper that collapses runs of adjacent `text` events into a single event by concatenating their `content` strings. Applied this in three places:
 
-Standard Markdown spec treats a single newline within a paragraph as a **soft line break** — it should be rendered as a space, not as a `<br />`. Only a blank line (two or more consecutive newlines) creates a new paragraph. Pi's responses are written as flowing prose with occasional single newlines for source readability, and the old renderer was faithfully (but incorrectly) turning each of those newlines into a hard line break in the HTML output.
+- **`RunningClaudeSection`** — live/streaming event list
+- **`DoneClaudeSection` detail events** — the tool-call detail panel (inside `<details>`)
+- **`DoneClaudeSection` final events** — the concluding prose shown below the tool list; these are all text events so they're now joined with `.join('')` into one `<MarkdownContent>`
 
-## Fix
+### Fix 2 — Treat single newlines as spaces in `MarkdownContent` (`SimpleMarkdown.tsx`)
 
-Changed the line joiner in the mixed/plain paragraph branch of `MarkdownContent` from `<br />` to a plain `" "` space character. Bullet list items are unaffected — they already render each item in its own `<li>`. Paragraph splitting on `\n\n+` is also unchanged, so double-newline paragraph breaks still work correctly.
+Within a paragraph (text between blank lines), single `\n` characters are now joined with a space instead of a `<br />`. Standard Markdown treats a bare newline as a soft line break (space), not a hard break — only `\n\n` starts a new paragraph. This prevents accidental line breaks when a text chunk happens to start or end at a newline.

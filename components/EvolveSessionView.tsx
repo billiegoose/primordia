@@ -177,6 +177,31 @@ function summarizeToolInput(name: string, input: Record<string, unknown>, worktr
   return `${k}=${val.length > 60 ? val.slice(0, 60) + '…' : val}`;
 }
 
+/**
+ * Collapse runs of consecutive text events into single events by concatenating
+ * their content. This is necessary because Pi streams text as many small delta
+ * chunks — each stored as a separate { type: 'text' } event — which would
+ * otherwise each render as their own block element, fragmenting the prose.
+ */
+type RenderableEvent = Extract<SessionEvent, { type: 'tool_use' }>
+  | Extract<SessionEvent, { type: 'text' }>
+  | Extract<SessionEvent, { type: 'log_line' }>;
+
+function mergeConsecutiveTextEvents(events: RenderableEvent[]): RenderableEvent[] {
+  const merged: RenderableEvent[] = [];
+  for (const event of events) {
+    if (event.type === 'text') {
+      const last = merged[merged.length - 1];
+      if (last?.type === 'text') {
+        merged[merged.length - 1] = { ...last, content: last.content + event.content };
+        continue;
+      }
+    }
+    merged.push(event);
+  }
+  return merged;
+}
+
 /** Split content events into "detail" events (before/including last tool_use) and "final" events. */
 function splitClaudeEventsForDisplay(events: SessionEvent[]): {
   detailEvents: (Extract<SessionEvent, { type: 'tool_use' }> | Extract<SessionEvent, { type: 'text' }>)[];
@@ -225,7 +250,9 @@ function RunningClaudeSection({ events, label, isTypeFixSection, worktreePath, h
         </span>
       </div>
       <div className="px-4 py-3 space-y-2">
-        {events.map((event, i) => {
+        {mergeConsecutiveTextEvents(
+          events.filter((e): e is RenderableEvent => e.type === 'tool_use' || e.type === 'text' || e.type === 'log_line')
+        ).map((event, i) => {
           if (event.type === 'tool_use') {
             if (event.name.toLowerCase() === 'todowrite') {
               return (
@@ -291,7 +318,7 @@ function DoneClaudeSection({ events, label, isTypeFixSection, worktreePath, harn
             <span className="text-gray-500">🔧 {toolCallCount} tool call{toolCallCount !== 1 ? "s" : ""} made</span>
           </summary>
           <div className="px-4 py-3 border-t border-gray-800 space-y-2">
-            {detailEvents.map((event, i) => {
+            {mergeConsecutiveTextEvents(detailEvents).map((event, i) => {
               if (event.type === 'tool_use') {
                 if (event.name.toLowerCase() === 'todowrite') {
                   return (
@@ -318,7 +345,7 @@ function DoneClaudeSection({ events, label, isTypeFixSection, worktreePath, harn
       )}
       {finalEvents.length > 0 && (
         <div className="px-4 py-3">
-          {finalEvents.map((e, i) => <MarkdownContent key={i} text={e.content} />)}
+          <MarkdownContent text={finalEvents.map((e) => e.content).join('')} />
         </div>
       )}
       {metricsEvent && (
