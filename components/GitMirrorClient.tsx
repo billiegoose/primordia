@@ -159,7 +159,7 @@ export default function GitMirrorClient({ mirrorUrl: initialMirrorUrl }: GitMirr
               <p className="text-gray-400">
                 The{" "}
                 <a
-                  href="https://exe.dev/docs/integrations-github.md"
+                  href="https://exe.dev/integrations"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-blue-400 hover:text-blue-300 underline inline-flex items-center gap-1"
@@ -194,7 +194,11 @@ export default function GitMirrorClient({ mirrorUrl: initialMirrorUrl }: GitMirr
                 <input
                   type="url"
                   value={urlInput}
-                  onChange={(e) => setUrlInput(e.target.value)}
+                  onChange={(e) => {
+                    // Strip "git clone " prefix that users may accidentally paste
+                    const val = e.target.value.replace(/^git\s+clone\s+/i, "");
+                    setUrlInput(val);
+                  }}
                   placeholder="https://your-server-github.int.exe.xyz/owner/repo.git"
                   required
                   disabled={loading}
