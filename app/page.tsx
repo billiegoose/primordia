@@ -7,6 +7,7 @@ import { headers } from "next/headers";
 import { buildPageTitle } from "@/lib/page-title";
 import { basePath, withBasePath } from "@/lib/base-path";
 import CopyButton from "@/components/CopyButton";
+import { LandingNav } from "@/components/LandingNav";
 import { MessageSquare, RefreshCw, GitBranch, ArrowRight, Edit, ChevronDown } from "lucide-react";
 
 export function generateMetadata(): Metadata {
@@ -67,6 +68,7 @@ export default async function LandingPage() {
   const curlCmd = `curl -fsSL ${installUrl} | bash`;
   return (
     <div className="min-h-dvh bg-gray-950 text-gray-100 overflow-x-hidden">
+      <LandingNav />
 
       {/* ── Hero ── */}
       <section className="relative flex flex-col items-center justify-center min-h-dvh px-6 text-center overflow-hidden">
