@@ -17,6 +17,7 @@ import { EvolveRequestForm } from "./EvolveRequestForm";
 import Link from "next/link";
 import type { DiffFileSummary } from "../app/evolve/session/[id]/page";
 import { DiffFileExpander } from "./DiffFileExpander";
+import { WebPreviewPanel } from "./WebPreviewPanel";
 import type { SessionEvent } from "../lib/session-events";
 
 // ─── Metrics ──────────────────────────────────────────────────────────────────
@@ -1025,6 +1026,11 @@ export default function EvolveSessionView({
               The branch and worktree have been discarded.
             </p>
           </div>
+        )}
+
+        {/* Web preview — inline browser shown once server is running */}
+        {status === "ready" && previewUrl && proxyServerStatus === "running" && (
+          <WebPreviewPanel src={previewUrl} />
         )}
 
         {/* Preview server status + logs — shown when session is ready and proxy is managing the server */}
