@@ -210,6 +210,7 @@ export async function POST(request: Request) {
     harness,
     model,
     apiKey: decryptedApiKey,
+    userId: user.id,
   };
   // Clear the decrypted key from this scope immediately after assigning it to
   // the session object (the worker will consume it via env var then delete it).
