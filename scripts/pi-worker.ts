@@ -24,6 +24,7 @@ import {
   DefaultResourceLoader,
   createCodingTools,
   getAgentDir,
+  type ExtensionFactory,
 } from '@mariozechner/pi-coding-agent';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -31,6 +32,12 @@ import {
   appendSessionEvent,
   getSessionNdjsonPath,
 } from '../lib/session-events';
+
+// ---------------------------------------------------------------------------
+// exe.dev LLM gateway
+// ---------------------------------------------------------------------------
+
+const GATEWAY_BASE_URL = 'http://169.254.169.254/gateway/llm/anthropic';
 
 interface WorkerConfig {
   sessionId: string;
@@ -97,10 +104,11 @@ async function main(): Promise<void> {
   }, timeoutMs);
 
   try {
-    // Auth — inject the API key at runtime so it is never persisted to disk.
+    // Auth — the exe.dev LLM gateway handles authentication; the SDK requires a
+    // non-empty key value so we supply a placeholder.
     const authStorage = AuthStorage.create();
-    const apiKey = process.env.ANTHROPIC_API_KEY ?? '';
-    authStorage.setRuntimeApiKey('anthropic', apiKey);
+    authStorage.setRuntimeApiKey('anthropic', 'gateway');
+    process.stderr.write('Using exe.dev LLM gateway\n');
 
     const modelRegistry = ModelRegistry.create(authStorage);
 
@@ -119,6 +127,13 @@ async function main(): Promise<void> {
       ? SessionManager.continueRecent(worktreePath)
       : SessionManager.create(worktreePath);
 
+    // Register the gateway as the Anthropic provider base URL via an inline
+    // extension factory. extensionFactories are always applied even when
+    // noExtensions is true (which only disables file-based extension discovery).
+    const extensionFactories: ExtensionFactory[] = [
+      (pi) => { pi.registerProvider('anthropic', { baseUrl: GATEWAY_BASE_URL }); },
+    ];
+
     // Resource loader: use the worktree as cwd so pi discovers CLAUDE.md and
     // other project context, and append the working-directory line.
     const loader = new DefaultResourceLoader({
@@ -128,6 +143,7 @@ async function main(): Promise<void> {
       // Disable extension discovery — extensions are not needed for headless runs
       // and may require interactive input or write to unexpected locations.
       noExtensions: true,
+      extensionFactories,
     });
     await loader.reload();
 
