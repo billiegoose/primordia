@@ -5,7 +5,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { buildPageTitle } from "@/lib/page-title";
-import { basePath, withBasePath } from "@/lib/base-path";
+import { basePath } from "@/lib/base-path";
 import CopyButton from "@/components/CopyButton";
 import { LandingNav } from "@/components/LandingNav";
 import { MessageSquare, RefreshCw, GitBranch, ChevronDown } from "lucide-react";
@@ -89,18 +89,6 @@ export default async function LandingPage() {
                 "linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)",
               backgroundSize: "40px 40px",
             }}
-          />
-        </div>
-
-        {/* Logo */}
-        <div className="animate-fade-up relative mb-0">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={withBasePath("/primordia-logo.png")}
-            alt="Primordia logo"
-            width={180}
-            height={180}
-            className="drop-shadow-[0_0_32px_rgba(34,197,94,0.4)]"
           />
         </div>
 
