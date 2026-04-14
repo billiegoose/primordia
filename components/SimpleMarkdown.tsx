@@ -99,13 +99,14 @@ export function MarkdownContent({ text, className }: { text: string; className?:
           );
         }
 
-        // Mixed or plain paragraph — render each line, joining with spaces
-        // unless a line ends with a colon (treat as a label line).
+        // Mixed or plain paragraph — join lines with a space (standard Markdown
+        // soft-line-break behaviour: a single \n within a paragraph is not a
+        // hard line break; only blank lines create new paragraphs).
         return (
           <p key={pi} className="text-xs text-gray-300 leading-relaxed mb-3">
             {lines.map((line, li) => (
               <React.Fragment key={li}>
-                {li > 0 && <br />}
+                {li > 0 && " "}
                 <SimpleMarkdown text={line} />
               </React.Fragment>
             ))}
