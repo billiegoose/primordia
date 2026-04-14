@@ -19,6 +19,8 @@ import {
   type LocalSession,
 } from '../../../lib/evolve-sessions';
 import { getSessionUser, hasEvolvePermission } from '../../../lib/auth';
+import { getDb } from '../../../lib/db';
+import { PREF_HARNESS, PREF_MODEL } from '../../../lib/user-prefs';
 import {
   getSessionFromFilesystem,
   appendSessionEvent,
@@ -222,6 +224,15 @@ export async function POST(request: Request) {
     worktreeAlreadyCreated: true,
     initialEventAlreadyWritten: true,
   });
+
+  // Persist the chosen harness/model as the user's sticky preference.
+  // Fire-and-forget — a failure here must not break session creation.
+  void (async () => {
+    try {
+      const db = await getDb();
+      await db.setUserPreferences(user.id, { [PREF_HARNESS]: harness, [PREF_MODEL]: model });
+    } catch { /* ignore */ }
+  })();
 
   return Response.json({ sessionId });
 }

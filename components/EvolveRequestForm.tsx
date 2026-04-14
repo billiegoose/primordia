@@ -16,42 +16,7 @@ import {
   DEFAULT_MODEL,
 } from "../lib/agent-config";
 
-// ─── Preference persistence (server-side DB via API) ─────────────────────────────
 
-const PREF_HARNESS = 'evolve:preferred-harness';
-const PREF_MODEL = 'evolve:preferred-model';
-
-/** Load harness+model prefs from the server. Returns null on error (e.g. not logged in). */
-async function loadPreferences(): Promise<{ harness: string | null; model: string | null }> {
-  try {
-    const res = await fetch(`/api/user/preferences?keys=${PREF_HARNESS},${PREF_MODEL}`);
-    if (!res.ok) return { harness: null, model: null };
-    const data = (await res.json()) as { prefs?: Record<string, string> };
-    const prefs = data.prefs ?? {};
-    const harness = prefs[PREF_HARNESS] ?? null;
-    const model = prefs[PREF_MODEL] ?? null;
-    // Validate against known options so stale DB values don't break the UI.
-    const validHarness = harness && HARNESS_OPTIONS.find((h) => h.id === harness) ? harness : null;
-    const validModel =
-      validHarness && model && MODEL_OPTIONS_BY_HARNESS[validHarness]?.find((m) => m.id === model)
-        ? model
-        : validHarness
-        ? (MODEL_OPTIONS_BY_HARNESS[validHarness]?.[0]?.id ?? null)
-        : null;
-    return { harness: validHarness, model: validModel };
-  } catch {
-    return { harness: null, model: null };
-  }
-}
-
-/** Persist harness+model prefs to the server (fire-and-forget). */
-function savePreferences(harness: string, model: string) {
-  fetch('/api/user/preferences', {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prefs: { [PREF_HARNESS]: harness, [PREF_MODEL]: model } }),
-  }).catch(() => { /* ignore network errors */ });
-}
 
 // ─── ImagePreview ─────────────────────────────────────────────────────────────
 
@@ -100,16 +65,24 @@ interface EvolveRequestFormProps {
   /** Auto-focus the textarea on mount. */
   autoFocus?: boolean;
   /**
-   * Override the initial harness selection. When provided the form starts on
-   * this harness instead of reading from localStorage. Useful for follow-up
-   * forms that should default to the same harness used in the previous agent
-   * run. Changes made by the user are still persisted to localStorage.
+   * Override the initial harness/model with the session's last-used agent
+   * config. Used by the follow-up form so it inherits the previous run's
+   * harness without triggering preference persistence on submit.
+   * Takes priority over `initialHarness` / `initialModel`.
    */
   defaultHarness?: string;
-  /**
-   * Override the initial model selection. Works in tandem with defaultHarness.
-   */
+  /** Works in tandem with `defaultHarness`. */
   defaultModel?: string;
+  /**
+   * Sticky preference loaded server-side at page render time.
+   * Used by the /evolve page and the floating Propose-a-Change dialog.
+   * Ignored when `defaultHarness` is also supplied.
+   * The preference is saved back to the DB when the form is submitted
+   * (handled server-side in POST /api/evolve — not by this component).
+   */
+  initialHarness?: string;
+  /** Works in tandem with `initialHarness`. */
+  initialModel?: string;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -124,6 +97,8 @@ export function EvolveRequestForm({
   autoFocus = false,
   defaultHarness,
   defaultModel,
+  initialHarness,
+  initialModel,
 }: EvolveRequestFormProps) {
   const router = useRouter();
   const [input, setInput] = useState("");
@@ -132,26 +107,16 @@ export function EvolveRequestForm({
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  // Start with explicit defaults (e.g. from the last agent run) or fall back to
-  // the compile-time defaults; localStorage stickiness is applied in the
-  // useEffect below (only when no explicit defaultHarness was given).
-  const [selectedHarness, setSelectedHarness] = useState(defaultHarness ?? DEFAULT_HARNESS);
-  const [selectedModel, setSelectedModel] = useState(defaultModel ?? DEFAULT_MODEL);
+  // Priority: follow-up session default > server-loaded sticky preference > compile-time default.
+  const [selectedHarness, setSelectedHarness] = useState(
+    defaultHarness ?? initialHarness ?? DEFAULT_HARNESS,
+  );
+  const [selectedModel, setSelectedModel] = useState(
+    defaultModel ?? initialModel ?? DEFAULT_MODEL,
+  );
   const [cavemanMode, setCavemanMode] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Load sticky harness/model from the server DB on first render.
-  // Skipped when explicit defaults are provided (e.g. follow-up inherits from
-  // the previous agent run — the caller's value takes priority over the sticky).
-  useEffect(() => {
-    if (defaultHarness !== undefined) return;
-    void loadPreferences().then(({ harness, model }) => {
-      if (harness) setSelectedHarness(harness);
-      if (model) setSelectedModel(model);
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Auto-resize textarea height in page (non-compact) mode.
   useEffect(() => {
@@ -182,8 +147,8 @@ export function EvolveRequestForm({
           model: selectedModel,
           files: attachedFiles,
         });
-        // Reset form on success — keep harness/model as-is (they were just
-        // saved to the DB and reflect the user's current preference).
+        // Reset form on success. Keep harness/model as-is so subsequent
+        // follow-ups default to the same agent without extra clicks.
         setInput("");
         setAttachedFiles([]);
         setShowAdvanced(false);
@@ -381,7 +346,6 @@ export function EvolveRequestForm({
                     const newModel = models?.[0]?.id ?? DEFAULT_MODEL;
                     setSelectedHarness(harness);
                     setSelectedModel(newModel);
-                    savePreferences(harness, newModel);
                   }}
                   disabled={isLoading}
                   className="flex-1 text-xs bg-gray-800 text-gray-200 border border-gray-700 rounded px-2 py-1.5 focus:outline-none focus:border-gray-500 disabled:opacity-50"
@@ -397,7 +361,6 @@ export function EvolveRequestForm({
                   value={selectedModel}
                   onChange={(e) => {
                     setSelectedModel(e.target.value);
-                    savePreferences(selectedHarness, e.target.value);
                   }}
                   disabled={isLoading}
                   className="flex-1 text-xs bg-gray-800 text-gray-200 border border-gray-700 rounded px-2 py-1.5 focus:outline-none focus:border-gray-500 disabled:opacity-50"

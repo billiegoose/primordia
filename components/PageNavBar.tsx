@@ -41,11 +41,15 @@ interface PageNavBarProps {
    * When provided (even as null), skips the /api/auth/session fetch.
    */
   initialSession?: SessionUser | null;
+  /** Sticky harness preference loaded server-side. Forwarded to FloatingEvolveDialog. */
+  initialHarness?: string;
+  /** Sticky model preference loaded server-side. Forwarded to FloatingEvolveDialog. */
+  initialModel?: string;
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export function PageNavBar({ subtitle, branch, currentPage, initialSession }: PageNavBarProps) {
+export function PageNavBar({ subtitle, branch, currentPage, initialSession, initialHarness, initialModel }: PageNavBarProps) {
   const [evolveDialogOpen, setEvolveDialogOpen] = useState(false);
   const [evolveAnchorRect, setEvolveAnchorRect] = useState<DOMRect | null>(null);
   const hamburgerRef = useRef<HTMLDivElement>(null);
@@ -94,6 +98,8 @@ export function PageNavBar({ subtitle, branch, currentPage, initialSession }: Pa
         <FloatingEvolveDialog
           onClose={() => setEvolveDialogOpen(false)}
           anchorRect={evolveAnchorRect}
+          initialHarness={initialHarness}
+          initialModel={initialModel}
         />
       )}
     </header>

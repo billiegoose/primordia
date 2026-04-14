@@ -33,9 +33,11 @@ interface Message {
 interface GitContext {
   branch: string | null;
   commitMessage: string | null;
+  initialHarness?: string;
+  initialModel?: string;
 }
 
-export default function ChatInterface({ branch, commitMessage }: GitContext) {
+export default function ChatInterface({ branch, commitMessage, initialHarness, initialModel }: GitContext) {
   const [evolveDialogOpen, setEvolveDialogOpen] = useState(false);
   const [evolveAnchorRect, setEvolveAnchorRect] = useState<DOMRect | null>(null);
   const hamburgerRef = useRef<HTMLDivElement>(null);
@@ -243,6 +245,8 @@ export default function ChatInterface({ branch, commitMessage }: GitContext) {
           <FloatingEvolveDialog
             onClose={() => setEvolveDialogOpen(false)}
             anchorRect={evolveAnchorRect}
+            initialHarness={initialHarness}
+            initialModel={initialModel}
           />
         )}
       </header>

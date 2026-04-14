@@ -9,6 +9,7 @@ import type { Metadata } from "next";
 import { execSync } from "child_process";
 import * as fs from "fs";
 import { getSessionUser, hasEvolvePermission } from "@/lib/auth";
+import { getEvolvePrefs } from "@/lib/user-prefs";
 import { buildPageTitle } from "@/lib/page-title";
 import { readSessionEvents, getSessionNdjsonPath, getSessionFromFilesystem, type SessionEvent } from "@/lib/session-events";
 import EvolveSessionView from "@/components/EvolveSessionView";
@@ -120,6 +121,7 @@ export default async function EvolveSessionPage({
 }) {
   const user = await getSessionUser();
   const canEvolve = user ? await hasEvolvePermission(user.id) : false;
+  const evolvePrefs = user ? await getEvolvePrefs(user.id) : { initialHarness: undefined, initialModel: undefined };
 
   const { id } = await params;
 
@@ -166,6 +168,8 @@ export default async function EvolveSessionPage({
       canEvolve={canEvolve}
       isProduction={process.env.NODE_ENV === "production"}
       worktreePath={session.worktreePath}
+      initialHarness={evolvePrefs.initialHarness}
+      initialModel={evolvePrefs.initialModel}
     />
   );
 }

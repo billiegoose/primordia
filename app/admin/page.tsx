@@ -4,6 +4,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getSessionUser, isAdmin } from "@/lib/auth";
+import { getEvolvePrefs } from "@/lib/user-prefs";
 import { getDb } from "@/lib/db";
 import { buildPageTitle } from "@/lib/page-title";
 import AdminPermissionsClient, { type AdminUser } from "@/components/AdminPermissionsClient";
@@ -61,11 +62,14 @@ export default async function AdminPage() {
     canEvolve: evolveSet.has(u.id),
   }));
 
-  const sessionUser = { id: user.id, username: user.username, isAdmin: true };
+  const [sessionUser, evolvePrefs] = await Promise.all([
+    Promise.resolve({ id: user.id, username: user.username, isAdmin: true }),
+    getEvolvePrefs(user.id),
+  ]);
 
   return (
     <main className="flex flex-col w-full max-w-3xl mx-auto px-4 py-6 min-h-dvh">
-      <PageNavBar subtitle="Admin" currentPage="admin" initialSession={sessionUser} />
+      <PageNavBar subtitle="Admin" currentPage="admin" initialSession={sessionUser} initialHarness={evolvePrefs.initialHarness} initialModel={evolvePrefs.initialModel} />
       <AdminSubNav currentTab="users" />
 
       <section>

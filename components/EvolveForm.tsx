@@ -14,11 +14,13 @@ import { EvolveRequestForm } from "./EvolveRequestForm";
 
 interface EvolveFormProps {
   branch?: string | null;
+  initialHarness?: string;
+  initialModel?: string;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function EvolveForm({ branch }: EvolveFormProps = {}) {
+export default function EvolveForm({ branch, initialHarness, initialModel }: EvolveFormProps = {}) {
   const { sessionUser, handleLogout } = useSessionUser();
 
   return (
@@ -43,7 +45,7 @@ export default function EvolveForm({ branch }: EvolveFormProps = {}) {
       </div>
 
       <div className="border border-gray-800 rounded-xl bg-gray-900 p-4">
-        <EvolveRequestForm />
+        <EvolveRequestForm initialHarness={initialHarness} initialModel={initialModel} />
       </div>
     </main>
   );

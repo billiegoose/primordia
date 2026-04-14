@@ -9,6 +9,7 @@ import EvolveForm from "@/components/EvolveForm";
 import ForbiddenPage from "@/components/ForbiddenPage";
 import { getSessionUser, hasEvolvePermission } from "@/lib/auth";
 import { getDb } from "@/lib/db";
+import { getEvolvePrefs } from "@/lib/user-prefs";
 import { buildPageTitle } from "@/lib/page-title";
 
 export function generateMetadata(): Metadata {
@@ -36,9 +37,10 @@ export default async function EvolvePage() {
   if (!user) redirect("/login?next=/evolve");
 
   const db = await getDb();
-  const [canEvolve, allRoles] = await Promise.all([
+  const [canEvolve, allRoles, evolvePrefs] = await Promise.all([
     hasEvolvePermission(user.id),
     db.getAllRoles(),
+    getEvolvePrefs(user.id),
   ]);
 
   const adminRoleName = allRoles.find((r) => r.name === "admin")?.displayName ?? "admin";
@@ -63,5 +65,5 @@ export default async function EvolvePage() {
 
   const branch = runGit("git branch --show-current");
 
-  return <EvolveForm branch={branch ?? null} />;
+  return <EvolveForm branch={branch ?? null} initialHarness={evolvePrefs.initialHarness} initialModel={evolvePrefs.initialModel} />;
 }

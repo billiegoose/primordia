@@ -10,6 +10,7 @@ import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import ChatInterface from "@/components/ChatInterface";
 import { getSessionUser } from "@/lib/auth";
+import { getEvolvePrefs } from "@/lib/user-prefs";
 import { buildPageTitle } from "@/lib/page-title";
 
 export function generateMetadata(): Metadata {
@@ -55,13 +56,15 @@ export default async function ChatPage() {
   if (!user) redirect("/login?next=/chat");
 
   const branch = runGit("git branch --show-current");
-
   const commitMessage = getMostRecentChangelogEntry();
+  const evolvePrefs = await getEvolvePrefs(user.id);
 
   return (
     <ChatInterface
       branch={branch ?? null}
       commitMessage={commitMessage ?? null}
+      initialHarness={evolvePrefs.initialHarness}
+      initialModel={evolvePrefs.initialModel}
     />
   );
 }

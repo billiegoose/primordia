@@ -520,6 +520,10 @@ interface EvolveSessionViewProps {
   isProduction: boolean;
   /** Absolute path to the session's worktree, used to shorten file paths in tool call display. */
   worktreePath: string;
+  /** Sticky harness preference loaded server-side. Forwarded to FloatingEvolveDialog. */
+  initialHarness?: string;
+  /** Sticky model preference loaded server-side. Forwarded to FloatingEvolveDialog. */
+  initialModel?: string;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -540,6 +544,8 @@ export default function EvolveSessionView({
   canEvolve,
   isProduction,
   worktreePath,
+  initialHarness,
+  initialModel,
 }: EvolveSessionViewProps) {
   const [events, setEvents] = useState<SessionEvent[]>(initialEvents);
   const [status, setStatus] = useState(initialStatus);
@@ -957,6 +963,8 @@ export default function EvolveSessionView({
           <FloatingEvolveDialog
             onClose={() => setEvolveDialogOpen(false)}
             anchorRect={evolveAnchorRect}
+            initialHarness={initialHarness}
+            initialModel={initialModel}
           />
         )}
       </header>

@@ -7,6 +7,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { execFileSync } from "child_process";
 import { getSessionUser, isAdmin } from "@/lib/auth";
+import { getEvolvePrefs } from "@/lib/user-prefs";
 import { getDb } from "@/lib/db";
 import { buildPageTitle } from "@/lib/page-title";
 import ForbiddenPage from "@/components/ForbiddenPage";
@@ -62,11 +63,14 @@ export default async function AdminGitMirrorPage() {
   }
 
   const mirrorUrl = getMirrorRemoteUrl();
-  const sessionUser = { id: user.id, username: user.username, isAdmin: true };
+  const [sessionUser, evolvePrefs] = await Promise.all([
+    Promise.resolve({ id: user.id, username: user.username, isAdmin: true }),
+    getEvolvePrefs(user.id),
+  ]);
 
   return (
     <main className="flex flex-col w-full max-w-3xl mx-auto px-4 py-6 min-h-dvh">
-      <PageNavBar subtitle="Admin" currentPage="admin" initialSession={sessionUser} />
+      <PageNavBar subtitle="Admin" currentPage="admin" initialSession={sessionUser} initialHarness={evolvePrefs.initialHarness} initialModel={evolvePrefs.initialModel} />
       <AdminSubNav currentTab="git-mirror" />
       <GitMirrorClient mirrorUrl={mirrorUrl} />
     </main>

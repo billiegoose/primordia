@@ -17,6 +17,7 @@ import { PruneBranchesButton } from "@/components/PruneBranchesButton";
 import { CreateSessionFromBranchButton } from "@/components/CreateSessionFromBranchButton";
 import { buildPageTitle } from "@/lib/page-title";
 import { getSessionUser, isAdmin, hasEvolvePermission } from "@/lib/auth";
+import { getEvolvePrefs } from "@/lib/user-prefs";
 import { withBasePath } from "@/lib/base-path";
 
 export const dynamic = "force-dynamic";
@@ -469,9 +470,9 @@ function GitResultRow({
 
 export default async function BranchesPage() {
   const user = await getSessionUser();
-  const [userIsAdmin, userCanEvolve] = user
-    ? await Promise.all([isAdmin(user.id), hasEvolvePermission(user.id)])
-    : [false, false];
+  const [userIsAdmin, userCanEvolve, evolvePrefs] = user
+    ? await Promise.all([isAdmin(user.id), hasEvolvePermission(user.id), getEvolvePrefs(user.id)])
+    : [false, false, null];
 
   const { branches, productionBranch, diag } = await getBranchData();
   const { activeProd, pastSlots } = buildSections(branches, productionBranch);
@@ -495,6 +496,8 @@ export default async function BranchesPage() {
         subtitle="Local Branches"
         currentPage="branches"
         initialSession={sessionUser}
+        initialHarness={evolvePrefs?.initialHarness}
+        initialModel={evolvePrefs?.initialModel}
       />
 
       {/* Actions row — only shown to admins */}

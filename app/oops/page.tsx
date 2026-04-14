@@ -5,6 +5,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getSessionUser, isAdmin } from "@/lib/auth";
+import { getEvolvePrefs } from "@/lib/user-prefs";
 import { buildPageTitle } from "@/lib/page-title";
 import ForbiddenPage from "@/components/ForbiddenPage";
 import OopsShell from "@/components/OopsShell";
@@ -38,10 +39,11 @@ export default async function OopsPage() {
   }
 
   const sessionUser = { id: user.id, username: user.username, isAdmin: true };
+  const evolvePrefs = await getEvolvePrefs(user.id);
 
   return (
     <main className="flex flex-col w-full max-w-3xl mx-auto px-4 py-6 min-h-dvh">
-      <PageNavBar subtitle="Shell" currentPage="oops" initialSession={sessionUser} />
+      <PageNavBar subtitle="Shell" currentPage="oops" initialSession={sessionUser} initialHarness={evolvePrefs.initialHarness} initialModel={evolvePrefs.initialModel} />
       <OopsShell />
     </main>
   );

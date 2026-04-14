@@ -28,10 +28,16 @@ interface DragOrigin {
 export function FloatingEvolveDialog({
   onClose,
   anchorRect,
+  initialHarness,
+  initialModel,
 }: {
   onClose: () => void;
   /** When provided, the dialog opens with its top-right corner aligned to the bottom-right of this rect. */
   anchorRect?: DOMRect | null;
+  /** Sticky harness preference loaded server-side. */
+  initialHarness?: string;
+  /** Sticky model preference loaded server-side. */
+  initialModel?: string;
 }) {
   const [isDragging, setIsDragging] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -228,7 +234,7 @@ export function FloatingEvolveDialog({
 
       {/* Form body — flex-1 so it fills available height when dialog is resized */}
       <div className="p-3 flex flex-col flex-1 overflow-y-auto min-h-0">
-        <EvolveRequestForm compact />
+        <EvolveRequestForm compact initialHarness={initialHarness} initialModel={initialModel} />
       </div>
 
       {/* Bottom resize handle — drag up/down to resize the dialog vertically */}

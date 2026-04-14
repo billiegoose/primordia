@@ -13,6 +13,7 @@ import { ChangelogEntryDetails } from "@/components/ChangelogEntryDetails";
 import { PageNavBar } from "@/components/PageNavBar";
 import { buildPageTitle } from "@/lib/page-title";
 import { getSessionUser, isAdmin } from "@/lib/auth";
+import { getEvolvePrefs } from "@/lib/user-prefs";
 
 export function generateMetadata(): Metadata {
   return {
@@ -87,14 +88,17 @@ export default async function ChangelogPage() {
     Promise.resolve(loadSummaries()),
     getSessionUser(),
   ]);
-  const sessionUser = user
-    ? { id: user.id, username: user.username, isAdmin: await isAdmin(user.id) }
-    : null;
+  const [sessionUser, evolvePrefs] = user
+    ? await Promise.all([
+        isAdmin(user.id).then((admin) => ({ id: user.id, username: user.username, isAdmin: admin })),
+        getEvolvePrefs(user.id),
+      ])
+    : [null, null];
 
   return (
     <main className="flex flex-col w-full max-w-3xl mx-auto px-4 py-6 min-h-screen">
       {/* Header — session resolved server-side so the hamburger is instant */}
-      <PageNavBar subtitle="Changelog" currentPage="changelog" initialSession={sessionUser} />
+      <PageNavBar subtitle="Changelog" currentPage="changelog" initialSession={sessionUser} initialHarness={evolvePrefs?.initialHarness} initialModel={evolvePrefs?.initialModel} />
 
       {/* Entry list */}
       {entries.length === 0 ? (

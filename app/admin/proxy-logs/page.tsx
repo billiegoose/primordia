@@ -6,6 +6,7 @@ import type { Metadata } from "next";
 import { spawnSync } from "child_process";
 import { redirect } from "next/navigation";
 import { getSessionUser, isAdmin } from "@/lib/auth";
+import { getEvolvePrefs } from "@/lib/user-prefs";
 import { getDb } from "@/lib/db";
 import { buildPageTitle } from "@/lib/page-title";
 import ForbiddenPage from "@/components/ForbiddenPage";
@@ -46,7 +47,10 @@ export default async function AdminProxyLogsPage() {
     );
   }
 
-  const sessionUser = { id: user.id, username: user.username, isAdmin: true };
+  const [sessionUser, evolvePrefs] = await Promise.all([
+    Promise.resolve({ id: user.id, username: user.username, isAdmin: true }),
+    getEvolvePrefs(user.id),
+  ]);
 
   // Fetch the first batch of log lines server-side so the page is readable
   // even when client-side JavaScript hasn't connected yet (e.g. broken HMR).
@@ -60,7 +64,7 @@ export default async function AdminProxyLogsPage() {
 
   return (
     <main className="flex flex-col w-full max-w-3xl mx-auto px-4 py-6 min-h-dvh">
-      <PageNavBar subtitle="Admin" currentPage="admin" initialSession={sessionUser} />
+      <PageNavBar subtitle="Admin" currentPage="admin" initialSession={sessionUser} initialHarness={evolvePrefs.initialHarness} initialModel={evolvePrefs.initialModel} />
       <AdminSubNav currentTab="proxy-logs" />
       <ServerLogsClient apiPath="/api/admin/proxy-logs" initialOutput={initialLogs} />
     </main>
