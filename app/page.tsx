@@ -1,4 +1,4 @@
-// app/page.tsx - Fancy landing page for Primordia
+// app/page.tsx — Fancy landing page for Primordia
 // Server component. The actual chat lives at /chat.
 
 import type { Metadata } from "next";
@@ -24,7 +24,7 @@ const FEATURES = [
     bg: "bg-blue-500/5",
     title: "AI Chat",
     description:
-      "Talk to Claude - Anthropic's latest model - directly in your browser. Ask questions, explore ideas, or just have a conversation.",
+      "Talk to Claude — Anthropic's latest model — directly in your browser. Ask questions, explore ideas, or just have a conversation.",
   },
   {
     icon: <RefreshCw size={28} strokeWidth={1.5} aria-hidden="true" />,
@@ -33,7 +33,7 @@ const FEATURES = [
     bg: "bg-violet-500/5",
     title: "Self-Evolving",
     description:
-      "Don't like something? Describe the change you want in plain English. Claude Code rewrites the app and spins up a live preview - no coding required.",
+      "Don't like something? Describe the change you want in plain English. Claude Code rewrites the app and spins up a live preview — no coding required.",
   },
   {
     icon: <GitBranch size={28} strokeWidth={1.5} aria-hidden="true" />,
@@ -42,7 +42,7 @@ const FEATURES = [
     bg: "bg-fuchsia-500/5",
     title: "Open Source",
     description:
-      "Fork the repo, deploy to exe.dev in minutes, and own your instance entirely. Every change is tracked in git - full history, full control.",
+      "Fork the repo, deploy to exe.dev in minutes, and own your instance entirely. Every change is tracked in git — full history, full control.",
   },
 ];
 
@@ -51,8 +51,8 @@ const FEATURES = [
 const STEPS = [
   { n: "01", label: "Chat", detail: "Ask Primordia anything using the built-in AI chat." },
   { n: "02", label: "Propose", detail: "See something you'd like to change? Open the menu and propose it." },
-  { n: "03", label: "Review", detail: "Claude Code writes the code and spins up a live preview - inspect it in your browser." },
-  { n: "04", label: "Accept", detail: "Accept the change, and your app updates itself - instantly." },
+  { n: "03", label: "Review", detail: "Claude Code writes the code and spins up a live preview — inspect it in your browser." },
+  { n: "04", label: "Accept", detail: "Accept the change, and your app updates itself — instantly." },
 ];
 
 // ── Page ─────────────────────────────────────────────────────────────────────
@@ -75,11 +75,11 @@ export default async function LandingPage() {
 
         {/* Animated gradient blobs */}
         <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
-          {/* Blob A - blue/indigo, top-left */}
+          {/* Blob A — blue/indigo, top-left */}
           <div className="animate-blob-a absolute -top-32 -left-32 w-[600px] h-[600px] rounded-full bg-blue-600/15 blur-3xl" />
-          {/* Blob B - violet/purple, top-right */}
+          {/* Blob B — violet/purple, top-right */}
           <div className="animate-blob-b absolute -top-16 -right-40 w-[500px] h-[500px] rounded-full bg-violet-600/15 blur-3xl" />
-          {/* Blob C - fuchsia/pink, bottom-center */}
+          {/* Blob C — fuchsia/pink, bottom-center */}
           <div className="animate-blob-c absolute bottom-0 left-1/2 -translate-x-1/2 w-[700px] h-[400px] rounded-full bg-fuchsia-700/10 blur-3xl" />
           {/* Subtle grid overlay */}
           <div
@@ -103,7 +103,7 @@ export default async function LandingPage() {
           The web application that writes itself.
         </p>
 
-        {/* Primary CTA - curl install command */}
+        {/* Primary CTA — curl install command */}
         <div className="animate-fade-up-4 relative w-full max-w-2xl">
           <p className="text-xs font-mono text-gray-500 mb-2 text-center uppercase tracking-widest">
             Deploy your own instance
@@ -137,7 +137,7 @@ export default async function LandingPage() {
             What is Primordia?
           </h2>
           <p className="text-gray-400 max-w-2xl mx-auto leading-relaxed">
-            It&apos;s the app that builds itself. You interact with it, you shape it -
+            It&apos;s the app that builds itself. You interact with it, you shape it —
             and it evolves to become whatever you need.
           </p>
         </div>
@@ -209,7 +209,7 @@ export default async function LandingPage() {
       {/* ── Footer ── */}
       <footer className="border-t border-white/5 px-6 py-10">
         <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-gray-500 font-mono">
-          <span>Primordia - the self-modifying web application</span>
+          <span>Primordia — the self-modifying web application</span>
           <div className="flex items-center gap-6">
             <Link href="/chat" className="hover:text-gray-300 transition-colors">Chat</Link>
             <Link href="/evolve" className="hover:text-gray-300 transition-colors">Evolve</Link>
