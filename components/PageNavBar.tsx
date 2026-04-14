@@ -18,7 +18,6 @@
 
 import { useState, useEffect, useRef } from "react";
 import { NavHeader } from "./NavHeader";
-import { GitSyncDialog } from "./GitSyncDialog";
 import { FloatingEvolveDialog } from "./FloatingEvolveDialog";
 import { HamburgerMenu, buildStandardMenuItems } from "./HamburgerMenu";
 import type { SessionUser } from "../lib/hooks";
@@ -47,7 +46,6 @@ interface PageNavBarProps {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function PageNavBar({ subtitle, branch, currentPage, initialSession }: PageNavBarProps) {
-  const [syncDialogOpen, setSyncDialogOpen] = useState(false);
   const [evolveDialogOpen, setEvolveDialogOpen] = useState(false);
   const [evolveAnchorRect, setEvolveAnchorRect] = useState<DOMRect | null>(null);
   const hamburgerRef = useRef<HTMLDivElement>(null);
@@ -82,7 +80,6 @@ export function PageNavBar({ subtitle, branch, currentPage, initialSession }: Pa
           onLogout={handleLogout}
           containerRef={hamburgerRef}
           items={buildStandardMenuItems({
-            onSyncClick: () => setSyncDialogOpen(true),
             onEvolveClick: () => {
               setEvolveAnchorRect(hamburgerRef.current?.getBoundingClientRect() ?? null);
               setEvolveDialogOpen(true);
@@ -93,10 +90,6 @@ export function PageNavBar({ subtitle, branch, currentPage, initialSession }: Pa
         />
       )}
 
-      {/* Git sync confirmation dialog (portal-style — rendered outside the menu div) */}
-      {syncDialogOpen && (
-        <GitSyncDialog onClose={() => setSyncDialogOpen(false)} />
-      )}
       {evolveDialogOpen && (
         <FloatingEvolveDialog
           onClose={() => setEvolveDialogOpen(false)}

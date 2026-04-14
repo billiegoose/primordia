@@ -8,7 +8,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { GitBranch } from "lucide-react";
 import { MarkdownContent } from "./SimpleMarkdown";
 import { NavHeader } from "./NavHeader";
-import { GitSyncDialog } from "./GitSyncDialog";
+
 import { FloatingEvolveDialog } from "./FloatingEvolveDialog";
 import { HamburgerMenu, buildStandardMenuItems } from "./HamburgerMenu";
 import { useSessionUser } from "../lib/hooks";
@@ -546,7 +546,7 @@ export default function EvolveSessionView({
   const [proxyServerStatus, setProxyServerStatus] = useState<'starting' | 'running' | 'stopped' | 'unknown'>('unknown');
   /** Accumulated log lines from the proxy's server log SSE stream. */
   const [serverLogs, setServerLogs] = useState<string>('');
-  const [syncDialogOpen, setSyncDialogOpen] = useState(false);
+
   const [evolveDialogOpen, setEvolveDialogOpen] = useState(false);
   const [evolveAnchorRect, setEvolveAnchorRect] = useState<DOMRect | null>(null);
   const hamburgerRef = useRef<HTMLDivElement>(null);
@@ -930,7 +930,6 @@ export default function EvolveSessionView({
           onLogout={handleLogout}
           containerRef={hamburgerRef}
           items={buildStandardMenuItems({
-            onSyncClick: () => setSyncDialogOpen(true),
             onEvolveClick: () => {
               setEvolveAnchorRect(hamburgerRef.current?.getBoundingClientRect() ?? null);
               setEvolveDialogOpen(true);
@@ -938,9 +937,6 @@ export default function EvolveSessionView({
             isAdmin: sessionUser?.isAdmin ?? false,
           })}
         />
-        {syncDialogOpen && (
-          <GitSyncDialog onClose={() => setSyncDialogOpen(false)} />
-        )}
         {evolveDialogOpen && (
           <FloatingEvolveDialog
             onClose={() => setEvolveDialogOpen(false)}

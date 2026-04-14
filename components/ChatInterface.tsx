@@ -4,16 +4,14 @@
 // The main chat UI for Primordia. Streams responses from Claude via /api/chat.
 //
 // The header contains a hamburger (☰) menu button. Tapping it opens a dropdown
-// with two actions:
+// with actions:
 //   • "Propose a change" — links to /evolve, the dedicated change-request form.
-//   • "Sync with GitHub" — triggers a git pull+push dialog (GitSyncDialog).
 //
 // The accept/reject bar for previews lives in AcceptRejectBar (rendered in the
 // root layout below the fold — scroll down to reveal it).
 
 import { useState, useRef, useEffect, FormEvent } from "react";
 import { SimpleMarkdown } from "./SimpleMarkdown";
-import { GitSyncDialog } from "./GitSyncDialog";
 import { FloatingEvolveDialog } from "./FloatingEvolveDialog";
 import { NavHeader } from "./NavHeader";
 import { HamburgerMenu, buildStandardMenuItems } from "./HamburgerMenu";
@@ -37,7 +35,6 @@ interface GitContext {
 }
 
 export default function ChatInterface({ branch, commitMessage }: GitContext) {
-  const [syncDialogOpen, setSyncDialogOpen] = useState(false);
   const [evolveDialogOpen, setEvolveDialogOpen] = useState(false);
   const [evolveAnchorRect, setEvolveAnchorRect] = useState<DOMRect | null>(null);
   const hamburgerRef = useRef<HTMLDivElement>(null);
@@ -231,7 +228,6 @@ export default function ChatInterface({ branch, commitMessage }: GitContext) {
           onLogout={handleLogout}
           containerRef={hamburgerRef}
           items={buildStandardMenuItems({
-            onSyncClick: () => setSyncDialogOpen(true),
             onEvolveClick: () => {
               setEvolveAnchorRect(hamburgerRef.current?.getBoundingClientRect() ?? null);
               setEvolveDialogOpen(true);
@@ -240,9 +236,6 @@ export default function ChatInterface({ branch, commitMessage }: GitContext) {
             currentPath: "/chat",
           })}
         />
-        {syncDialogOpen && (
-          <GitSyncDialog onClose={() => setSyncDialogOpen(false)} />
-        )}
         {evolveDialogOpen && (
           <FloatingEvolveDialog
             onClose={() => setEvolveDialogOpen(false)}
@@ -318,4 +311,4 @@ function MessageBubble({ message }: { message: Message }) {
   );
 }
 
-// GitSyncDialog is imported from ./GitSyncDialog above.
+

@@ -5,7 +5,6 @@
 // Rendered at /evolve — a dedicated page, separate from the main chat interface.
 
 import { useState } from "react";
-import { GitSyncDialog } from "./GitSyncDialog";
 import { NavHeader } from "./NavHeader";
 import { HamburgerMenu, buildStandardMenuItems } from "./HamburgerMenu";
 import { useSessionUser } from "../lib/hooks";
@@ -20,7 +19,6 @@ interface EvolveFormProps {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function EvolveForm({ branch }: EvolveFormProps = {}) {
-  const [syncDialogOpen, setSyncDialogOpen] = useState(false);
   const { sessionUser, handleLogout } = useSessionUser();
 
   return (
@@ -32,14 +30,10 @@ export default function EvolveForm({ branch }: EvolveFormProps = {}) {
           sessionUser={sessionUser}
           onLogout={handleLogout}
           items={buildStandardMenuItems({
-            onSyncClick: () => setSyncDialogOpen(true),
             isAdmin: sessionUser?.isAdmin ?? false,
             currentPath: "/evolve",
           })}
         />
-        {syncDialogOpen && (
-          <GitSyncDialog onClose={() => setSyncDialogOpen(false)} />
-        )}
       </header>
 
       {/* Description banner */}

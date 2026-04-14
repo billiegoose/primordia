@@ -91,8 +91,10 @@ primordia/
 │   │   │   └── page.tsx           ← Proxy logs: pre-fetches first 100 journalctl lines server-side (Linux only; skipped on macOS); delegates live tail to ServerLogsClient; admin only
 │   │   ├── rollback/
 │   │   │   └── page.tsx           ← Deep rollback: lists previous prod slots from primordia.productionHistory; admin only
-│   │   └── server-health/
-│   │       └── page.tsx           ← Server health: disk/memory usage and oldest non-prod worktree cleanup; admin only
+│   │   ├── server-health/
+│   │   │   └── page.tsx           ← Server health: disk/memory usage and oldest non-prod worktree cleanup; admin only
+│   │   └── git-mirror/
+│   │       └── page.tsx           ← Git Mirror: shows current mirror remote status and SSH instructions for adding a mirror remote; admin only
 │   ├── oops/
 │   │   └── page.tsx               ← Owner-only mobile shell: run occasional system commands without SSH
 │   ├── evolve/
@@ -112,8 +114,6 @@ primordia/
 │       │   └── route.ts           ← Streams Claude responses via SSE
 │       ├── check-keys/
 │       │   └── route.ts           ← Returns list of missing required env vars (called on page load)
-│       ├── git-sync/
-│       │   └── route.ts           ← POST pull + push the current branch (used by GitSyncDialog)
 │       ├── rollback/
 │       │   └── route.ts           ← GET hasPrevious check; POST zero-downtime swap to previous slot via lsof kill + bun start health-check (admin only)
 │       ├── admin/
@@ -177,14 +177,14 @@ primordia/
 │   ├── AdminPermissionsClient.tsx ← Client component: grant/revoke 'can_evolve' role per user (used by /admin)
 │   ├── AdminRollbackClient.tsx    ← Client component: deep rollback UI; lists previous production slots from primordia.productionHistory with roll-back buttons (used by /admin/rollback)
 │   ├── AdminServerHealthClient.tsx ← Client component: disk/memory usage bars and oldest non-prod worktree delete button (used by /admin/server-health)
-│   ├── AdminSubNav.tsx            ← Tab subnav for admin pages: "Manage Users" (/admin), "Server Logs" (/admin/logs), "Proxy Logs" (/admin/proxy-logs), "Rollback" (/admin/rollback), "Server Health" (/admin/server-health)
+│   ├── AdminSubNav.tsx            ← Tab subnav for admin pages: "Manage Users" (/admin), "Server Logs" (/admin/logs), "Proxy Logs" (/admin/proxy-logs), "Rollback" (/admin/rollback), "Server Health" (/admin/server-health), "Git Mirror" (/admin/git-mirror)
 │   ├── ForbiddenPage.tsx          ← Server component: 403 access-denied page with page description, required/met/unmet conditions, and how-to-fix
 │   ├── ChatInterface.tsx          ← Main chat UI (chat only); hamburger menu "Propose a change" opens FloatingEvolveDialog
 │   ├── ChangelogEntryDetails.tsx  ← Client component: single changelog <details> widget; lazy-loads body from /api/changelog on first open
 │   ├── EvolveForm.tsx             ← "Submit a request" form; POSTs then redirects to /evolve/session/{id}; used by /evolve page
 │   ├── FloatingEvolveDialog.tsx   ← Draggable, dockable floating popup with the evolve form; opened from hamburger "Propose a change" on any page
 │   ├── EvolveSessionView.tsx      ← Client component for session tracking page; streams live progress via SSE
-│   ├── GitSyncDialog.tsx          ← Modal: git pull + push via /api/git-sync (wraps StreamingDialog)
+│   ├── GitMirrorClient.tsx        ← Client component: Git Mirror admin panel; shows mirror remote status and SSH instructions
 │   ├── HamburgerMenu.tsx          ← Reusable hamburger button + dropdown; used by ChatInterface, EvolveForm, EvolveSessionView, PageNavBar
 │   ├── LandingNav.tsx             ← Landing page navbar with mobile hamburger collapse
 │   ├── OopsShell.tsx              ← Client component: mobile-friendly shell for /oops; streams command output via SSE
@@ -195,7 +195,7 @@ primordia/
 │   ├── PruneBranchesButton.tsx    ← Client-side trigger button for PruneBranchesDialog
 │   ├── PruneBranchesDialog.tsx    ← Thin wrapper around StreamingDialog for delete-merged-branches action
 │   ├── SimpleMarkdown.tsx         ← Minimal markdown renderer (bold, links, inline code, code blocks)
-│   └── StreamingDialog.tsx        ← Generic modal for SSE-streaming operations (git-sync, prune-branches, etc.)
+│   └── StreamingDialog.tsx        ← Generic modal for SSE-streaming operations (prune-branches, etc.)
 ```
 
 ### Data Flow
@@ -349,8 +349,6 @@ These must be set in:
 | Variable | Required | Description |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Required for evolve | Required for the evolve pipeline (`@anthropic-ai/claude-agent-sdk`) in **all environments**. Not required for chat on exe.dev — the built-in LLM gateway is used instead. Required for chat outside exe.dev. |
-| `GITHUB_TOKEN` | No | Personal access token (repo scope) — enables authenticated git pull/push in GitSyncDialog; falls back to `origin` remote if unset |
-| `GITHUB_REPO` | No | `owner/repo` slug (e.g. `primordia-org/primordia`) — used alongside `GITHUB_TOKEN` to build the authenticated remote URL |
 | `REVERSE_PROXY_PORT` | Yes | Port the reverse proxy listens on (e.g. `3000`). Blue/green accepts and rollbacks use zero-downtime cutover via the proxy. |
 | `PRIMORDIA_WORKTREES_DIR` | No | Path to the worktrees directory (default `/home/exedev/primordia-worktrees`). Set automatically by the systemd service files. |
 | `NEXT_BASE_PATH` | No | URL sub-path prefix (e.g. `/primordia`) for hosting the app at a non-root path. Leave unset to serve from `/` (default). Sets both Next.js `basePath` config and `NEXT_PUBLIC_BASE_PATH` for client-side `fetch()` calls. Also set automatically on preview dev servers to `/preview/{sessionId}` when `REVERSE_PROXY_PORT` is active. |
@@ -408,6 +406,7 @@ When implementing changes, follow these principles:
 | Proxy logs (/admin/proxy-logs) | ✅ Live | Admin-only; live tail of `journalctl -u primordia-proxy -f -n 100` via SSE; accessible from the admin subnav |
 | Deep rollback (/admin/rollback) | ✅ Live | Admin-only; lists all previous production slots from primordia.productionHistory in git config; "Roll back" button for each target; zero-downtime cutover via reverse proxy |
 | Server health (/admin/server-health) | ✅ Live | Admin-only; shows disk and memory usage with visual bars; shows oldest non-prod worktree with a "Delete oldest" button to free disk space |
+| Git mirror (/admin/git-mirror) | ✅ Live | Admin-only; shows current `mirror` remote status and SSH instructions for adding it; every production deploy auto-pushes to `mirror` if it exists |
 | Read-only git HTTP | ✅ Live | Clone/fetch via `git clone http[s]://<host>/api/git`; proxied through `git http-backend`; push permanently blocked (403) |
 
 ---

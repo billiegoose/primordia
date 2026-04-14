@@ -239,20 +239,10 @@ async function blueGreenAccept(
   return { ok: true, branch };
 }
 
-/** Build an authenticated https remote URL from GITHUB_TOKEN + GITHUB_REPO.
- *  Returns null if either env var is missing. */
-function buildAuthRemoteUrl(): string | null {
-  const token = process.env.GITHUB_TOKEN;
-  const repo = process.env.GITHUB_REPO;
-  if (!token || !repo) return null;
-  // username = token, password = blank (empty string after the colon)
-  return `https://${token}:@github.com/${repo}.git`;
-}
-
 /**
- * Moves the `main` branch pointer to the HEAD of the accepted session branch
- * and pushes it to the remote. `main` is a stable reference that external
- * users can clone to always get the latest production code.
+ * Moves the `main` branch pointer to the HEAD of the accepted session branch,
+ * checks it out in the main repo dir, and (if a remote named "mirror" exists)
+ * pushes to it. The mirror remote is the recommended way to sync with GitHub.
  *
  * Non-fatal: errors are logged as warnings so a push failure never blocks a deploy.
  */
@@ -277,25 +267,6 @@ async function moveMainAndPush(
     return;
   }
 
-  // Push main to the remote so external clones see the latest production code.
-  await onStep('- Pushing main branch…\n');
-  const remoteUrl = buildAuthRemoteUrl();
-  const pushArgs = remoteUrl
-    ? ['push', remoteUrl, 'main:main']
-    : ['push', 'origin', 'main'];
-  const pushResult = await runGit(pushArgs, mainRepoRoot);
-  if (pushResult.code !== 0) {
-    await onStep(`  ⚠ Could not push main branch: ${pushResult.stderr.trim()}\n`);
-  } else if (remoteUrl) {
-    // When pushing to an explicit URL (rather than a named remote), git does
-    // not update the local remote-tracking ref, so `git status` shows
-    // "ahead of origin/main by N commits". Sync it manually to avoid that.
-    await runGit(
-      ['update-ref', 'refs/remotes/origin/main', 'refs/heads/main'],
-      mainRepoRoot,
-    );
-  }
-
   // Check out `main` in the main repo dir (~/primordia) so it tracks the
   // latest production code and doesn't stay on a detached HEAD or old branch.
   // --force discards any local modifications so the checkout always succeeds.
@@ -303,6 +274,17 @@ async function moveMainAndPush(
   const checkoutResult = await runGit(['checkout', '--force', 'main'], mainRepoRoot);
   if (checkoutResult.code !== 0) {
     await onStep(`  ⚠ Could not checkout main in ${mainRepoRoot}: ${checkoutResult.stderr.trim()}\n`);
+  }
+
+  // Push to the mirror remote if one exists (configured via /admin/git-mirror).
+  const remotesResult = await runGit(['remote'], mainRepoRoot);
+  const remotes = remotesResult.stdout.split('\n').map((r) => r.trim()).filter(Boolean);
+  if (remotes.includes('mirror')) {
+    await onStep('- Pushing to mirror remote…\n');
+    const pushResult = await runGit(['push', 'mirror'], mainRepoRoot);
+    if (pushResult.code !== 0) {
+      await onStep(`  ⚠ Could not push to mirror: ${pushResult.stderr.trim()}\n`);
+    }
   }
 }
 

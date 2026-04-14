@@ -6,7 +6,7 @@
 // behaviour internally; callers pass the session user and page-specific items.
 //
 // buildStandardMenuItems() returns the shared navigation items (Go to chat,
-// Propose a change, Sync with GitHub, Admin) used by every primary app page,
+// Propose a change, Admin) used by every primary app page,
 // so callers don't have to duplicate the icon JSX. Pass `currentPath` to
 // suppress the link to whichever page the user is already on.
 
@@ -14,7 +14,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { SessionUser } from "../lib/hooks";
-import { MessageSquare, Edit, CloudUpload, Shield, Terminal, X, Menu, LogOut, LogIn } from "lucide-react";
+import { MessageSquare, Edit, Shield, Terminal, X, Menu, LogOut, LogIn } from "lucide-react";
 
 export type { SessionUser };
 
@@ -39,17 +39,14 @@ interface HamburgerMenuProps {
 
 /**
  * Returns the standard set of navigation items (Go to chat, Propose a change,
- * Sync with GitHub, Admin) shared by all primary app pages. Any item whose
- * `href` matches `currentPath` is omitted, so the menu never links to the
- * page you're already on.
+ * Admin) shared by all primary app pages. Any item whose `href` matches
+ * `currentPath` is omitted, so the menu never links to the page you're already on.
  */
 export function buildStandardMenuItems({
-  onSyncClick,
   isAdmin,
   currentPath,
   onEvolveClick,
 }: {
-  onSyncClick: () => void;
   isAdmin: boolean;
   currentPath?: string;
   /** When provided, "Propose a change" opens this callback instead of navigating to /evolve. */
@@ -67,12 +64,6 @@ export function buildStandardMenuItems({
       hoverColor: "hover:text-amber-400",
       ...(onEvolveClick ? { onClick: onEvolveClick } : { href: "/evolve" }),
       icon: <Edit size={16} strokeWidth={2} aria-hidden="true" />,
-    },
-    {
-      label: "Sync with GitHub",
-      hoverColor: "hover:text-green-400",
-      onClick: onSyncClick,
-      icon: <CloudUpload size={16} strokeWidth={2} aria-hidden="true" />,
     },
   ];
   if (isAdmin) {
