@@ -6,7 +6,8 @@
 
 - **`app/markdown-test/page.tsx`** — new client-side test page at `/markdown-test` that:
   - Connects to the SSE stream on mount and accumulates received text
-  - Renders accumulated text with `<Streamdown mode="streaming" isAnimating={...}>` so streamdown's streaming-specific behaviour (incomplete block handling, remend, etc.) is exercised in real time
+  - Renders accumulated text with `<MarkdownContent>` — the same component and styling used on the evolve session page — so the test is visually representative of the real app
+  - The card wrapper mirrors the `RunningClaudeSection` layout from `EvolveSessionView` (rounded-lg, `bg-gray-900`, `border-blue-700/50` while streaming, header with pulsing dot)
   - Shows a status bar (streaming / done / error) and live character count
   - Exposes controls for speed (delay slider), chunk size (select), and a Start / Stop / Restart button
   - Starts streaming automatically on page load

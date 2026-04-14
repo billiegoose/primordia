@@ -1,17 +1,18 @@
 "use client";
 
 // app/markdown-test/page.tsx
-// Interactive test page for the streamdown integration.
+// Interactive test page for the streamdown / MarkdownContent integration.
 // Streams a comprehensive markdown sample from /api/markdown-stream and renders
-// it with <Streamdown mode="streaming" isAnimating={...}>.
+// it with <MarkdownContent> — the same component and styling used on the evolve
+// session page — so the test is visually representative.
 //
 // Controls:
-//   • Speed slider  — adjusts the per-character delay (SSE query param)
-//   • Restart button — resets accumulated text and starts a new SSE connection
-//   • Chunk-size selector — characters sent per SSE event
+//   • Speed slider     — adjusts the per-character delay (SSE query param)
+//   • Chunk-size select — characters sent per SSE event
+//   • Stop / Restart button
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Streamdown } from "streamdown";
+import { MarkdownContent } from "@/components/SimpleMarkdown";
 import { withBasePath } from "@/lib/base-path";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -34,7 +35,6 @@ export default function MarkdownTestPage() {
   const streamStarted = useRef(false);
 
   const startStream = useCallback(() => {
-    // Cancel any in-flight stream
     abortRef.current?.abort();
     abortRef.current = new AbortController();
 
@@ -59,8 +59,6 @@ export default function MarkdownTestPage() {
           if (done) break;
 
           buffer += decoder.decode(value, { stream: true });
-
-          // Parse SSE lines
           const lines = buffer.split("\n");
           buffer = lines.pop() ?? "";
 
@@ -88,12 +86,10 @@ export default function MarkdownTestPage() {
     })();
   }, [delay, chunk]);
 
-  // Start streaming automatically on first mount
+  // Auto-start on first mount
   useEffect(() => {
     if (!streamStarted.current) startStream();
-    return () => {
-      abortRef.current?.abort();
-    };
+    return () => { abortRef.current?.abort(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -140,7 +136,7 @@ export default function MarkdownTestPage() {
           </select>
         </label>
 
-        {/* Restart / stop button */}
+        {/* Stop / Restart button */}
         <button
           onClick={() => {
             if (isStreaming) {
@@ -185,23 +181,44 @@ export default function MarkdownTestPage() {
         {error && <span className="text-red-400">{error}</span>}
       </div>
 
-      {/* ── Main content ────────────────────────────────────────────────── */}
+      {/* ── Main content — mirrors EvolveSessionView card layout ─────────── */}
       <main className="flex-1 overflow-y-auto px-4 sm:px-8 py-6 max-w-4xl mx-auto w-full">
-        {text ? (
-          <div className="prose prose-invert max-w-none">
-            <Streamdown
-              mode="streaming"
-              isAnimating={isStreaming}
-              className="text-sm leading-relaxed text-gray-200"
+        <div
+          className={`rounded-lg border bg-gray-900 text-sm overflow-hidden ${
+            isStreaming ? "border-blue-700/50" : isDone ? "border-gray-700" : "border-gray-800"
+          }`}
+        >
+          {/* Card header — matches RunningClaudeSection header */}
+          <div className="px-4 py-2.5 border-b border-gray-800 flex items-center gap-2">
+            <span
+              className={`font-semibold text-xs ${
+                isStreaming ? "text-blue-300" : isDone ? "text-gray-300" : "text-gray-500"
+              }`}
             >
-              {text}
-            </Streamdown>
+              {isStreaming
+                ? "🤖 Streaming markdown…"
+                : isDone
+                ? "🤖 Stream complete"
+                : "🤖 Ready to stream"}
+            </span>
+            {isStreaming && (
+              <span className="ml-auto flex items-center gap-1.5 text-gray-500 text-xs animate-pulse">
+                <span className="w-1.5 h-1.5 rounded-full bg-current inline-block" />
+              </span>
+            )}
           </div>
-        ) : (
-          <div className="flex items-center justify-center h-48 text-gray-600 text-sm">
-            {isStreaming ? "Waiting for first bytes…" : "Press Start to stream."}
+
+          {/* Card body */}
+          <div className="px-4 py-3">
+            {text ? (
+              <MarkdownContent text={text} className="[&>*:last-child]:mb-0" />
+            ) : (
+              <p className="text-gray-600 text-xs">
+                {isStreaming ? "Waiting for first bytes…" : "Press Start to stream."}
+              </p>
+            )}
           </div>
-        )}
+        </div>
       </main>
     </div>
   );
