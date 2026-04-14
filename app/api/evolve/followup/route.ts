@@ -124,6 +124,7 @@ export async function POST(request: Request) {
     harness,
     model,
     apiKey: decryptedApiKey,
+    userId: user.id,
   };
   decryptedApiKey = undefined;
 

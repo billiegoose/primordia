@@ -53,6 +53,12 @@ export interface LocalSession {
    * Anthropic API directly. When omitted, the gateway is used.
    */
   apiKey?: string;
+  /**
+   * Primordia user ID of the person who initiated this session.
+   * Used to set CLAUDE_CONFIG_DIR so each user's Claude configuration
+   * (settings, tool approvals, conversation history) is isolated.
+   */
+  userId?: string;
 }
 
 // ─── Branch port management ────────────────────────────────────────────────────
@@ -127,6 +133,12 @@ interface WorkerConfig {
    * process environment so it is never at rest in a temp file.
    */
   apiKey?: string;
+  /**
+   * Primordia user ID. When set, CLAUDE_CONFIG_DIR is pointed at a
+   * per-user directory so each user's Claude config is isolated.
+   * NOT written to the JSON config file — only used to derive the env var.
+   */
+  userId?: string;
 }
 
 /** Maps session IDs to the PID of their running Claude worker process. */
@@ -185,6 +197,10 @@ async function spawnClaudeWorker(
   const workerEnv: NodeJS.ProcessEnv = { ...process.env };
   if (workerApiKey) {
     workerEnv['PRIMORDIA_USER_API_KEY'] = workerApiKey;
+  }
+  if (config.userId) {
+    const homeDir = process.env.HOME ?? '/home/exedev';
+    workerEnv['CLAUDE_CONFIG_DIR'] = path.join(homeDir, '.claude-users', config.userId);
   }
 
   return new Promise<void>((resolve, reject) => {
@@ -556,6 +572,7 @@ export async function startLocalEvolve(
         timeoutMs: 20 * 60 * 1000,
         model: session.model,
         apiKey: session.apiKey,
+        userId: session.userId,
       },
       workerScript,
     );
@@ -678,6 +695,7 @@ export async function runFollowupInWorktree(
         model: session.model,
         useContinue: true,
         apiKey: session.apiKey,
+        userId: session.userId,
       },
       fuWorkerScript,
     );

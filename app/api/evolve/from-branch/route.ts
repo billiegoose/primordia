@@ -177,6 +177,7 @@ export async function POST(request: Request) {
     request: requestText,
     createdAt: Date.now(),
     apiKey: decryptedApiKey,
+    userId: user.id,
   };
   decryptedApiKey = undefined;
 
