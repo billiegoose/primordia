@@ -289,7 +289,7 @@ function MessageBubble({ message }: { message: Message }) {
   if (isSystem) {
     return (
       <div className="flex justify-center">
-        <div className="w-full px-4 py-3 rounded-lg text-xs text-amber-300 bg-amber-900/30 border border-amber-700/30 whitespace-pre-wrap leading-relaxed">
+        <div className="w-full px-4 py-3 rounded-lg text-xs text-amber-300 bg-amber-900/30 border border-amber-700/30 leading-relaxed">
           <SimpleMarkdown text={message.content} />
         </div>
       </div>
@@ -299,7 +299,7 @@ function MessageBubble({ message }: { message: Message }) {
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[80%] px-4 py-3 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
+        className={`max-w-[80%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${
           isUser
             ? "bg-blue-600 text-white rounded-br-sm"
             : "bg-gray-800 text-gray-100 rounded-bl-sm"

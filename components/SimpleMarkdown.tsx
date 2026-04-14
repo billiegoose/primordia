@@ -1,118 +1,118 @@
+"use client";
+
 // components/SimpleMarkdown.tsx
 //
-// Minimal markdown renderer shared across the app.
+// Markdown rendering backed by streamdown.
 //
-// SimpleMarkdown   — inline renderer: bold, links, inline code, within a
-//                    single line of text.
-// MarkdownContent  — block renderer: splits content into lines, handles
-//                    bullet lists and paragraphs, renders each line with
-//                    SimpleMarkdown for inline formatting.
+// SimpleMarkdown   — renders markdown in a chat-context style (inherits parent
+//                    text colour/size so it works inside coloured bubbles).
+// MarkdownContent  — renders multi-line block markdown with the app's dark
+//                    prose styling (text-xs, text-gray-300, etc.).
 
-import React from "react";
+import { Streamdown, type Components } from "streamdown";
+
+// ─── Shared inline elements ───────────────────────────────────────────────────
+// Link and inline-code styling is the same in all contexts.
+
+function Anchor({ href, children }: { href?: string; children?: React.ReactNode }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="underline text-blue-300 hover:text-blue-200"
+    >
+      {children}
+    </a>
+  );
+}
+
+function InlineCode({ children, className }: { children?: React.ReactNode; className?: string }) {
+  if (className?.startsWith("language-")) {
+    return <code className={className}>{children}</code>;
+  }
+  return <code className="bg-gray-700 px-1 rounded text-xs">{children}</code>;
+}
+
+// ─── Components for chat bubbles (SimpleMarkdown) ────────────────────────────
+// Minimal overrides — paragraph spacing only; text colour/size come from the
+// parent container so the component works inside any coloured bubble.
+
+const chatComponents: Components = {
+  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+  a: ({ href, children }) => <Anchor href={href}>{children}</Anchor>,
+  code: ({ children, className }) => <InlineCode className={className}>{children}</InlineCode>,
+  pre: ({ children }) => (
+    <pre className="bg-gray-800 rounded p-3 overflow-x-auto mb-3 text-xs">{children}</pre>
+  ),
+  strong: ({ children }) => <strong>{children}</strong>,
+  em: ({ children }) => <em>{children}</em>,
+  ul: ({ children }) => <ul className="list-disc list-inside space-y-0.5 mb-2">{children}</ul>,
+  ol: ({ children }) => <ol className="list-decimal list-inside space-y-0.5 mb-2">{children}</ol>,
+  li: ({ children }) => <li>{children}</li>,
+};
+
+// ─── Components for block prose (MarkdownContent) ────────────────────────────
+// Explicit text-xs / text-gray-300 styling matching the previous hand-rolled
+// MarkdownContent renderer.
+
+const proseComponents: Components = {
+  p: ({ children }) => (
+    <p className="text-xs text-gray-300 leading-relaxed mb-3">{children}</p>
+  ),
+  ul: ({ children }) => (
+    <ul className="list-disc list-inside space-y-0.5 mb-3 text-xs text-gray-300 leading-relaxed">
+      {children}
+    </ul>
+  ),
+  ol: ({ children }) => (
+    <ol className="list-decimal list-inside space-y-0.5 mb-3 text-xs text-gray-300 leading-relaxed">
+      {children}
+    </ol>
+  ),
+  li: ({ children }) => <li>{children}</li>,
+  a: ({ href, children }) => <Anchor href={href}>{children}</Anchor>,
+  code: ({ children, className }) => <InlineCode className={className}>{children}</InlineCode>,
+  pre: ({ children }) => (
+    <pre className="bg-gray-800 rounded p-3 overflow-x-auto mb-3 text-xs">{children}</pre>
+  ),
+  strong: ({ children }) => <strong>{children}</strong>,
+  em: ({ children }) => <em>{children}</em>,
+  h1: ({ children }) => (
+    <h1 className="text-sm font-bold text-gray-100 mb-2 mt-3">{children}</h1>
+  ),
+  h2: ({ children }) => (
+    <h2 className="text-sm font-semibold text-gray-100 mb-2 mt-3">{children}</h2>
+  ),
+  h3: ({ children }) => (
+    <h3 className="text-xs font-semibold text-gray-200 mb-1 mt-2">{children}</h3>
+  ),
+  blockquote: ({ children }) => (
+    <blockquote className="border-l-2 border-gray-600 pl-3 text-xs text-gray-400 mb-3">
+      {children}
+    </blockquote>
+  ),
+  hr: () => <hr className="border-gray-700 mb-3" />,
+};
 
 // ─── SimpleMarkdown ──────────────────────────────────────────────────────────
-// Renders a single line of text with inline markdown: bold, links, inline code.
 
 export function SimpleMarkdown({ text }: { text: string }) {
   if (!text) return null;
-
-  // Split on links [text](url), bold **text**, and inline `code`.
-  // Use non-capturing inner groups so split() only puts the full token in the
-  // array — not each inner capture group — which would otherwise cause bold
-  // text to be rendered twice (once as <strong>, once as a plain <span>).
-  const parts = text.split(/(\[(?:[^\]]+)\]\((?:[^)]+)\)|\*\*(?:[^*]+)\*\*|`(?:[^`]+)`)/g);
-
-  const rendered: React.ReactNode[] = [];
-  let i = 0;
-  let key = 0;
-
-  while (i < parts.length) {
-    const part = parts[i];
-    if (!part) { i++; continue; }
-
-    const linkMatch = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
-    const boldMatch = part.match(/^\*\*([^*]+)\*\*$/);
-    const codeMatch = part.match(/^`([^`]+)`$/);
-
-    if (linkMatch) {
-      rendered.push(
-        <a
-          key={key++}
-          href={linkMatch[2]}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="underline text-blue-300 hover:text-blue-200"
-        >
-          {linkMatch[1]}
-        </a>
-      );
-    } else if (boldMatch) {
-      rendered.push(<strong key={key++}>{boldMatch[1]}</strong>);
-    } else if (codeMatch) {
-      rendered.push(
-        <code key={key++} className="bg-gray-700 px-1 rounded text-xs">
-          {codeMatch[1]}
-        </code>
-      );
-    } else {
-      // suppressHydrationWarning: emojis can encode differently between Node.js
-      // (server) and the browser, causing a spurious hydration mismatch error.
-      // The content is always correct on the client, so we suppress the warning
-      // and let React use the client-rendered text.
-      rendered.push(<span key={key++} suppressHydrationWarning>{part}</span>);
-    }
-    i++;
-  }
-
-  return <>{rendered}</>;
+  return (
+    <Streamdown mode="static" components={chatComponents}>
+      {text}
+    </Streamdown>
+  );
 }
 
 // ─── MarkdownContent ─────────────────────────────────────────────────────────
-// Renders multi-line markdown content.
-// Splits on blank lines into paragraphs; within each paragraph handles bullet
-// list items (lines starting with "- ") and plain lines.
 
 export function MarkdownContent({ text, className }: { text: string; className?: string }) {
   if (!text) return null;
-
-  // Split into paragraph groups by blank lines.
-  const paragraphs = text.split(/\n\n+/);
-
   return (
-    <div className={className}>
-      {paragraphs.map((para, pi) => {
-        const lines = para.split("\n").filter((l) => l.trim() !== "");
-        if (lines.length === 0) return null;
-
-        // Check if all (non-empty) lines are bullet items.
-        const allBullets = lines.every((l) => l.match(/^[-*] /));
-
-        if (allBullets) {
-          return (
-            <ul key={pi} className="list-disc list-inside space-y-0.5 mb-3 text-xs text-gray-300 leading-relaxed">
-              {lines.map((line, li) => (
-                <li key={li}>
-                  <SimpleMarkdown text={line.replace(/^[-*] /, "")} />
-                </li>
-              ))}
-            </ul>
-          );
-        }
-
-        // Mixed or plain paragraph — join lines with a space (standard Markdown
-        // soft-line-break behaviour: a single \n within a paragraph is not a
-        // hard line break; only blank lines create new paragraphs).
-        return (
-          <p key={pi} className="text-xs text-gray-300 leading-relaxed mb-3">
-            {lines.map((line, li) => (
-              <React.Fragment key={li}>
-                {li > 0 && " "}
-                <SimpleMarkdown text={line} />
-              </React.Fragment>
-            ))}
-          </p>
-        );
-      })}
-    </div>
+    <Streamdown mode="static" className={className} components={proseComponents}>
+      {text}
+    </Streamdown>
   );
 }
