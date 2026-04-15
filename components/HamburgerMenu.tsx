@@ -14,7 +14,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { SessionUser } from "../lib/hooks";
-import { MessageSquare, Edit, Shield, Terminal, X, Menu, LogOut, LogIn, Key } from "lucide-react";
+import { MessageSquare, Edit, Shield, Terminal, X, Menu, LogOut, LogIn, Key, GitBranch } from "lucide-react";
 import { ApiKeyDialog } from "./ApiKeyDialog";
 
 export type { SessionUser };
@@ -65,6 +65,12 @@ export function buildStandardMenuItems({
       hoverColor: "hover:text-amber-400",
       ...(onEvolveClick ? { onClick: onEvolveClick } : { href: "/evolve" }),
       icon: <Edit size={16} strokeWidth={2} aria-hidden="true" />,
+    },
+    {
+      label: "Branches",
+      hoverColor: "hover:text-green-400",
+      href: "/branches",
+      icon: <GitBranch size={16} strokeWidth={2} aria-hidden="true" />,
     },
   ];
   if (isAdmin) {
