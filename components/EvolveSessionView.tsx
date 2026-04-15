@@ -373,13 +373,14 @@ function AttachmentChip({ name, sessionId }: { name: string; sessionId: string }
       href={url}
       target="_blank"
       rel="noopener noreferrer"
-      className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-gray-800 border border-gray-700 text-xs text-gray-300 font-mono hover:bg-gray-700 hover:border-gray-600 transition-colors"
+      className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-gray-800 border border-gray-700 text-xs text-gray-300 font-mono hover:bg-gray-700 hover:border-gray-600 transition-colors max-w-[200px]"
+      title={name}
     >
       {isImage && (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={url} alt="" className="h-4 w-4 rounded object-cover flex-shrink-0" />
       )}
-      {name}
+      <span className="truncate">{name}</span>
     </a>
   );
 }
