@@ -96,6 +96,55 @@ const INSPECTOR_SCRIPT = `
     return null;
   }
 
+  // ── Label ───────────────────────────────────────────────────────────────────
+
+  var labelEl = null;
+
+  function ensureLabel() {
+    if (labelEl) return labelEl;
+    labelEl = document.createElement('div');
+    labelEl.id = 'primordia-inspector-label';
+    labelEl.style.cssText = [
+      'position:fixed',
+      'z-index:2147483647',
+      'background:#3b82f6',
+      'color:#fff',
+      'font:bold 11px/1.6 monospace',
+      'padding:1px 6px',
+      'border-radius:3px 3px 3px 0',
+      'pointer-events:none',
+      'white-space:nowrap',
+      'max-width:90vw',
+      'overflow:hidden',
+      'text-overflow:ellipsis',
+      'box-shadow:0 1px 4px rgba(0,0,0,0.5)',
+    ].join(';');
+    document.body.appendChild(labelEl);
+    return labelEl;
+  }
+
+  function positionLabel(el) {
+    var lbl = ensureLabel();
+    var component = getReactComponentName(el) || 'Unknown';
+    var selector = getCssSelector(el);
+    lbl.textContent = '<' + component + '> ' + selector;
+    var rect = el.getBoundingClientRect();
+    // Measure after setting text so width is accurate for right-edge clamping
+    var lblW = lbl.offsetWidth;
+    var lblH = lbl.offsetHeight || 18;
+    var top = rect.top - lblH - 3;
+    if (top < 2) top = rect.bottom + 3; // flip below when near top of viewport
+    var left = Math.max(2, Math.min(rect.left, window.innerWidth - lblW - 2));
+    lbl.style.top = top + 'px';
+    lbl.style.left = left + 'px';
+  }
+
+  function removeLabel() {
+    if (labelEl) { labelEl.remove(); labelEl = null; }
+  }
+
+  // ── Highlight ────────────────────────────────────────────────────────────────
+
   function setHighlight(el) {
     if (el === hovered) return;
     clearHighlight();
@@ -103,6 +152,7 @@ const INSPECTOR_SCRIPT = `
     if (hovered && hovered.style) {
       hovered.style.outline = '2px solid #3b82f6';
       hovered.style.outlineOffset = '1px';
+      positionLabel(hovered);
     }
   }
 
@@ -112,6 +162,7 @@ const INSPECTOR_SCRIPT = `
       hovered.style.outlineOffset = '';
     }
     hovered = null;
+    removeLabel();
   }
 
   function selectElement(el) {
@@ -195,7 +246,7 @@ const INSPECTOR_SCRIPT = `
     document.removeEventListener('touchmove', onTouchMove, true);
     document.removeEventListener('touchend', onTouchEnd, true);
     cancelLongPress();
-    clearHighlight();
+    clearHighlight(); // also calls removeLabel()
     document.body.classList.remove('primordia-inspecting');
     var s = document.getElementById('primordia-inspector-style');
     if (s) s.remove();

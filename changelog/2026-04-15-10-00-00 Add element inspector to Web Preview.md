@@ -10,8 +10,8 @@ A **crosshair element inspector** tool has been added to the Web Preview panel t
 ### How it works
 
 1. Click the crosshair (⊕) button in the preview toolbar to enter inspect mode.  A blue hint bar appears and the cursor inside the iframe changes to a crosshair.
-2. **Mouse:** hover over elements — they get a 2px blue outline highlight.  Click an element to capture it.
-   **Touch (tablet/phone):** drag your finger around to highlight elements under it.  Hold still for ~600 ms to select the highlighted element.
+2. **Mouse:** hover over elements — they get a 2px blue outline highlight and a floating `<Component> selector` label above the outline (blue background, white text, readable against any page background).  Click an element to capture it.
+   **Touch (tablet/phone):** drag your finger around to highlight elements under it — the same label tracks the current element.  Hold still for ~600 ms to select the highlighted element.
 3. The inspector deactivates and the **Follow-up** action panel opens automatically with a context chip showing:
    ```
    <ComponentName>  element.selector > path
