@@ -4,7 +4,7 @@
 // Shared evolve request form body used by the /evolve page, the floating
 // dialog, and the follow-up panel on session detail pages.
 
-import { useState, useRef, useEffect, useCallback, FormEvent, memo } from "react";
+import { useState, useRef, useEffect, useCallback, FormEvent, memo, forwardRef, useImperativeHandle } from "react";
 import { Paperclip, Settings, ChevronDown } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { withBasePath } from "../lib/base-path";
@@ -31,6 +31,16 @@ const ImagePreview = memo(function ImagePreview({ file }: { file: File }) {
   if (!url) return null;
   return <img src={url} alt="" className="h-4 w-4 rounded object-cover flex-shrink-0" />;
 });
+
+// ─── Imperative handle ───────────────────────────────────────────────────────
+
+export interface EvolveRequestFormHandle {
+  /**
+   * Prepend an element-context block (from the page inspector) to the textarea
+   * and focus it so the user can continue typing their request immediately.
+   */
+  insertElementContext: (text: string) => void;
+}
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -92,7 +102,8 @@ interface EvolveRequestFormProps {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function EvolveRequestForm({
+export const EvolveRequestForm = forwardRef<EvolveRequestFormHandle, EvolveRequestFormProps>(
+  function EvolveRequestFormInner({
   compact = false,
   placeholder = "Describe the change you want to make to this app…",
   submitLabel = "Submit Request",
@@ -105,7 +116,7 @@ export function EvolveRequestForm({
   defaultModel,
   initialHarness,
   initialModel,
-}: EvolveRequestFormProps) {
+}: EvolveRequestFormProps, ref: React.Ref<EvolveRequestFormHandle>) {
   const router = useRouter();
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -122,6 +133,22 @@ export function EvolveRequestForm({
   );
   const [cavemanMode, setCavemanMode] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // ── Imperative handle ─────────────────────────────────────────────────────
+
+  useImperativeHandle(ref, () => ({
+    insertElementContext: (text: string) => {
+      // Prepend the context block then focus with cursor after the block.
+      setInput((prev) => text + (prev ? "\n\n" + prev : ""));
+      requestAnimationFrame(() => {
+        const ta = textareaRef.current;
+        if (!ta) return;
+        ta.focus();
+        // cursor after text + "\n\n" (or just text if prev was empty)
+        ta.setSelectionRange(text.length + 2, text.length + 2);
+      });
+    },
+  }));
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Auto-resize textarea height in page (non-compact) mode.
@@ -407,4 +434,5 @@ export function EvolveRequestForm({
       </form>
     </div>
   );
-}
+  }
+);
