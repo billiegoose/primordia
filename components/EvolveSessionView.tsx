@@ -18,7 +18,7 @@ import { EvolveRequestForm } from "./EvolveRequestForm";
 import Link from "next/link";
 import type { DiffFileSummary } from "../app/evolve/session/[id]/page";
 import { DiffFileExpander } from "./DiffFileExpander";
-import { WebPreviewPanel } from "./WebPreviewPanel";
+import { WebPreviewPanel, type ElementSelection } from "./WebPreviewPanel";
 import type { SessionEvent } from "../lib/session-events";
 
 // ─── Metrics ──────────────────────────────────────────────────────────────────
@@ -565,6 +565,8 @@ export default function EvolveSessionView({
   const [acceptRejectError, setAcceptRejectError] = useState<string | null>(null);
   /** Which of the three action panels is currently expanded, or null if all collapsed. */
   const [activeAction, setActiveAction] = useState<"accept" | "reject" | "followup" | null>(null);
+  /** Element selected via the WebPreviewPanel inspector tool, to be attached as context to a follow-up. */
+  const [elementContext, setElementContext] = useState<ElementSelection | null>(null);
   const [isRestartingServer, setIsRestartingServer] = useState(false);
   const [restartError, setRestartError] = useState<string | null>(null);
   const [isAborting, setIsAborting] = useState(false);
@@ -911,6 +913,12 @@ export default function EvolveSessionView({
     setAcceptRejectError(null);
   }, []);
 
+  // Called by WebPreviewPanel when the user picks an element with the inspector tool.
+  const handleElementSelected = useCallback((info: ElementSelection) => {
+    setActiveAction('followup');
+    setElementContext(info);
+  }, []);
+
   const isTerminal =
     status === "accepted" ||
     status === "rejected" ||
@@ -1063,7 +1071,7 @@ export default function EvolveSessionView({
         {/* Web preview — shown inline on mobile only; desktop uses sidebar */}
         {status === "ready" && previewUrl && proxyServerStatus === "running" && (
           <div className="xl:hidden">
-            <WebPreviewPanel src={previewUrl} />
+            <WebPreviewPanel src={previewUrl} onElementSelected={handleElementSelected} />
           </div>
         )}
 
@@ -1291,6 +1299,21 @@ export default function EvolveSessionView({
                 Address feedback on the changes, e.g. &quot;I got this error when using it:&quot; or
                 &quot;please change the design of the button&quot;.
               </p>
+              {/* Element context chip — populated by the WebPreviewPanel inspector */}
+              {elementContext && (
+                <div className="mb-3 flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-blue-950/40 border border-blue-700/40 text-xs text-blue-300">
+                  <span className="font-semibold text-blue-200 flex-shrink-0">&lt;{elementContext.component}&gt;</span>
+                  <span className="font-mono text-blue-400 truncate">{elementContext.selector}</span>
+                  <button
+                    type="button"
+                    onClick={() => setElementContext(null)}
+                    className="ml-auto flex-shrink-0 text-blue-500 hover:text-blue-200 transition-colors"
+                    aria-label="Clear element context"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
               <EvolveRequestForm
                 placeholder="Describe what to fix or improve…"
                 submitLabel="Submit follow-up"
@@ -1300,9 +1323,13 @@ export default function EvolveSessionView({
                 defaultHarness={sessionHarness}
                 defaultModel={sessionModel}
                 onSubmit={async ({ request, harness, model, files }) => {
+                  // Prepend element context to the request when present.
+                  const fullRequest = elementContext
+                    ? `Re: <${elementContext.component}> ${elementContext.selector}\n\n${request}`
+                    : request;
                   const formData = new FormData();
                   formData.append('sessionId', sessionId);
-                  formData.append('request', request);
+                  formData.append('request', fullRequest);
                   formData.append('harness', harness);
                   formData.append('model', model);
                   for (const file of files) formData.append('attachments', file);
@@ -1316,6 +1343,7 @@ export default function EvolveSessionView({
                     const data = (await res.json()) as { error?: string };
                     throw new Error(data.error ?? `Server error: ${res.status}`);
                   }
+                  setElementContext(null);
                   setStatus('running-claude');
                   void startStreaming();
                 }}
@@ -1433,7 +1461,7 @@ export default function EvolveSessionView({
     {showPreviewSidebar && (
       <aside className="hidden xl:flex xl:flex-col xl:flex-1 xl:sticky xl:top-0 xl:h-dvh border-l border-gray-800 bg-gray-950 p-4">
         {proxyServerStatus === "running" ? (
-          <WebPreviewPanel src={previewUrl!} fullHeight />
+          <WebPreviewPanel src={previewUrl!} fullHeight onElementSelected={handleElementSelected} />
         ) : (
           <div className="flex flex-col flex-1 items-center justify-center gap-2 text-gray-500">
             <span className={`text-sm ${proxyServerStatus === 'starting' ? 'animate-pulse' : ''}`}>

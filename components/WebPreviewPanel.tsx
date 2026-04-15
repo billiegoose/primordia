@@ -3,9 +3,159 @@
 // components/WebPreviewPanel.tsx
 // Inline browser-like preview panel for evolve session pages.
 // Shows an iframe with Back, Forward, Refresh buttons and an editable URL bar.
+// Supports an element inspector mode that highlights elements on hover,
+// detects the React component name, and reports a CSS selector on click.
 
-import React, { useRef, useState, useCallback } from "react";
-import { ArrowLeft, ArrowRight, RotateCw, ExternalLink } from "lucide-react";
+import React, { useRef, useState, useCallback, useEffect } from "react";
+import { ArrowLeft, ArrowRight, RotateCw, ExternalLink, Crosshair } from "lucide-react";
+
+// ─── Element Inspector script ─────────────────────────────────────────────────
+// Injected into the iframe's document when inspector mode is activated.
+// Communicates results back to the parent via postMessage.
+const INSPECTOR_SCRIPT = `
+(function() {
+  if (window.__primordiaInspectorActive) return;
+  window.__primordiaInspectorActive = true;
+
+  var hovered = null;
+
+  // Inject crosshair cursor style
+  var styleEl = document.createElement('style');
+  styleEl.id = 'primordia-inspector-style';
+  styleEl.textContent = 'body.primordia-inspecting, body.primordia-inspecting * { cursor: crosshair !important; }';
+  document.head.appendChild(styleEl);
+  document.body.classList.add('primordia-inspecting');
+
+  function getCssSelector(el) {
+    if (!(el instanceof Element)) return '';
+    var path = [];
+    var current = el;
+    while (current && current.tagName && current.tagName !== 'HTML' && current.tagName !== 'BODY') {
+      var part = current.tagName.toLowerCase();
+      if (current.id) {
+        path.unshift('#' + current.id);
+        break;
+      }
+      var classes = [];
+      for (var i = 0; i < current.classList.length && classes.length < 2; i++) {
+        var c = current.classList[i];
+        // Skip Tailwind utility classes (contain special chars or are too long) and pseudo-variants
+        if (c.length < 25 && !c.includes(':') && !c.includes('/') && !c.includes('[') && !c.includes(']')) {
+          classes.push(c);
+        }
+      }
+      if (classes.length > 0) {
+        part += '.' + classes.join('.');
+      }
+      var siblings = current.parentElement
+        ? Array.from(current.parentElement.children).filter(function(s) { return s.tagName === current.tagName; })
+        : [];
+      if (siblings.length > 1) {
+        part += ':nth-of-type(' + (siblings.indexOf(current) + 1) + ')';
+      }
+      path.unshift(part);
+      if (path.length >= 5) break;
+      current = current.parentElement;
+    }
+    return path.join(' > ');
+  }
+
+  function getReactComponentName(el) {
+    var keys = Object.keys(el);
+    var fiberKey = null;
+    for (var i = 0; i < keys.length; i++) {
+      if (keys[i].startsWith('__reactFiber$') || keys[i].startsWith('__reactInternalInstance$')) {
+        fiberKey = keys[i];
+        break;
+      }
+    }
+    if (!fiberKey) return null;
+    var fiber = el[fiberKey];
+    var limit = 60;
+    while (fiber && limit-- > 0) {
+      var type = fiber.type;
+      if (type && typeof type === 'function') {
+        var name = type.displayName || type.name;
+        if (name && /^[A-Z]/.test(name) && name.length > 1) return name;
+      }
+      if (type && typeof type === 'object') {
+        var name = type.displayName;
+        if (!name && type.render) name = type.render.displayName || type.render.name;
+        if (!name && type.type) name = type.type.displayName || type.type.name;
+        if (name && /^[A-Z]/.test(name) && name.length > 1) return name;
+      }
+      fiber = fiber.return;
+    }
+    return null;
+  }
+
+  function clearHighlight() {
+    if (hovered && hovered.style) {
+      hovered.style.outline = '';
+      hovered.style.outlineOffset = '';
+    }
+    hovered = null;
+  }
+
+  function onMouseOver(e) {
+    clearHighlight();
+    hovered = e.target;
+    if (hovered && hovered.style) {
+      hovered.style.outline = '2px solid #3b82f6';
+      hovered.style.outlineOffset = '1px';
+    }
+    e.stopPropagation();
+  }
+
+  function onMouseOut(e) {
+    clearHighlight();
+    e.stopPropagation();
+  }
+
+  function onClick(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    var el = e.target;
+    var component = getReactComponentName(el) || 'Unknown';
+    var selector = getCssSelector(el);
+    window.parent.postMessage({
+      type: 'primordia-element-selected',
+      component: component,
+      selector: selector,
+    }, '*');
+    deactivate();
+  }
+
+  function deactivate() {
+    document.removeEventListener('mouseover', onMouseOver, true);
+    document.removeEventListener('mouseout', onMouseOut, true);
+    document.removeEventListener('click', onClick, true);
+    clearHighlight();
+    document.body.classList.remove('primordia-inspecting');
+    var s = document.getElementById('primordia-inspector-style');
+    if (s) s.remove();
+    window.__primordiaInspectorActive = false;
+  }
+
+  window.addEventListener('message', function onMsg(e) {
+    if (e.data && e.data.type === 'primordia-inspector-cancel') {
+      deactivate();
+      window.removeEventListener('message', onMsg);
+    }
+  });
+
+  document.addEventListener('mouseover', onMouseOver, true);
+  document.addEventListener('mouseout', onMouseOut, true);
+  document.addEventListener('click', onClick, true);
+})();
+`;
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface ElementSelection {
+  component: string;
+  selector: string;
+}
 
 interface WebPreviewPanelProps {
   /** Initial URL to load in the iframe. */
@@ -18,15 +168,47 @@ interface WebPreviewPanelProps {
   fullHeight?: boolean;
   /** Extra classes applied to the outer wrapper element. */
   className?: string;
+  /**
+   * Called when the user selects an element via the inspector tool.
+   * Receives the nearest React component name and a CSS path selector.
+   */
+  onElementSelected?: (info: ElementSelection) => void;
 }
 
-export function WebPreviewPanel({ src, fullHeight = false, className }: WebPreviewPanelProps) {
+// ─── Component ────────────────────────────────────────────────────────────────
+
+export function WebPreviewPanel({ src, fullHeight = false, className, onElementSelected }: WebPreviewPanelProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   // The URL shown in the address bar — starts as the initial src.
   const [urlBarValue, setUrlBarValue] = useState(src);
   // The actual src attribute driving the iframe. We update this to navigate.
   const [iframeSrc, setIframeSrc] = useState(src);
   const [isLoading, setIsLoading] = useState(true);
+  const [inspectorActive, setInspectorActive] = useState(false);
+  // Ref so handleLoad can read the latest inspector state without stale closure.
+  const inspectorActiveRef = useRef(false);
+  useEffect(() => { inspectorActiveRef.current = inspectorActive; }, [inspectorActive]);
+
+  const injectInspector = useCallback(() => {
+    try {
+      const doc = iframeRef.current?.contentDocument;
+      if (!doc || !doc.head) return;
+      // Remove stale instance if present
+      doc.getElementById('primordia-inspector-script')?.remove();
+      const script = doc.createElement('script');
+      script.id = 'primordia-inspector-script';
+      script.textContent = INSPECTOR_SCRIPT;
+      doc.head.appendChild(script);
+    } catch {
+      // Cross-origin — inspector not available
+    }
+  }, []);
+
+  const cancelInspector = useCallback(() => {
+    try {
+      iframeRef.current?.contentWindow?.postMessage({ type: 'primordia-inspector-cancel' }, '*');
+    } catch { /* cross-origin */ }
+  }, []);
 
   /** Called whenever the iframe finishes loading a page. */
   const handleLoad = useCallback(() => {
@@ -37,7 +219,11 @@ export function WebPreviewPanel({ src, fullHeight = false, className }: WebPrevi
     } catch {
       // Cross-origin frame — keep last known URL bar value.
     }
-  }, []);
+    // Re-inject inspector if it was active before the page reloaded.
+    if (inspectorActiveRef.current) {
+      setTimeout(() => injectInspector(), 50);
+    }
+  }, [injectInspector]);
 
   const handleLoadStart = useCallback(() => {
     setIsLoading(true);
@@ -73,12 +259,48 @@ export function WebPreviewPanel({ src, fullHeight = false, className }: WebPrevi
     } catch {
       // Fallback: reassign the src attribute.
       setIframeSrc((prev) => {
-        // Force a re-render by briefly setting empty then restoring.
         setTimeout(() => setIframeSrc(prev), 0);
         return "";
       });
     }
   };
+
+  const toggleInspector = useCallback(() => {
+    setInspectorActive((prev) => {
+      if (!prev) {
+        injectInspector();
+      } else {
+        cancelInspector();
+      }
+      return !prev;
+    });
+  }, [injectInspector, cancelInspector]);
+
+  // Listen for element selections and inspector-done messages from the iframe.
+  useEffect(() => {
+    function handleMessage(e: MessageEvent) {
+      if (!e.data || typeof e.data !== 'object') return;
+      if (e.data.type === 'primordia-element-selected' && inspectorActive) {
+        setInspectorActive(false);
+        onElementSelected?.({ component: e.data.component, selector: e.data.selector });
+      }
+    }
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [inspectorActive, onElementSelected]);
+
+  // Cancel inspector on Escape key.
+  useEffect(() => {
+    if (!inspectorActive) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        cancelInspector();
+        setInspectorActive(false);
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [inspectorActive, cancelInspector]);
 
   return (
     <div className={`${fullHeight ? 'flex flex-col h-full' : ''} rounded-lg border border-emerald-700/50 bg-gray-900 overflow-hidden${className ? ` ${className}` : ''}`}>
@@ -124,6 +346,22 @@ export function WebPreviewPanel({ src, fullHeight = false, className }: WebPrevi
           />
         </form>
 
+        {/* Element inspector toggle — only shown when a callback is provided */}
+        {onElementSelected && (
+          <button
+            type="button"
+            onClick={toggleInspector}
+            className={`p-1.5 rounded transition-colors flex-shrink-0 ${
+              inspectorActive
+                ? "bg-blue-600 text-white hover:bg-blue-500"
+                : "hover:bg-gray-800 text-gray-400 hover:text-gray-200"
+            }`}
+            title={inspectorActive ? "Cancel element selection (Esc)" : "Pick an element to inspect"}
+          >
+            <Crosshair size={14} />
+          </button>
+        )}
+
         {/* Open in new tab */}
         <a
           href={src}
@@ -135,6 +373,14 @@ export function WebPreviewPanel({ src, fullHeight = false, className }: WebPrevi
           <ExternalLink size={14} />
         </a>
       </div>
+
+      {/* Inspector active hint */}
+      {inspectorActive && (
+        <div className="px-3 py-1.5 bg-blue-950/60 border-b border-blue-700/40 text-xs text-blue-300 flex items-center gap-2">
+          <Crosshair size={11} className="flex-shrink-0" />
+          Click an element to capture its component and selector. Press Esc to cancel.
+        </div>
+      )}
 
       {/* ── iframe ── */}
       <div className={`relative ${fullHeight ? 'flex-1' : ''}`} style={fullHeight ? undefined : { height: "600px" }}>
