@@ -20,6 +20,7 @@ import type { DiffFileSummary } from "../app/evolve/session/[id]/page";
 import { DiffFileExpander } from "./DiffFileExpander";
 import { WebPreviewPanel, type ElementSelection } from "./WebPreviewPanel";
 import type { SessionEvent } from "../lib/session-events";
+import { HARNESS_OPTIONS, MODEL_OPTIONS_BY_HARNESS } from "../lib/agent-config";
 
 // ─── Metrics ──────────────────────────────────────────────────────────────────
 
@@ -76,6 +77,9 @@ interface SectionGroup {
   label: string;
   harness?: string;
   model?: string;
+  /** Stable IDs for harness/model — used by the follow-up form to populate selects correctly. */
+  harnessId?: string;
+  modelId?: string;
   events: SessionEvent[];
 }
 
@@ -88,6 +92,8 @@ function groupEventsIntoSections(events: SessionEvent[]): SectionGroup[] {
       if (event.sectionType === 'agent') {
         group.harness = event.harness;
         group.model = event.model;
+        group.harnessId = event.harnessId;
+        group.modelId = event.modelId;
       }
       sections.push(group);
     } else {
@@ -943,8 +949,15 @@ export default function EvolveSessionView({
     (s): s is SectionGroup & { harness: string; model: string } =>
       s.type === 'agent' && s.harness !== undefined,
   );
-  const sessionHarness = lastAgentSection?.harness;
-  const sessionModel = lastAgentSection?.model;
+  // Prefer stored IDs (new sessions); fall back to label-based reverse lookup for old sessions.
+  const sessionHarness = lastAgentSection?.harnessId
+    ?? (lastAgentSection?.harness
+      ? HARNESS_OPTIONS.find((h) => h.label === lastAgentSection.harness)?.id
+      : undefined);
+  const sessionModel = lastAgentSection?.modelId
+    ?? (lastAgentSection?.model && sessionHarness
+      ? MODEL_OPTIONS_BY_HARNESS[sessionHarness]?.find((m) => m.label === lastAgentSection.model)?.id
+      : undefined);
   // Setup is active while it's the only section and session isn't terminal
   const isSetupActive = !isTerminal && contentSections.length === 0;
   const setupStepCount = setupSection

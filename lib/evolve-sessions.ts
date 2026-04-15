@@ -541,7 +541,7 @@ export async function startLocalEvolve(
     const modelId = session.model ?? DEFAULT_MODEL;
     const harnessLabel = HARNESS_OPTIONS.find((h) => h.id === harnessId)?.label ?? harnessId;
     const modelLabel = (MODEL_OPTIONS_BY_HARNESS[harnessId] ?? []).find((m) => m.id === modelId)?.label ?? modelId;
-    appendSessionEvent(ndjsonPath, { type: 'section_start', sectionType: 'agent', harness: harnessLabel, model: modelLabel, label: `🤖 ${harnessLabel} (${modelLabel})`, ts: Date.now() });
+    appendSessionEvent(ndjsonPath, { type: 'section_start', sectionType: 'agent', harness: harnessLabel, model: modelLabel, harnessId, modelId, label: `🤖 ${harnessLabel} (${modelLabel})`, ts: Date.now() });
 
     const attachmentSection = worktreeAttachmentPaths.length > 0
       ? `\n\nThe user has attached the following file(s) to this request (already saved in the worktree):\n` +
@@ -623,7 +623,7 @@ export async function runFollowupInWorktree(
       const fuModelId = session.model ?? DEFAULT_MODEL;
       const fuHarnessLabel = HARNESS_OPTIONS.find((h) => h.id === fuHarnessId)?.label ?? fuHarnessId;
       const fuModelLabel = (MODEL_OPTIONS_BY_HARNESS[fuHarnessId] ?? []).find((m) => m.id === fuModelId)?.label ?? fuModelId;
-      appendSessionEvent(ndjsonPath, { type: 'section_start', sectionType: 'agent', harness: fuHarnessLabel, model: fuModelLabel, label: `🤖 ${fuHarnessLabel} (${fuModelLabel})`, ts: Date.now() });
+      appendSessionEvent(ndjsonPath, { type: 'section_start', sectionType: 'agent', harness: fuHarnessLabel, model: fuModelLabel, harnessId: fuHarnessId, modelId: fuModelId, label: `🤖 ${fuHarnessLabel} (${fuModelLabel})`, ts: Date.now() });
     }
     session.status = inProgressStatus;
 

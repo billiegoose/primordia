@@ -18,7 +18,7 @@ import type { EvolveSession } from './db/types';
 
 export type SessionEvent =
   | { type: 'section_start'; sectionType: 'setup' | 'type_fix' | 'followup' | 'deploy' | 'conflict_resolution'; label: string; ts: number }
-  | { type: 'section_start'; sectionType: 'agent'; harness: string; model: string; label: string; ts: number }
+  | { type: 'section_start'; sectionType: 'agent'; harness: string; model: string; harnessId?: string; modelId?: string; label: string; ts: number }
   | { type: 'section_start'; sectionType: 'claude'; label: string; ts: number } // legacy
   | { type: 'setup_step'; label: string; done: boolean; ts: number }
   | { type: 'text'; content: string; ts: number }
