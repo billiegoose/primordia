@@ -12,11 +12,11 @@ import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { EvolveRequestForm } from "./EvolveRequestForm";
 import { withBasePath } from "../lib/base-path";
-import { X, ExternalLink } from "lucide-react";
+import { X, ExternalLink, PanelTop, PanelBottom } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type DockPosition = "top-left" | "top-right" | "bottom-left" | "bottom-right";
+type DockPosition = "top-left" | "top-right" | "bottom-left" | "bottom-right" | "top" | "bottom";
 
 interface DragOrigin {
   mouseX: number;
@@ -49,6 +49,7 @@ export function FloatingEvolveDialog({
   onSessionCreated?: (sessionId: string) => void;
 }) {
   const [isDragging, setIsDragging] = useState(false);
+  const [isSmallScreen, setIsSmallScreen] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
 
   // null = docked; {x,y} = free-floating (px from viewport top-left)
@@ -62,6 +63,33 @@ export function FloatingEvolveDialog({
 
   // Suppress unused warning — isDragging used only for cursor style via CSS
   void isDragging;
+
+  // Detect small screens (viewport narrower than dialog natural width + margins)
+  useEffect(() => {
+    const check = () => setIsSmallScreen(window.innerWidth < 452);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+
+  // When switching to small screen: clear free position and convert corner docks to
+  // top/bottom. When switching back to large screen: convert top/bottom back to corners.
+  useEffect(() => {
+    if (isSmallScreen) {
+      setFreePos(null);
+      setDock((prev) => {
+        if (prev === "top-left" || prev === "top-right") return "top";
+        if (prev === "bottom-left" || prev === "bottom-right") return "bottom";
+        return prev;
+      });
+    } else {
+      setDock((prev) => {
+        if (prev === "top") return "top-right";
+        if (prev === "bottom") return "bottom-right";
+        return prev;
+      });
+    }
+  }, [isSmallScreen]);
 
   // When a session is created: close the dialog then notify the parent so it
   // can show a persistent toast (which must live outside this component to
@@ -197,6 +225,8 @@ export function FloatingEvolveDialog({
     ? { position: "fixed", left: freePos.x, top: freePos.y }
     : {
         position: "fixed",
+        ...(dock === "top"          ? { top: 16, left: 16, right: 16, width: "auto" }    : {}),
+        ...(dock === "bottom"       ? { bottom: 16, left: 16, right: 16, width: "auto" } : {}),
         ...(dock === "top-left"     ? { top: 16, left: 16 }    : {}),
         ...(dock === "top-right"    ? { top: 16, right: 16 }   : {}),
         ...(dock === "bottom-left"  ? { bottom: 16, left: 16 } : {}),
@@ -219,24 +249,44 @@ export function FloatingEvolveDialog({
       >
         <span className="flex-1 text-sm font-medium text-amber-400">Propose a change</span>
 
-        {/* Dock corner buttons */}
-        <div className="flex items-center gap-0.5 mr-1" title="Dock to corner">
-          {(["top-left", "top-right", "bottom-left", "bottom-right"] as DockPosition[]).map((d) => (
-            <button
-              key={d}
-              type="button"
-              onClick={() => snapToDock(d)}
-              title={`Dock to ${d.replace("-", " ")}`}
-              className={`w-5 h-5 rounded flex items-center justify-center transition-colors ${
-                dock === d && !freePos
-                  ? "text-amber-400 bg-gray-800"
-                  : "text-gray-500 hover:text-gray-200 hover:bg-gray-700"
-              }`}
-            >
-              <DockIcon pos={d} />
-            </button>
-          ))}
-        </div>
+        {/* Dock buttons — corners on large screens; top/bottom on small screens */}
+        {isSmallScreen ? (
+          <div className="flex items-center gap-0.5 mr-1" title="Pin dialog">
+            {(["top", "bottom"] as DockPosition[]).map((d) => (
+              <button
+                key={d}
+                type="button"
+                onClick={() => snapToDock(d)}
+                title={d === "top" ? "Pin to top" : "Pin to bottom"}
+                className={`w-5 h-5 rounded flex items-center justify-center transition-colors ${
+                  dock === d && !freePos
+                    ? "text-amber-400 bg-gray-800"
+                    : "text-gray-500 hover:text-gray-200 hover:bg-gray-700"
+                }`}
+              >
+                {d === "top" ? <PanelTop size={12} aria-hidden="true" /> : <PanelBottom size={12} aria-hidden="true" />}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="flex items-center gap-0.5 mr-1" title="Dock to corner">
+            {(["top-left", "top-right", "bottom-left", "bottom-right"] as DockPosition[]).map((d) => (
+              <button
+                key={d}
+                type="button"
+                onClick={() => snapToDock(d)}
+                title={`Dock to ${d.replace("-", " ")}`}
+                className={`w-5 h-5 rounded flex items-center justify-center transition-colors ${
+                  dock === d && !freePos
+                    ? "text-amber-400 bg-gray-800"
+                    : "text-gray-500 hover:text-gray-200 hover:bg-gray-700"
+                }`}
+              >
+                <DockIcon pos={d} />
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Close button */}
         <button
