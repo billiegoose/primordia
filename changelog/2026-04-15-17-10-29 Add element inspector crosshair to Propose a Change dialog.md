@@ -59,3 +59,23 @@ Previously, element selection only inserted a short text snippet into the textar
 2. **Richer context** — the Markdown file includes the full React component chain, the CSS selector, truncated `outerHTML`, and a fibre-tree JSX snapshot, giving Claude Code precise multi-dimensional context to locate and edit the right element.
 3. **Visual attachment chip** — a single blue `<ComponentName>` chip in the form's attachment row shows exactly what was captured, with a spinner during async file generation and a tooltip listing the generated file names.
 4. **Works everywhere** — the inspector is embedded in `EvolveRequestForm` itself, so it works in the floating dialog, the `/evolve` page, and the session follow-up form without any duplication.
+
+---
+
+## Follow-up fixes (same PR)
+
+### Screenshot was missing (fixed)
+
+The previous approach rendered the SVG via a `<canvas>` and called `canvas.toBlob()`. Modern browsers treat the canvas as **tainted** when `drawImage()` is called with an SVG that contains a `<foreignObject>` element (browser security restriction), causing `toBlob()` to return `null` silently.
+
+**Fix:** `captureElementScreenshot` is now synchronous and returns the SVG blob directly as a `File` with extension `.svg` — no canvas involved. The SVG embeds the same-origin CSS and the element's `outerHTML`, and is readable by Claude and any SVG viewer.
+
+### React Fiber Tree was the entire page (fixed)
+
+The previous `generateFiberTreeText` walked DOWN from the nearest named component and rendered ALL its children recursively (up to 400 nodes), which on any typical page produced the entire component tree and was not useful.
+
+**Fix:** Replaced with a **path-only renderer**. It walks UP from the selected element to the nearest named React component, records only the direct ancestor fibers along that single branch, then renders them top-down as a compact JSX-like snippet. Siblings at each level are replaced with a `{/* ... */}` placeholder. Depth is capped at 25 fibers. Typical output is 5-15 lines covering just the component boundary down to the selected element.
+
+### Page URL added to details file
+
+`element-{name}-details.md` now includes a `## Page` section with `window.location.href` captured at the moment of selection, so Claude Code knows which route the element was seen on.

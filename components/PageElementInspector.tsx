@@ -2,15 +2,16 @@
 
 // components/PageElementInspector.tsx
 // Full-screen transparent portal overlay for picking a DOM element on the
-// current page.  Renders above all other UI (z-index 9998–9999) so it works
+// current page.  Renders above all other UI (z-index 9998-9999) so it works
 // regardless of which page is open.
 //
 // Mouse: move to highlight, click to select.
 // Touch: drag to highlight, hold 600 ms to select.
 // Keyboard: Escape to cancel.
 //
-// Also exports captureElementFiles() which generates a PNG screenshot and a
-// Markdown details file (outerHTML + React fiber tree) for a selected element.
+// Also exports captureElementFiles() which generates an SVG screenshot and a
+// Markdown details file (page URL, outerHTML, React ancestry path) for a
+// selected element.
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
@@ -121,109 +122,112 @@ export function getReactComponentChain(el: Element): string[] {
 }
 
 /**
- * Walk the React fiber tree starting from the nearest named component ancestor
- * of `selectedEl`, generating a JSX-like tree with the selected fiber marked.
+ * Render the DIRECT ANCESTRY PATH from the selected element up to its nearest
+ * named React component (e.g. NavHeader), as a compact JSX-like snippet.
+ *
+ * Only the single branch leading to the selected element is shown - siblings
+ * at each level are omitted and replaced with a siblings-omitted hint. This
+ * keeps the output small and immediately useful without flooding the context
+ * window with the entire component tree.
  */
 export function generateFiberTreeText(selectedEl: Element): string {
-  const keys = Object.keys(selectedEl as unknown as Record<string, unknown>);
+  const elAny = selectedEl as unknown as Record<string, unknown>;
+  const keys = Object.keys(elAny);
   const fiberKey = keys.find(
     (k) => k.startsWith("__reactFiber$") || k.startsWith("__reactInternalInstance$"),
   );
-  if (!fiberKey) return "(React fiber not available — production builds strip fiber data)";
+  if (!fiberKey) return "(React fiber not available - production builds strip fiber data)";
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const selectedFiber: any = (selectedEl as unknown as Record<string, unknown>)[fiberKey];
+  const selectedFiber: any = elAny[fiberKey];
 
-  // Walk up to the nearest named React component
+  // Walk UP from the selected element collecting fibers until we reach a named
+  // React component (capital-letter display name). Only include fibers that have
+  // a renderable type (skip fragments and root fibers).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let rootFiber: any = selectedFiber;
-  let limit = 60;
-  while (rootFiber.return && limit-- > 0) {
-    const parent = rootFiber.return;
-    const type = parent.type;
-    if (type && typeof type === "function") {
+  const upPath: any[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let cur: any = selectedFiber;
+  let limit = 25;
+
+  while (cur && limit-- > 0) {
+    const type = cur.type;
+    if (type) upPath.push(cur); // only fibers with a renderable type
+    // Stop once we've added the nearest named React component ancestor
+    // (upPath.length > 1 ensures we skip the selected element itself)
+    if (upPath.length > 1 && typeof type === "function") {
       const name = (type.displayName || type.name) as string | undefined;
-      if (name && /^[A-Z]/.test(name) && name.length > 1) {
-        rootFiber = parent;
-        break;
-      }
+      if (name && /^[A-Z]/.test(name) && name.length > 1) break;
     }
-    rootFiber = parent;
+    cur = cur.return;
+  }
+
+  // Reverse so the component root comes first: [component, ..., selected]
+  const path = upPath.slice().reverse();
+
+  // Helper: concise attribute string from fiber props
+  function attrsFor(props: Record<string, unknown>): string {
+    const parts: string[] = [];
+    if (typeof props.className === "string") {
+      const cls =
+        props.className.length > 70 ? props.className.slice(0, 70) + "..." : props.className;
+      parts.push(`className="${cls}"`);
+    }
+    if (props.id) parts.push(`id="${props.id}"`);
+    if (typeof props.href === "string") parts.push(`href="${props.href.slice(0, 50)}"`);
+    if (typeof props.type === "string") parts.push(`type="${props.type}"`);
+    return parts.length ? " " + parts.join(" ") : "";
+  }
+
+  // Helper: display name for a fiber type
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function tagFor(type: any): string | null {
+    if (typeof type === "string") return type;
+    if (typeof type === "function")
+      return ((type.displayName || type.name || null) as string | null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if (type && typeof type === "object") return ((type as any).displayName || null) as string | null;
+    return null;
   }
 
   const lines: string[] = [];
-  serializeFiber(rootFiber, 0, selectedFiber, lines, 12, { count: 0 });
-  return lines.join("\n");
-}
+  const openTags: string[] = []; // ancestor tags that need closing
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function serializeFiber(fiber: any, depth: number, selectedFiber: any, lines: string[], maxDepth: number, counter: { count: number }) {
-  if (!fiber || depth > maxDepth || counter.count > 400) return;
-  counter.count++;
+  for (let i = 0; i < path.length; i++) {
+    const fiber = path[i];
+    const isSelected = fiber === selectedFiber;
+    // The element immediately above the selected one — no siblings hint between them
+    const isDirectParent = i === path.length - 2;
+    const pad = "  ".repeat(i);
+    const props = (fiber.memoizedProps || {}) as Record<string, unknown>;
+    const tag = tagFor(fiber.type);
+    if (!tag) continue;
 
-  const pad = "  ".repeat(depth);
-  const type = fiber.type;
-  const props: Record<string, unknown> = fiber.memoizedProps || {};
-  const isSelected = fiber === selectedFiber;
+    const attrsStr = attrsFor(props);
+    const textContent =
+      typeof props.children === "string" ? (props.children as string).trim().slice(0, 60) : null;
 
-  if (!type) {
-    // Fragment / root — render children inline
-    let child = fiber.child;
-    while (child) {
-      serializeFiber(child, depth, selectedFiber, lines, maxDepth, counter);
-      child = child.sibling;
-    }
-    return;
-  }
-
-  let tagName: string;
-  if (typeof type === "string") {
-    tagName = type;
-  } else if (typeof type === "function") {
-    tagName = ((type.displayName || type.name) as string | undefined) ?? "Anonymous";
-  } else if (type && typeof type === "object") {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const t = type as any;
-    tagName = (t.displayName || t.render?.name || t.type?.name) as string | undefined ?? "Anonymous";
-  } else {
-    return;
-  }
-
-  // Build a concise attribute string
-  const attrs: string[] = [];
-  if (props.className && typeof props.className === "string") {
-    const cls = props.className.slice(0, 60);
-    attrs.push(`className="${cls}${props.className.length > 60 ? "…" : ""}"`);
-  }
-  if (props.id) attrs.push(`id="${props.id}"`);
-  if (typeof props.href === "string") attrs.push(`href="${props.href.slice(0, 40)}"`);
-  if (typeof props.type === "string") attrs.push(`type="${props.type}"`);
-  if (typeof props.placeholder === "string") attrs.push(`placeholder="${(props.placeholder as string).slice(0, 30)}"`);
-  if (props.disabled === true) attrs.push("disabled");
-  const attrsStr = attrs.length ? " " + attrs.join(" ") : "";
-
-  const selectedMark = isSelected ? "  {/* ← SELECTED */}" : "";
-  const textChildren = typeof props.children === "string" ? (props.children as string).trim().slice(0, 80) : null;
-
-  if (!fiber.child || isSelected) {
-    if (textChildren) {
-      lines.push(`${pad}<${tagName}${attrsStr}>${textChildren}</${tagName}>${selectedMark}`);
+    if (isSelected) {
+      // Leaf: self-closing or with text content, marked as selected
+      if (textContent) {
+        lines.push(`${pad}<${tag}${attrsStr}>${textContent}</${tag}>  {/* <- SELECTED */}`);
+      } else {
+        lines.push(`${pad}<${tag}${attrsStr} />  {/* <- SELECTED */}`);
+      }
     } else {
-      lines.push(`${pad}<${tagName}${attrsStr} />${selectedMark}`);
+      // Ancestor: open tag + optional siblings-omitted hint
+      lines.push(`${pad}<${tag}${attrsStr}>`);
+      if (!isDirectParent) lines.push(`${pad}  {/* ... */}`);
+      openTags.push(tag);
     }
-    return;
   }
 
-  lines.push(`${pad}<${tagName}${attrsStr}>${selectedMark}`);
-  let child = fiber.child;
-  let sibCount = 0;
-  while (child && sibCount < 15) {
-    serializeFiber(child, depth + 1, selectedFiber, lines, maxDepth, counter);
-    child = child.sibling;
-    sibCount++;
+  // Close ancestor tags in reverse order
+  for (let i = openTags.length - 1; i >= 0; i--) {
+    lines.push(`${"".padStart(i * 2)}</${openTags[i]}>`);
   }
-  if (child) lines.push(`${pad}  {/* …more siblings */}`);
-  lines.push(`${pad}</${tagName}>`);
+
+  return lines.join("\n");
 }
 
 // ─── File capture ─────────────────────────────────────────────────────────────
@@ -234,8 +238,11 @@ function sanitizeLabel(label: string): string {
 
 /**
  * Generate attachment files for a selected page element:
- * 1. A PNG screenshot (best-effort via SVG foreignObject — may not reflect all CSS)
- * 2. A Markdown details file with outerHTML + React component chain + fiber tree
+ * 1. An SVG screenshot — the element's HTML + embedded same-origin CSS rendered
+ *    via SVG foreignObject. Saved directly as SVG to avoid canvas-taint issues
+ *    that cause canvas.toBlob() to return null for foreignObject content.
+ * 2. A Markdown details file with: page URL, React component chain, CSS selector,
+ *    outerHTML, and a compact JSX ancestry path ending at the selected element.
  *
  * Both files share a common slug derived from the component name.
  */
@@ -243,22 +250,28 @@ export async function captureElementFiles(el: Element, info: PageElementInfo): P
   const slug = sanitizeLabel(info.component);
   const files: File[] = [];
 
-  // Screenshot (best-effort — skip silently on failure)
+  // Screenshot - synchronous SVG, skip silently on any error
   try {
-    const screenshot = await captureElementScreenshot(el, slug);
+    const screenshot = captureElementScreenshot(el, slug);
     if (screenshot) files.push(screenshot);
   } catch {
     // ignore
   }
 
   // Text details
+  const pageUrl = typeof window !== "undefined" ? window.location.href : "(unknown)";
   const chain = getReactComponentChain(el);
   const chainStr =
-    chain.length ? chain.join(" > ") + ` > [${el.tagName.toLowerCase()}]` : el.tagName.toLowerCase();
+    chain.length
+      ? chain.join(" > ") + ` > [${el.tagName.toLowerCase()}]`
+      : el.tagName.toLowerCase();
   const fiberTree = generateFiberTreeText(el);
 
   const md = [
     `# Inspected Element: <${info.component}>`,
+    "",
+    "## Page",
+    pageUrl,
     "",
     "## React Component Chain",
     chainStr,
@@ -271,7 +284,8 @@ export async function captureElementFiles(el: Element, info: PageElementInfo): P
     info.html,
     "```",
     "",
-    "## React Fiber Tree",
+    "## React Ancestry Path",
+    "(direct path from nearest named component to selected element; siblings omitted)",
     "```jsx",
     fiberTree,
     "```",
@@ -281,13 +295,22 @@ export async function captureElementFiles(el: Element, info: PageElementInfo): P
   return files;
 }
 
-async function captureElementScreenshot(el: Element, slug: string): Promise<File | null> {
+/**
+ * Capture a screenshot of the element as an SVG file.
+ *
+ * We save the SVG directly rather than routing it through a Canvas, because
+ * drawing an SVG foreignObject to Canvas taints the canvas (browser security
+ * restriction) and causes canvas.toBlob() to return null. Saving the SVG blob
+ * as a .svg file avoids this entirely and is readable by Claude.
+ */
+function captureElementScreenshot(el: Element, slug: string): File | null {
   const rect = el.getBoundingClientRect();
   const w = Math.round(rect.width);
   const h = Math.round(rect.height);
   if (w < 1 || h < 1) return null;
 
-  // Gather CSS: <style> tags + same-origin stylesheet rules
+  // Gather CSS: <style> tags in the document + same-origin stylesheet rules.
+  // This preserves Tailwind utility classes and Next.js injected styles.
   const cssChunks: string[] = [];
   for (const styleEl of Array.from(document.querySelectorAll("style"))) {
     cssChunks.push(styleEl.textContent ?? "");
@@ -297,10 +320,10 @@ async function captureElementScreenshot(el: Element, slug: string): Promise<File
       const rules = Array.from(sheet.cssRules ?? []);
       cssChunks.push(rules.slice(0, 2000).map((r) => r.cssText).join("\n"));
     } catch {
-      // cross-origin — skip
+      // cross-origin stylesheet - skip
     }
   }
-  // Cap total embedded CSS at 300 KB to avoid browser SVG rendering limits
+  // Cap embedded CSS at 300 KB to stay within SVG renderer limits
   const cssText = cssChunks.join("\n").slice(0, 300_000).replace(/<\/style>/gi, "");
 
   const svgContent = [
@@ -314,40 +337,7 @@ async function captureElementScreenshot(el: Element, slug: string): Promise<File
     "</svg>",
   ].join("");
 
-  const svgBlob = new Blob([svgContent], { type: "image/svg+xml;charset=utf-8" });
-  const url = URL.createObjectURL(svgBlob);
-
-  try {
-    const img = new Image();
-    await new Promise<void>((resolve, reject) => {
-      img.onload = () => resolve();
-      img.onerror = () => reject(new Error("SVG image load failed"));
-      img.src = url;
-    });
-
-    const dpr = window.devicePixelRatio || 1;
-    const canvas = document.createElement("canvas");
-    canvas.width = w * dpr;
-    canvas.height = h * dpr;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    ctx.scale(dpr, dpr);
-    ctx.drawImage(img, 0, 0, w, h);
-
-    return await new Promise<File | null>((resolve) => {
-      canvas.toBlob(
-        (blob) =>
-          resolve(
-            blob
-              ? new File([blob], `element-${slug}-screenshot.png`, { type: "image/png" })
-              : null,
-          ),
-        "image/png",
-      );
-    });
-  } finally {
-    URL.revokeObjectURL(url);
-  }
+  return new File([svgContent], `element-${slug}-screenshot.svg`, { type: "image/svg+xml" });
 }
 
 // ─── HoverLabel ───────────────────────────────────────────────────────────────
