@@ -79,3 +79,27 @@ The previous `generateFiberTreeText` walked DOWN from the nearest named componen
 ### Page URL added to details file
 
 `element-{name}-details.md` now includes a `## Page` section with `window.location.href` captured at the moment of selection, so Claude Code knows which route the element was seen on.
+
+---
+
+## Further refinements (same PR)
+
+### JSX Rendered shows full siblings (was path-only)
+
+Renamed section from "React Ancestry Path" to "JSX Rendered".
+
+Previous approach walked only the direct ancestor branch to the selected element and replaced all siblings with `{/* ... */}` placeholders. This was too minimal to be useful.
+
+New approach (`renderFiber`): starts from the nearest named React component ancestor (same as before) but renders the **full subtree** with all siblings, like React DevTools. Depth is capped at 8 levels below the component root and node count at 200 to keep the output reasonable. The selected element is still marked `{/* <- SELECTED */}`.
+
+### Screenshot fixed: well-formed SVG + PNG attempt
+
+The SVG was malformed because `el.outerHTML` is HTML (not XML) — void elements are unclosed (`<br>`, `<input>`, etc.), attribute values may contain unescaped `<`/`>`, and so on. This broke SVG parsers.
+
+**Fix:** Use `new XMLSerializer().serializeToString(el)` to serialize the element as proper XHTML before embedding it in the SVG. XHTML is valid XML so SVG parsers handle it correctly.
+
+**Fix:** Wrap the embedded CSS in `<![CDATA[...]]>` so CSS content (which frequently contains `<`, `>`, `&`, and `</style>`) cannot break the surrounding SVG XML structure.
+
+**PNG attempt first:** `captureElementScreenshot` is now async. It tries to render the fixed SVG to a Canvas and export PNG via `canvas.toBlob()`. This succeeds in Firefox (which does not taint the canvas for same-origin foreignObject SVGs). Chrome always taints the canvas for foreignObject content regardless of origin, so `toBlob()` throws a `SecurityError` there — caught and handled gracefully.
+
+**SVG fallback:** If PNG fails, the well-formed SVG is returned instead. This SVG now renders correctly in any conforming SVG viewer (unlike the previous version which was malformed HTML-in-SVG).
