@@ -103,6 +103,11 @@ async function main(): Promise<void> {
   // agent loop exits cleanly and prompt() resolves without throwing — but the
   // task is not complete.
   let lastAssistantStopReason: string | null = null;
+  // Track the last API-level error message (e.g. invalid API key). The Pi SDK
+  // emits a message_update event with assistantMessageEvent.type === 'error'
+  // but does NOT throw from session.prompt() — we must detect and re-throw it
+  // ourselves so the session is correctly reported as errored rather than done.
+  let lastApiErrorMessage: string | null = null;
 
   process.on('SIGTERM', () => {
     userAborted = true;
@@ -184,6 +189,11 @@ async function main(): Promise<void> {
         const ae = event.assistantMessageEvent;
         if (ae.type === 'text_delta' && ae.delta) {
           appendSessionEvent(ndjsonPath, { type: 'text', content: ae.delta, ts: ts() });
+        } else if (ae.type === 'error') {
+          // Capture API errors (e.g. invalid API key). session.prompt() resolves
+          // without throwing in this case, so we must detect it here and surface
+          // it after prompt() returns.
+          lastApiErrorMessage = ae.error.errorMessage ?? `API error (${ae.reason})`;
         }
       } else if (event.type === 'tool_execution_start') {
         appendSessionEvent(ndjsonPath, {
@@ -224,6 +234,13 @@ async function main(): Promise<void> {
       }
     } finally {
       clearTimeout(timeoutId);
+    }
+
+    // Re-throw any API-level error that the SDK swallowed (e.g. invalid API key).
+    // The SDK emits a message_update 'error' event but resolves prompt() cleanly,
+    // so without this check the session would be reported as successful.
+    if (lastApiErrorMessage) {
+      throw new Error(lastApiErrorMessage);
     }
 
     // Collect final token/cost metrics from the session stats.
