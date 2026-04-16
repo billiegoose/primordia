@@ -933,6 +933,44 @@ export default function EvolveSessionView({
   /** Whether to show the preview as a desktop sidebar. */
   const showPreviewSidebar = status === "ready" && !!previewUrl;
 
+  /** Width of the session (left) panel in pixels when sidebar is visible. */
+  const [mainWidthPx, setMainWidthPx] = useState(560);
+  const isDraggingRef = useRef(false);
+  const dragStartXRef = useRef(0);
+  const dragStartWidthRef = useRef(560);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const handleDividerMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isDraggingRef.current = true;
+    dragStartXRef.current = e.clientX;
+    dragStartWidthRef.current = mainWidthPx;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!isDraggingRef.current) return;
+      const delta = ev.clientX - dragStartXRef.current;
+      const containerWidth = containerRef.current?.offsetWidth ?? window.innerWidth;
+      const minLeft = 280;
+      const minRight = 280;
+      const maxLeft = containerWidth - minRight - 4; // 4px for divider
+      const newWidth = Math.max(minLeft, Math.min(maxLeft, dragStartWidthRef.current + delta));
+      setMainWidthPx(newWidth);
+    };
+
+    const onMouseUp = () => {
+      isDraggingRef.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  }, [mainWidthPx]);
+
   /** True while the session pipeline is actively running (not yet ready for action). */
   const isClaudeRunning = status === "starting" || status === "running-claude" || status === "fixing-types";
 
@@ -965,8 +1003,11 @@ export default function EvolveSessionView({
     : 0;
 
   return (
-    <div className={`flex min-h-dvh w-full${showPreviewSidebar ? ' xl:flex-row xl:items-start' : ''}`}>
-    <main className={`flex flex-col w-full px-4 py-6${showPreviewSidebar ? ' xl:max-w-[560px] xl:flex-shrink-0' : ' max-w-3xl mx-auto'}`}>
+    <div ref={containerRef} className={`flex min-h-dvh w-full${showPreviewSidebar ? ' xl:flex-row xl:items-start' : ''}`}>
+    <main
+      className={`flex flex-col w-full px-4 py-6${showPreviewSidebar ? '' : ' max-w-3xl mx-auto'}`}
+      style={showPreviewSidebar ? { width: mainWidthPx, minWidth: mainWidthPx, flexShrink: 0 } : undefined}
+    >
       {/* Header */}
       <header className="flex items-center justify-between mb-8 flex-shrink-0">
         <NavHeader branch={branch} subtitle="Session" />
@@ -1472,7 +1513,14 @@ export default function EvolveSessionView({
 
     {/* ── Desktop preview sidebar ── */}
     {showPreviewSidebar && (
-      <aside className="hidden xl:flex xl:flex-col xl:flex-1 xl:sticky xl:top-0 xl:h-dvh border-l border-gray-800 bg-gray-950 p-4">
+      <>
+      {/* Drag handle */}
+      <div
+        className="hidden xl:block w-1 flex-shrink-0 xl:sticky xl:top-0 xl:h-dvh bg-gray-800 hover:bg-blue-500 active:bg-blue-400 transition-colors cursor-col-resize"
+        onMouseDown={handleDividerMouseDown}
+        title="Drag to resize"
+      />
+      <aside className="hidden xl:flex xl:flex-col xl:flex-1 xl:sticky xl:top-0 xl:h-dvh bg-gray-950 p-4">
         {proxyServerStatus === "running" ? (
           <WebPreviewPanel src={previewUrl!} fullHeight onElementSelected={handleElementSelected} />
         ) : (
@@ -1483,6 +1531,7 @@ export default function EvolveSessionView({
           </div>
         )}
       </aside>
+      </>
     )}
     </div>
   );
