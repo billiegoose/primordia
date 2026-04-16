@@ -71,7 +71,7 @@ export default async function LandingPage() {
       <LandingNav />
 
       {/* ── Hero ── */}
-      <section className="relative flex flex-col items-center justify-center min-h-dvh px-6 text-center overflow-hidden">
+      <section data-component="HeroSection" className="relative flex flex-col items-center justify-center min-h-dvh px-6 text-center overflow-hidden">
 
         {/* Animated gradient blobs */}
         <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
@@ -131,7 +131,7 @@ export default async function LandingPage() {
       </section>
 
       {/* ── Features ── */}
-      <section className="relative px-6 py-24 max-w-5xl mx-auto">
+      <section data-component="FeaturesSection" className="relative px-6 py-24 max-w-5xl mx-auto">
         <div className="text-center mb-16">
           <h2 className="font-mono font-bold text-3xl sm:text-4xl text-white mb-4">
             What is Primordia?
@@ -146,6 +146,7 @@ export default async function LandingPage() {
           {FEATURES.map((f) => (
             <div
               key={f.title}
+              data-component="FeatureCard"
               className={`group relative rounded-2xl p-6 border border-white/5 ${f.bg} ring-1 ${f.ring} hover:border-white/10 transition-all hover:-translate-y-1`}
             >
               <div className={`mb-4 ${f.accent}`}>{f.icon}</div>
@@ -157,7 +158,7 @@ export default async function LandingPage() {
       </section>
 
       {/* ── How it works ── */}
-      <section className="relative px-6 py-24 border-t border-white/5">
+      <section data-component="HowItWorksSection" className="relative px-6 py-24 border-t border-white/5">
         <div className="max-w-4xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="font-mono font-bold text-3xl sm:text-4xl text-white mb-4">
@@ -168,7 +169,7 @@ export default async function LandingPage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
             {STEPS.map((s, i) => (
-              <div key={s.n} className="relative">
+              <div key={s.n} data-component="HowItWorksStep" className="relative">
                 {/* Connector line (not on last item) */}
                 {i < STEPS.length - 1 && (
                   <div className="hidden lg:block absolute top-5 left-full w-full h-px bg-gradient-to-r from-white/10 to-transparent -translate-y-px" aria-hidden="true" />
@@ -183,7 +184,7 @@ export default async function LandingPage() {
       </section>
 
       {/* ── CTA banner ── */}
-      <section className="relative px-6 py-24">
+      <section data-component="CTABannerSection" className="relative px-6 py-24">
         <div className="relative max-w-3xl mx-auto rounded-3xl overflow-hidden">
           {/* Background glow */}
           <div className="absolute inset-0 bg-gradient-to-br from-blue-600/20 via-violet-600/15 to-fuchsia-600/10" aria-hidden="true" />
@@ -207,7 +208,7 @@ export default async function LandingPage() {
       </section>
 
       {/* ── Footer ── */}
-      <footer className="border-t border-white/5 px-6 py-10">
+      <footer data-component="LandingFooter" className="border-t border-white/5 px-6 py-10">
         <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-gray-500 font-mono">
           <span>Primordia — the self-modifying web application</span>
           <div className="flex items-center gap-6">

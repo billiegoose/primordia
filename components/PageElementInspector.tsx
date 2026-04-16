@@ -74,7 +74,51 @@ export function getCssSelector(el: Element): string {
 
 // ─── React fiber helpers ──────────────────────────────────────────────────────
 
+/**
+ * Next.js App Router and React internal component names that should be skipped
+ * when walking the fiber tree, because they are framework plumbing rather than
+ * meaningful application-level components.
+ */
+const INTERNAL_COMPONENT_NAMES = new Set([
+  "SegmentViewNode",
+  "InnerLayoutRouter",
+  "OuterLayoutRouter",
+  "AppRouter",
+  "HotReloader",
+  "ReactDevOverlay",
+  "ServerInsertedHTMLContext",
+  "StylesheetResource",
+  "ScriptResource",
+  "ClientHookContext",
+  "GlobalError",
+  "NotFoundBoundary",
+  "RedirectBoundary",
+  "ErrorBoundary",
+  "LoadingBoundary",
+  "RootLayout",
+]);
+
+/**
+ * Walk DOM ancestors looking for a `data-component` attribute.
+ * This is the preferred label source for server-rendered sections that don't
+ * appear as named components in the client-side fiber tree.
+ */
+function getDataComponentLabel(el: Element): string | null {
+  let cur: Element | null = el;
+  while (cur && cur !== document.body) {
+    const label = cur.getAttribute("data-component");
+    if (label) return label;
+    cur = cur.parentElement;
+  }
+  return null;
+}
+
 export function getReactComponentName(el: Element): string | null {
+  // 1. Check data-component attribute first — reliable for server-rendered content.
+  const label = getDataComponentLabel(el);
+  if (label) return label;
+
+  // 2. Walk React fiber tree, skipping Next.js / React internal names.
   const keys = Object.keys(el as unknown as Record<string, unknown>);
   const fiberKey = keys.find(
     (k) => k.startsWith("__reactFiber$") || k.startsWith("__reactInternalInstance$"),
@@ -87,13 +131,13 @@ export function getReactComponentName(el: Element): string | null {
     const type = fiber.type;
     if (type && typeof type === "function") {
       const name = (type.displayName || type.name) as string | undefined;
-      if (name && /^[A-Z]/.test(name) && name.length > 1) return name;
+      if (name && /^[A-Z]/.test(name) && name.length > 1 && !INTERNAL_COMPONENT_NAMES.has(name)) return name;
     }
     if (type && typeof type === "object") {
       let name: string | undefined = type.displayName;
       if (!name && type.render) name = type.render.displayName || type.render.name;
       if (!name && type.type) name = type.type.displayName || type.type.name;
-      if (name && /^[A-Z]/.test(name) && name.length > 1) return name;
+      if (name && /^[A-Z]/.test(name) && name.length > 1 && !INTERNAL_COMPONENT_NAMES.has(name)) return name;
     }
     fiber = fiber.return;
   }
@@ -115,10 +159,13 @@ export function getReactComponentChain(el: Element): string[] {
     const type = fiber.type;
     if (type && typeof type === "function") {
       const name = (type.displayName || type.name) as string | undefined;
-      if (name && /^[A-Z]/.test(name) && name.length > 1) chain.unshift(name);
+      if (name && /^[A-Z]/.test(name) && name.length > 1 && !INTERNAL_COMPONENT_NAMES.has(name)) chain.unshift(name);
     }
     fiber = fiber.return;
   }
+  // Prepend any data-component label found in the DOM ancestry.
+  const label = getDataComponentLabel(el);
+  if (label && !chain.includes(label)) chain.unshift(label);
   return chain;
 }
 
@@ -141,7 +188,8 @@ export function generateFiberTreeText(selectedEl: Element): string {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const selectedFiber: any = elAny[fiberKey];
 
-  // Walk UP to the nearest named React component to use as the rendering root.
+  // Walk UP to the nearest named React component to use as the rendering root,
+  // skipping Next.js / React internal names so we don't end up rooted at SegmentViewNode.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let rootFiber: any = selectedFiber;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -151,7 +199,7 @@ export function generateFiberTreeText(selectedEl: Element): string {
     const type = cur.type;
     if (type && typeof type === "function") {
       const name = (type.displayName || type.name) as string | undefined;
-      if (name && /^[A-Z]/.test(name) && name.length > 1) {
+      if (name && /^[A-Z]/.test(name) && name.length > 1 && !INTERNAL_COMPONENT_NAMES.has(name)) {
         rootFiber = cur;
         break;
       }
