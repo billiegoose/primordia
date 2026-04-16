@@ -75,7 +75,7 @@ export default function HorizontalResizeHandle({
 
   return (
     <div
-      className="hidden xl:flex items-center justify-center w-3 flex-shrink-0 xl:sticky xl:top-0 xl:h-dvh cursor-col-resize group select-none touch-none"
+      className="hidden xl:flex items-center justify-center w-1 flex-shrink-0 xl:sticky xl:top-0 xl:h-dvh cursor-col-resize group select-none touch-none"
       onMouseDown={(e) => { e.preventDefault(); startResize(e.clientX); }}
       aria-hidden="true"
     >
