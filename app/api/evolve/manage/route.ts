@@ -713,10 +713,8 @@ async function runAcceptAsync(
         return;
       }
 
-      // Cleanup.
-      await runGit(['worktree', 'remove', '--force', worktreePath], repoRoot);
-      await runGit(['branch', '-D', branch], repoRoot);
-      await runGit(['config', '--remove-section', `branch.${branch}`], repoRoot);
+      // Keep the worktree intact so logs and the preview server remain
+      // accessible after the merge. The user can manually clean up later.
     }
 
     // Mark as accepted (decision event makes inferred status 'accepted').
@@ -786,14 +784,19 @@ export async function POST(request: Request) {
   const parentBranchResult = await runGit(['config', `branch.${branch}.parent`], repoRoot);
   const parentBranch = parentBranchResult.stdout.trim() || 'main';
 
-  // Ask the reverse proxy to stop the preview dev server for this session.
-  try {
-    await fetch(`http://127.0.0.1:${process.env.REVERSE_PROXY_PORT!}/_proxy/preview/${body.sessionId}`, {
-      method: 'DELETE',
-    });
-  } catch { /* proxy not running — preview server may already be gone */ }
-
   const isProduction = process.env.NODE_ENV === 'production';
+
+  // Ask the reverse proxy to stop the preview dev server for this session.
+  // For dev accepts we keep the worktree alive (logs + preview server remain
+  // accessible), so there's no need to kill the preview server up front.
+  const shouldKillPreview = body.action === 'reject' || isProduction;
+  if (shouldKillPreview) {
+    try {
+      await fetch(`http://127.0.0.1:${process.env.REVERSE_PROXY_PORT!}/_proxy/preview/${body.sessionId}`, {
+        method: 'DELETE',
+      });
+    } catch { /* proxy not running — preview server may already be gone */ }
+  }
 
   /** Write a decision event (makes inferred status 'accepted' or 'rejected'). */
   async function logDecision(action: 'accept' | 'reject'): Promise<void> {
