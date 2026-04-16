@@ -29,10 +29,19 @@ export default function HorizontalResizeHandle({
 }: HorizontalResizeHandleProps) {
   const dragOriginRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+
   function startResize(clientX: number) {
     dragOriginRef.current = { startX: clientX, startWidth: currentWidth };
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
+
+    // Cover the page with a transparent overlay so iframe doesn't swallow mouse events.
+    const overlay = document.createElement("div");
+    overlay.style.cssText =
+      "position:fixed;inset:0;z-index:9999;cursor:col-resize;";
+    document.body.appendChild(overlay);
+    overlayRef.current = overlay;
   }
 
   useEffect(() => {
@@ -50,6 +59,8 @@ export default function HorizontalResizeHandle({
       dragOriginRef.current = null;
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
+      overlayRef.current?.remove();
+      overlayRef.current = null;
     }
 
     window.addEventListener("mousemove", onMouseMove);
