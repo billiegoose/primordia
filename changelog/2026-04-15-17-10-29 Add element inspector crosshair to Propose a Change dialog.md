@@ -103,3 +103,13 @@ The SVG was malformed because `el.outerHTML` is HTML (not XML) — void elements
 **PNG attempt first:** `captureElementScreenshot` is now async. It tries to render the fixed SVG to a Canvas and export PNG via `canvas.toBlob()`. This succeeds in Firefox (which does not taint the canvas for same-origin foreignObject SVGs). Chrome always taints the canvas for foreignObject content regardless of origin, so `toBlob()` throws a `SecurityError` there — caught and handled gracefully.
 
 **SVG fallback:** If PNG fails, the well-formed SVG is returned instead. This SVG now renders correctly in any conforming SVG viewer (unlike the previous version which was malformed HTML-in-SVG).
+
+---
+
+## Screenshot: switch to @zumer/snapdom for real PNG (same PR)
+
+The SVG-foreignObject-via-canvas approach was fundamentally broken in Chrome (canvas taint) and the resulting SVG was hard to view. Replaced with `@zumer/snapdom` (v2.8.0), a dedicated DOM-to-image library that inlines all styles and resources and avoids the canvas-taint issue.
+
+**Change:** `captureElementScreenshot` now calls `snapdom.toBlob(el, { type: 'png', scale: devicePixelRatio, fast: true })` and wraps the result in a `File` named `element-{slug}-screenshot.png`. Remote font embedding is skipped (`embedFonts: false`) for speed; Tailwind utility classes are captured via the same-origin stylesheet already in the DOM.
+
+The previous SVG-generation and canvas-fallback code has been removed entirely.

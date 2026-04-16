@@ -15,6 +15,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
+import { snapdom } from "@zumer/snapdom";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -300,94 +301,23 @@ export async function captureElementFiles(el: Element, info: PageElementInfo): P
 }
 
 /**
- * Capture a screenshot of the element.
- *
- * Strategy:
- * 1. Build a well-formed SVG using XMLSerializer (produces valid XHTML, unlike
- *    raw outerHTML which can have unclosed tags) and CDATA-wrapped CSS (so CSS
- *    content cannot break the XML structure).
- * 2. Try rendering that SVG to a Canvas and exporting as PNG. This works in
- *    Firefox; Chrome always taints the canvas for foreignObject SVGs (security
- *    restriction), causing toBlob() to throw or return null.
- * 3. Fall back to saving the well-formed SVG directly if PNG fails.
+ * Capture a PNG screenshot of the element using @zumer/snapdom, which inlines
+ * all styles and resources and renders via SVG foreignObject + Canvas without
+ * the cross-origin taint issues that plague a naive canvas approach.
  */
 async function captureElementScreenshot(el: Element, slug: string): Promise<File | null> {
   const rect = el.getBoundingClientRect();
-  const w = Math.round(rect.width);
-  const h = Math.round(rect.height);
-  if (w < 1 || h < 1) return null;
+  if (rect.width < 1 || rect.height < 1) return null;
 
-  // Gather CSS: <style> tags + same-origin stylesheet rules
-  const cssChunks: string[] = [];
-  for (const styleEl of Array.from(document.querySelectorAll("style"))) {
-    cssChunks.push(styleEl.textContent ?? "");
-  }
-  for (const sheet of Array.from(document.styleSheets)) {
-    try {
-      const rules = Array.from(sheet.cssRules ?? []);
-      cssChunks.push(rules.slice(0, 2000).map((r) => r.cssText).join("\n"));
-    } catch {
-      // cross-origin stylesheet — skip
-    }
-  }
-  const rawCss = cssChunks.join("\n").slice(0, 300_000);
+  const blob = await snapdom.toBlob(el, {
+    type: "png",
+    scale: window.devicePixelRatio || 1,
+    backgroundColor: "#111827",
+    embedFonts: false, // skip remote font embedding to keep capture fast
+    fast: true,
+  });
 
-  // Serialize the element as valid XHTML using XMLSerializer.
-  // Raw outerHTML is not XML (unclosed void elements, unescaped attribute chars,
-  // etc.) and would produce a malformed SVG.
-  const serializer = new XMLSerializer();
-  const htmlXml = serializer.serializeToString(el);
-
-  // Wrap CSS in CDATA so any `<`, `>`, `&` or `</style>` in the CSS cannot
-  // break the surrounding XML structure. Escape any `]]>` sequences inside.
-  const safeCss = rawCss.replace(/]]>/g, "]]]]><![CDATA[>");
-
-  const svgContent = [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">`,
-    `<foreignObject width="${w}" height="${h}">`,
-    `<div xmlns="http://www.w3.org/1999/xhtml" style="width:${w}px;height:${h}px;overflow:hidden;margin:0;padding:0;background:#111827">`,
-    rawCss ? `<style><![CDATA[${safeCss}]]></style>` : "",
-    htmlXml,
-    "</div>",
-    "</foreignObject>",
-    "</svg>",
-  ].join("");
-
-  // ── Attempt PNG via canvas ──────────────────────────────────────────────────────
-  const svgBlob = new Blob([svgContent], { type: "image/svg+xml;charset=utf-8" });
-  const url = URL.createObjectURL(svgBlob);
-  try {
-    const img = new Image();
-    await new Promise<void>((resolve, reject) => {
-      img.onload = () => resolve();
-      img.onerror = () => reject(new Error("SVG load failed"));
-      img.src = url;
-    });
-
-    const dpr = window.devicePixelRatio || 1;
-    const canvas = document.createElement("canvas");
-    canvas.width = w * dpr;
-    canvas.height = h * dpr;
-    const ctx = canvas.getContext("2d");
-    if (ctx) {
-      ctx.scale(dpr, dpr);
-      ctx.drawImage(img, 0, 0, w, h);
-      // toBlob throws SecurityError on tainted canvas (Chrome) or returns null
-      const pngBlob = await new Promise<Blob | null>((resolve) =>
-        canvas.toBlob(resolve, "image/png"),
-      );
-      if (pngBlob) {
-        return new File([pngBlob], `element-${slug}-screenshot.png`, { type: "image/png" });
-      }
-    }
-  } catch {
-    // Canvas tainted (Chrome) or SVG load failed — fall through to SVG fallback
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-
-  // ── Fallback: return the well-formed SVG ──────────────────────────────────────────
-  return new File([svgContent], `element-${slug}-screenshot.svg`, { type: "image/svg+xml" });
+  return new File([blob], `element-${slug}-screenshot.png`, { type: "image/png" });
 }
 
 // ─── HoverLabel ───────────────────────────────────────────────────────────────
