@@ -37,6 +37,14 @@ export interface Session {
  * The "requester" device (e.g. laptop) creates one and shows a QR code.
  * The "approver" device (e.g. phone, already signed in) scans the QR and
  * approves it; the requester then polls until approved and gets a session.
+ *
+ * API-key encryption key transfer (ECDH):
+ *   - The requester generates an ephemeral ECDH key pair and stores the public
+ *     key here so the approver can use it.
+ *   - The approver generates its own ephemeral ECDH key pair, derives the ECDH
+ *     shared secret, wraps its AES storage key, and stores the wrapped bundle
+ *     plus its public key here.
+ *   - The requester retrieves both via the poll response and unwraps the AES key.
  */
 export interface CrossDeviceToken {
   id: string;
@@ -45,6 +53,12 @@ export interface CrossDeviceToken {
   /** Set when the approver approves — the userId of the approving user. */
   userId: string | null;
   expiresAt: number;
+  /** Requester's ephemeral ECDH P-256 public key as a JWK JSON string (set at token creation). */
+  requesterEcdhPublicKey: string | null;
+  /** Approver's ephemeral ECDH P-256 public key as a JWK JSON string (set on approval). */
+  approverEcdhPublicKey: string | null;
+  /** AES storage key wrapped by the ECDH-derived key, as JSON `{ iv, ciphertext }` (set on approval). */
+  wrappedAesKey: string | null;
 }
 
 /**
@@ -115,7 +129,11 @@ export interface DbAdapter {
   // Cross-device QR tokens
   createCrossDeviceToken(token: CrossDeviceToken): Promise<void>;
   getCrossDeviceToken(id: string): Promise<CrossDeviceToken | null>;
-  approveCrossDeviceToken(id: string, userId: string): Promise<void>;
+  approveCrossDeviceToken(
+    id: string,
+    userId: string,
+    keyTransfer?: { approverEcdhPublicKey: string; wrappedAesKey: string },
+  ): Promise<void>;
   deleteCrossDeviceToken(id: string): Promise<void>;
   deleteExpiredCrossDeviceTokens(): Promise<void>;
 

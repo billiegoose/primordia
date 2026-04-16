@@ -50,7 +50,10 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
       id TEXT PRIMARY KEY,
       status TEXT NOT NULL DEFAULT 'pending',
       user_id TEXT,
-      expires_at INTEGER NOT NULL
+      expires_at INTEGER NOT NULL,
+      requester_ecdh_public_key TEXT,
+      approver_ecdh_public_key TEXT,
+      wrapped_aes_key TEXT
     );
     CREATE TABLE IF NOT EXISTS roles (
       name TEXT PRIMARY KEY,
@@ -84,6 +87,23 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
   }
   try {
     db.exec("ALTER TABLE roles ADD COLUMN display_name TEXT NOT NULL DEFAULT ''");
+  } catch {
+    // Column already exists — ignore
+  }
+
+  // Migration: add ECDH key-transfer columns to cross_device_tokens
+  try {
+    db.exec("ALTER TABLE cross_device_tokens ADD COLUMN requester_ecdh_public_key TEXT");
+  } catch {
+    // Column already exists — ignore
+  }
+  try {
+    db.exec("ALTER TABLE cross_device_tokens ADD COLUMN approver_ecdh_public_key TEXT");
+  } catch {
+    // Column already exists — ignore
+  }
+  try {
+    db.exec("ALTER TABLE cross_device_tokens ADD COLUMN wrapped_aes_key TEXT");
   } catch {
     // Column already exists — ignore
   }
@@ -308,8 +328,8 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
     },
     async createCrossDeviceToken(token: CrossDeviceToken) {
       db.prepare(
-        "INSERT INTO cross_device_tokens (id, status, user_id, expires_at) VALUES (?, ?, ?, ?)"
-      ).run(token.id, token.status, token.userId ?? null, token.expiresAt);
+        "INSERT INTO cross_device_tokens (id, status, user_id, expires_at, requester_ecdh_public_key) VALUES (?, ?, ?, ?, ?)"
+      ).run(token.id, token.status, token.userId ?? null, token.expiresAt, token.requesterEcdhPublicKey ?? null);
     },
     async getCrossDeviceToken(id: string) {
       const r = db
@@ -319,6 +339,9 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
         status: string;
         user_id: string | null;
         expires_at: number;
+        requester_ecdh_public_key: string | null;
+        approver_ecdh_public_key: string | null;
+        wrapped_aes_key: string | null;
       } | null;
       if (!r) return null;
       return {
@@ -326,12 +349,25 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
         status: r.status as CrossDeviceToken["status"],
         userId: r.user_id,
         expiresAt: r.expires_at,
+        requesterEcdhPublicKey: r.requester_ecdh_public_key ?? null,
+        approverEcdhPublicKey: r.approver_ecdh_public_key ?? null,
+        wrappedAesKey: r.wrapped_aes_key ?? null,
       };
     },
-    async approveCrossDeviceToken(id: string, userId: string) {
-      db.prepare(
-        "UPDATE cross_device_tokens SET status = 'approved', user_id = ? WHERE id = ?"
-      ).run(userId, id);
+    async approveCrossDeviceToken(
+      id: string,
+      userId: string,
+      keyTransfer?: { approverEcdhPublicKey: string; wrappedAesKey: string },
+    ) {
+      if (keyTransfer) {
+        db.prepare(
+          "UPDATE cross_device_tokens SET status = 'approved', user_id = ?, approver_ecdh_public_key = ?, wrapped_aes_key = ? WHERE id = ?"
+        ).run(userId, keyTransfer.approverEcdhPublicKey, keyTransfer.wrappedAesKey, id);
+      } else {
+        db.prepare(
+          "UPDATE cross_device_tokens SET status = 'approved', user_id = ? WHERE id = ?"
+        ).run(userId, id);
+      }
     },
     async deleteCrossDeviceToken(id: string) {
       db.prepare("DELETE FROM cross_device_tokens WHERE id = ?").run(id);

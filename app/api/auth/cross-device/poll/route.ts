@@ -41,7 +41,13 @@ export async function GET(request: NextRequest) {
 
     const sessionId = await createSession(user.id);
 
-    const response = NextResponse.json({ status: "approved", username: user.username });
+    const response = NextResponse.json({
+      status: "approved",
+      username: user.username,
+      // Forward ECDH key-transfer data if the approver provided it.
+      approverEcdhPublicKey: token.approverEcdhPublicKey ?? undefined,
+      wrappedAesKey: token.wrappedAesKey ?? undefined,
+    });
     response.cookies.set(SESSION_COOKIE, sessionId, {
       httpOnly: true,
       sameSite: "lax",

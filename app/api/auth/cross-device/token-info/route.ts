@@ -1,24 +1,21 @@
-// app/api/auth/cross-device/approve/route.ts
-// Called by the "approver" device (e.g. phone, already signed in) to approve
-// a pending cross-device token.  Requires an active session.
+// app/api/auth/cross-device/token-info/route.ts
+// Returns public metadata about a pending cross-device token.
+// Used by the approver device to retrieve the requester's ECDH public key
+// so it can encrypt the AES storage key for transfer.
+// Requires an active session (approver must be signed in).
 
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db/index";
 import { getSessionUser } from "@/lib/auth";
 
-export async function POST(request: NextRequest) {
+export async function GET(request: NextRequest) {
   try {
     const user = await getSessionUser();
     if (!user) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    const body = (await request.json()) as {
-      tokenId?: string;
-      approverEcdhPublicKey?: string;
-      wrappedAesKey?: string;
-    };
-    const tokenId = body.tokenId?.trim();
+    const tokenId = request.nextUrl.searchParams.get("tokenId");
     if (!tokenId) {
       return NextResponse.json({ error: "Missing tokenId" }, { status: 400 });
     }
@@ -30,24 +27,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Token not found" }, { status: 404 });
     }
     if (token.expiresAt < Date.now()) {
-      await db.deleteCrossDeviceToken(tokenId);
       return NextResponse.json({ error: "Token has expired" }, { status: 410 });
     }
     if (token.status !== "pending") {
       return NextResponse.json({ error: "Token already used" }, { status: 409 });
     }
 
-    const keyTransfer =
-      typeof body.approverEcdhPublicKey === "string" &&
-      typeof body.wrappedAesKey === "string"
-        ? { approverEcdhPublicKey: body.approverEcdhPublicKey, wrappedAesKey: body.wrappedAesKey }
-        : undefined;
-
-    await db.approveCrossDeviceToken(tokenId, user.id, keyTransfer);
-
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({
+      requesterEcdhPublicKey: token.requesterEcdhPublicKey,
+    });
   } catch (err) {
-    console.error("[cross-device/approve]", err);
+    console.error("[cross-device/token-info]", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

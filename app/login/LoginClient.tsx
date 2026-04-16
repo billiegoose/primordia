@@ -11,6 +11,13 @@ import {
   startAuthentication,
 } from "@simplewebauthn/browser";
 import { withBasePath } from "@/lib/base-path";
+import {
+  generateEcdhKeyPair,
+  exportPublicKeyJwk,
+  importPublicKeyJwk,
+  deriveWrapKey,
+  unwrapBytes,
+} from "@/lib/key-transfer-client";
 import { Key, ChevronRight } from "lucide-react";
 
 type Tab = "passkey" | "qr" | "exe-dev";
@@ -60,6 +67,8 @@ function LoginPageInner({ initialUser, exeDevEmail }: LoginClientProps) {
   const [qrTokenId, setQrTokenId] = useState<string | null>(null);
   const [qrError, setQrError] = useState<string | null>(null);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Ephemeral ECDH private key — kept in memory only, used to unwrap the AES key from the approver.
+  const ecdhPrivateKeyRef = useRef<CryptoKey | null>(null);
 
   // Clean up poll interval when leaving QR tab or unmounting.
   useEffect(() => {
@@ -80,8 +89,25 @@ function LoginPageInner({ initialUser, exeDevEmail }: LoginClientProps) {
     setQrPhase("loading");
     setQrError(null);
     setQrTokenId(null);
+    ecdhPrivateKeyRef.current = null;
     try {
-      const res = await fetch(withBasePath("/api/auth/cross-device/start"), { method: "POST" });
+      // Generate an ephemeral ECDH key pair so the approver can transfer its
+      // AES encryption key to this device during login.
+      let requesterEcdhPublicKey: string | null = null;
+      try {
+        const ecdhKeyPair = await generateEcdhKeyPair();
+        ecdhPrivateKeyRef.current = ecdhKeyPair.privateKey;
+        const pubJwk = await exportPublicKeyJwk(ecdhKeyPair.publicKey);
+        requesterEcdhPublicKey = JSON.stringify(pubJwk);
+      } catch {
+        // Non-fatal — login still works, just no key transfer.
+      }
+
+      const res = await fetch(withBasePath("/api/auth/cross-device/start"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requesterEcdhPublicKey }),
+      });
       const data = (await res.json()) as { tokenId?: string; error?: string };
       if (!res.ok || !data.tokenId) {
         setQrPhase("error");
@@ -100,11 +126,38 @@ function LoginPageInner({ initialUser, exeDevEmail }: LoginClientProps) {
           const pollData = (await pollRes.json()) as {
             status?: string;
             username?: string;
+            approverEcdhPublicKey?: string;
+            wrappedAesKey?: string;
             error?: string;
           };
 
           if (pollData.status === "approved") {
             stopPolling();
+
+            // Attempt to unwrap and store the AES encryption key from the approver.
+            if (
+              pollData.approverEcdhPublicKey &&
+              pollData.wrappedAesKey &&
+              ecdhPrivateKeyRef.current
+            ) {
+              try {
+                const approverPubKey = await importPublicKeyJwk(
+                  JSON.parse(pollData.approverEcdhPublicKey) as JsonWebKey
+                );
+                const wrapKey = await deriveWrapKey(ecdhPrivateKeyRef.current, approverPubKey);
+                const bundle = JSON.parse(pollData.wrappedAesKey) as {
+                  iv: string;
+                  ciphertext: string;
+                };
+                const aesKeyBytes = await unwrapBytes(wrapKey, bundle);
+                const aesKeyJwkStr = new TextDecoder().decode(aesKeyBytes);
+                // Store the AES key so it's available after the page reload.
+                localStorage.setItem("primordia_aes_key", aesKeyJwkStr);
+              } catch {
+                // Non-fatal — login succeeds even without key transfer.
+              }
+            }
+
             setQrPhase("approved");
             // Session cookie has been set by the poll response.
             // Redirect to the intended destination.

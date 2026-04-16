@@ -15,6 +15,13 @@ import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Check } from "lucide-react";
 import { withBasePath } from "@/lib/base-path";
+import {
+  generateEcdhKeyPair,
+  exportPublicKeyJwk,
+  importPublicKeyJwk,
+  deriveWrapKey,
+  wrapBytes,
+} from "@/lib/key-transfer-client";
 
 type Phase =
   | "loading"       // checking session
@@ -40,19 +47,28 @@ function ApprovePageInner() {
       ? null
       : "No token found in URL. This QR code may be invalid."
   );
+  // Requester's ECDH public key (JWK string) fetched from the server after session check.
+  const [requesterEcdhPublicKey, setRequesterEcdhPublicKey] = useState<string | null>(null);
 
-  // On mount: check session status (only if we have a token).
+  // On mount: check session status and fetch requester ECDH key (only if we have a token).
   useEffect(() => {
     if (!tokenId) return;
 
-    fetch(withBasePath("/api/auth/session"))
-      .then((r) => r.json())
-      .then((data: { user?: { username: string } | null }) => {
-        if (data.user) {
-          setUsername(data.user.username);
+    Promise.all([
+      fetch(withBasePath("/api/auth/session")).then((r) => r.json() as Promise<{ user?: { username: string } | null }>),
+      fetch(withBasePath(`/api/auth/cross-device/token-info?tokenId=${tokenId}`)).then((r) =>
+        r.ok ? (r.json() as Promise<{ requesterEcdhPublicKey?: string | null }>) : null
+      ).catch(() => null),
+    ])
+      .then(([sessionData, tokenInfo]) => {
+        if (sessionData.user) {
+          setUsername(sessionData.user.username);
           setPhase("ready");
         } else {
           setPhase("not_signed_in");
+        }
+        if (tokenInfo?.requesterEcdhPublicKey) {
+          setRequesterEcdhPublicKey(tokenInfo.requesterEcdhPublicKey);
         }
       })
       .catch(() => {
@@ -66,10 +82,34 @@ function ApprovePageInner() {
     setPhase("approving");
     setErrorMsg(null);
     try {
+      // Attempt to transfer this device's AES encryption key to the requester.
+      let approverEcdhPublicKey: string | undefined;
+      let wrappedAesKey: string | undefined;
+
+      const aesKeyJwkStr = localStorage.getItem("primordia_aes_key");
+      if (aesKeyJwkStr && requesterEcdhPublicKey) {
+        try {
+          const requesterPubKey = await importPublicKeyJwk(
+            JSON.parse(requesterEcdhPublicKey) as JsonWebKey
+          );
+          const approverKeyPair = await generateEcdhKeyPair();
+          const approverPubJwk = await exportPublicKeyJwk(approverKeyPair.publicKey);
+          approverEcdhPublicKey = JSON.stringify(approverPubJwk);
+
+          const wrapKey = await deriveWrapKey(approverKeyPair.privateKey, requesterPubKey);
+          const bundle = await wrapBytes(wrapKey, new TextEncoder().encode(aesKeyJwkStr));
+          wrappedAesKey = JSON.stringify(bundle);
+        } catch {
+          // Non-fatal — approval proceeds without key transfer.
+          approverEcdhPublicKey = undefined;
+          wrappedAesKey = undefined;
+        }
+      }
+
       const res = await fetch(withBasePath("/api/auth/cross-device/approve"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tokenId }),
+        body: JSON.stringify({ tokenId, approverEcdhPublicKey, wrappedAesKey }),
       });
       const data = (await res.json()) as { ok?: boolean; error?: string };
       if (!res.ok) {
