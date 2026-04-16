@@ -106,6 +106,11 @@ const LISTEN_PORT = parseInt(process.env.REVERSE_PROXY_PORT ?? '3000', 10);
 const WORKTREES_DIR =
   process.env.PRIMORDIA_WORKTREES_DIR ?? '/home/exedev/primordia-worktrees';
 
+/** Disk usage percent above which automatic worktree cleanup is triggered. */
+const DISK_CLEANUP_THRESHOLD_PCT = 90;
+/** How often the proxy checks disk usage and cleans up if needed (5 minutes). */
+const DISK_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+
 /**
  * Discover the main git repo by inspecting any worktree in WORKTREES_DIR.
  * Falls back to process.cwd() (which is set to the main repo by the systemd
@@ -1242,6 +1247,173 @@ const server = net.createServer((rawSocket) => {
   rawSocket.resume();
 });
 
+// ─── Automatic disk cleanup ───────────────────────────────────────────────────
+//
+// Periodically checks disk usage.  When usage is at or above
+// DISK_CLEANUP_THRESHOLD_PCT, the oldest non-production worktree is deleted
+// (killing its dev server, removing the worktree directory, and deleting its
+// branch).  This repeats until usage drops below the threshold or there are no
+// more deletable worktrees.
+
+function getDiskUsedPercent(): number | null {
+  try {
+    const out = execFileSync('df', ['-B1', '/'], {
+      encoding: 'utf8',
+      timeout: 5_000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const dataLine = out.trim().split('\n').slice(1).join(' ').trim();
+    const parts = dataLine.split(/\s+/);
+    if (parts.length < 3) return null;
+    const total = parseInt(parts[1], 10);
+    const used = parseInt(parts[2], 10);
+    if (isNaN(total) || isNaN(used) || total === 0) return null;
+    return Math.round((used / total) * 100);
+  } catch {
+    return null;
+  }
+}
+
+interface CleanupWorktreeTarget {
+  path: string;
+  branch: string;
+}
+
+function getOldestDeletableWorktree(repoRoot: string): CleanupWorktreeTarget | null {
+  let wtOut: string;
+  try {
+    wtOut = execFileSync('git', ['worktree', 'list', '--porcelain'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch {
+    return null;
+  }
+
+  // Parse worktree list into { path, branch } entries.
+  const worktrees: { path: string; branch: string | null }[] = [];
+  let cur: { path: string; branch: string | null } | null = null;
+  for (const line of wtOut.split('\n')) {
+    if (line.startsWith('worktree ')) {
+      if (cur) worktrees.push(cur);
+      cur = { path: line.slice('worktree '.length).trim(), branch: null };
+    } else if (line.startsWith('branch ') && cur) {
+      cur.branch = line.slice('branch '.length).replace('refs/heads/', '').trim();
+    }
+  }
+  if (cur) worktrees.push(cur);
+
+  const mainPath = worktrees[0]?.path ?? repoRoot;
+
+  let prodBranch: string | null = null;
+  try {
+    prodBranch = execFileSync(
+      'git', ['config', '--get', 'primordia.productionBranch'],
+      { cwd: repoRoot, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] },
+    ).trim() || null;
+  } catch { /* not set yet */ }
+
+  const candidates: (CleanupWorktreeTarget & { ctimeMs: number })[] = [];
+  for (const wt of worktrees) {
+    if (!wt.branch) continue;
+    if (wt.path === mainPath) continue;
+    if (prodBranch && wt.branch === prodBranch) continue;
+    let ctimeMs = 0;
+    try { ctimeMs = fs.statSync(wt.path).ctimeMs; } catch { /* missing dir */ }
+    candidates.push({ path: wt.path, branch: wt.branch, ctimeMs });
+  }
+
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => a.ctimeMs - b.ctimeMs);
+  return { path: candidates[0].path, branch: candidates[0].branch };
+}
+
+function deleteWorktreeForCleanup(repoRoot: string, target: CleanupWorktreeTarget): void {
+  // Kill any dev server on this branch's port (best-effort).
+  try {
+    const portStr = execFileSync(
+      'git', ['config', '--get', `branch.${target.branch}.port`],
+      { cwd: repoRoot, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] },
+    ).trim();
+    if (portStr) {
+      execFileSync('bash', ['-c', `lsof -ti tcp:${portStr} | xargs -r kill -SIGTERM`], {
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    }
+  } catch { /* best-effort */ }
+
+  // Remove the worktree.
+  try {
+    execFileSync('git', ['worktree', 'remove', '--force', target.path], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch {
+    // If the directory is already gone, prune stale refs.
+    try {
+      execFileSync('git', ['worktree', 'prune'], {
+        cwd: repoRoot,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch { /* best-effort */ }
+  }
+
+  // Delete the branch and clean up git config.
+  try {
+    execFileSync('git', ['branch', '-D', target.branch], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch { /* best-effort */ }
+  try {
+    execFileSync('git', ['config', '--unset', `branch.${target.branch}.port`], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch { /* best-effort */ }
+}
+
+function runDiskCleanup(): void {
+  const usedPct = getDiskUsedPercent();
+  if (usedPct === null || usedPct < DISK_CLEANUP_THRESHOLD_PCT) return;
+
+  console.log(
+    `[disk-cleanup] disk at ${usedPct}% ≥ threshold ${DISK_CLEANUP_THRESHOLD_PCT}% — starting cleanup`,
+  );
+
+  let deleted = 0;
+  for (;;) {
+    const current = getDiskUsedPercent();
+    if (current === null || current < DISK_CLEANUP_THRESHOLD_PCT) break;
+
+    const target = getOldestDeletableWorktree(MAIN_REPO);
+    if (!target) {
+      console.warn(
+        `[disk-cleanup] no deletable non-prod worktrees remain; disk still at ${current}%`,
+      );
+      break;
+    }
+
+    console.log(
+      `[disk-cleanup] deleting worktree branch='${target.branch}' path='${target.path}' (disk ${current}%)`,
+    );
+    deleteWorktreeForCleanup(MAIN_REPO, target);
+    deleted++;
+  }
+
+  const finalPct = getDiskUsedPercent();
+  console.log(
+    `[disk-cleanup] done — deleted ${deleted} worktree(s), disk now at ${finalPct ?? '?'}%`,
+  );
+}
+
+// ─── Server startup ───────────────────────────────────────────────────────────
+
 httpHandler.listen(0, '127.0.0.1', () => {
   httpHandlerPort = (httpHandler.address() as net.AddressInfo).port;
   server.listen(LISTEN_PORT, '0.0.0.0', () => {
@@ -1252,6 +1424,10 @@ httpHandler.listen(0, '127.0.0.1', () => {
     console.log(`[proxy] worktrees: ${WORKTREES_DIR}`);
   });
 });
+
+// Run an initial disk check shortly after startup, then on a fixed interval.
+setTimeout(runDiskCleanup, 30_000).unref();
+setInterval(runDiskCleanup, DISK_CLEANUP_INTERVAL_MS).unref();
 
 process.on('SIGTERM', () => {
   // Stop all preview servers before exiting.
