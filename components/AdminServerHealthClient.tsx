@@ -139,6 +139,10 @@ export default function AdminServerHealthClient() {
         ) : (
           <p className="text-sm text-gray-500">Disk info unavailable.</p>
         )}
+        <p className="text-xs text-gray-500 mt-3">
+          Disk usage is checked every 5 minutes and the oldest non-production worktrees are
+          deleted until usage drops below 90%.
+        </p>
       </section>
 
       {/* Memory */}
