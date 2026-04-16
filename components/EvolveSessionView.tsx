@@ -19,6 +19,7 @@ import Link from "next/link";
 import type { DiffFileSummary } from "../app/evolve/session/[id]/page";
 import { DiffFileExpander } from "./DiffFileExpander";
 import { WebPreviewPanel, type ElementSelection } from "./WebPreviewPanel";
+import HorizontalResizeHandle from "./HorizontalResizeHandle";
 import type { SessionEvent } from "../lib/session-events";
 import { HARNESS_OPTIONS, MODEL_OPTIONS_BY_HARNESS } from "../lib/agent-config";
 
@@ -933,6 +934,10 @@ export default function EvolveSessionView({
   /** Whether to show the preview as a desktop sidebar. */
   const showPreviewSidebar = status === "ready" && !!previewUrl;
 
+  /** Width of the session (left) panel in pixels when sidebar is visible. */
+  const [mainWidthPx, setMainWidthPx] = useState(560);
+  const containerRef = useRef<HTMLDivElement>(null);
+
   /** True while the session pipeline is actively running (not yet ready for action). */
   const isClaudeRunning = status === "starting" || status === "running-claude" || status === "fixing-types";
 
@@ -965,8 +970,11 @@ export default function EvolveSessionView({
     : 0;
 
   return (
-    <div className={`flex min-h-dvh w-full${showPreviewSidebar ? ' xl:flex-row xl:items-start' : ''}`}>
-    <main className={`flex flex-col w-full px-4 py-6${showPreviewSidebar ? ' xl:max-w-[560px] xl:flex-shrink-0' : ' max-w-3xl mx-auto'}`}>
+    <div ref={containerRef} className={`flex min-h-dvh w-full${showPreviewSidebar ? ' xl:flex-row xl:items-start' : ''}`}>
+    <main
+      className={`flex flex-col w-full px-4 py-6${showPreviewSidebar ? '' : ' max-w-3xl mx-auto'}`}
+      style={showPreviewSidebar ? { width: mainWidthPx, minWidth: mainWidthPx, flexShrink: 0 } : undefined}
+    >
       {/* Header */}
       <header className="flex items-center justify-between mb-8 flex-shrink-0">
         <NavHeader branch={branch} subtitle="Session" />
@@ -1474,7 +1482,13 @@ export default function EvolveSessionView({
 
     {/* ── Desktop preview sidebar ── */}
     {showPreviewSidebar && (
-      <aside className="hidden xl:flex xl:flex-col xl:flex-1 xl:sticky xl:top-0 xl:h-dvh border-l border-gray-800 bg-gray-950 p-4">
+      <>
+      <HorizontalResizeHandle
+        currentWidth={mainWidthPx}
+        onWidthChange={setMainWidthPx}
+        containerRef={containerRef}
+      />
+      <aside className="hidden xl:flex xl:flex-col xl:flex-1 xl:sticky xl:top-0 xl:h-dvh bg-gray-950 p-4">
         {proxyServerStatus === "running" ? (
           <WebPreviewPanel src={previewUrl!} fullHeight onElementSelected={handleElementSelected} />
         ) : (
@@ -1485,6 +1499,7 @@ export default function EvolveSessionView({
           </div>
         )}
       </aside>
+      </>
     )}
     </div>
   );
