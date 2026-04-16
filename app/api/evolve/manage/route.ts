@@ -38,6 +38,7 @@ import { Database } from 'bun:sqlite';
 import {
   runGit,
   runFollowupInWorktree,
+  resolveConflictsWithClaude,
   type LocalSession,
 } from '../../../../lib/evolve-sessions';
 import { getSessionUser } from '../../../../lib/auth';
@@ -820,15 +821,22 @@ export async function POST(request: Request) {
         worktreePath,
       );
       if (ancestorCheck.code !== 0) {
-        return Response.json(
-          {
-            error:
-              `Cannot accept: session branch "${branch}" is not up-to-date with "${parentBranch}". ` +
-              `Please use the Merge (or Rebase) button on the session page to bring the session branch ` +
-              `up-to-date before accepting.`,
-          },
-          { status: 400 },
+        // Automatically apply updates (merge parent into session branch) before accepting.
+        const sessionContext = { id: body.sessionId, userId: user.id };
+        const mergeResult = await runGit(
+          ['merge', parentBranch, '--no-ff', '-m', `chore: merge ${parentBranch} into ${branch}`],
+          worktreePath,
         );
+        if (mergeResult.code !== 0) {
+          const resolution = await resolveConflictsWithClaude(worktreePath, parentBranch, branch, sessionContext, repoRoot);
+          if (!resolution.success) {
+            await runGit(['merge', '--abort'], worktreePath);
+            return Response.json(
+              { error: `Cannot accept: session branch is not up-to-date with "${parentBranch}" and automatic merge failed:\n${resolution.log}` },
+              { status: 400 },
+            );
+          }
+        }
       }
 
       // Gate 2: worktree must have no uncommitted changes.
