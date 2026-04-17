@@ -108,12 +108,16 @@ sudo chmod g+s "${WORKTREES_DIR}"
 echo "  Set group ownership: ${_MAIN_REPO} → primordia (g+rwXs)"
 echo "  Set group ownership: ${WORKTREES_DIR} → primordia (g+rwXs)"
 
-# ── Symlink bun into /usr/local/bin ──────────────────────────────────────────
+# ── Copy bun into /usr/local/bin ─────────────────────────────────────────────
 # Spawned child processes (bun run start/dev) need bun on PATH even when
-# PATH doesn't include ~/.bun/bin.
+# PATH doesn't include ~/.bun/bin. We copy (not symlink) the binary so that
+# the primordia service user can execute it without needing to traverse
+# /home/exedev (which is mode 750 and not accessible to primordia).
 BUN_BIN="$HOME/.bun/bin/bun"
-if [[ -f "$BUN_BIN" ]] && [[ ! -L /usr/local/bin/bun ]]; then
-  sudo ln -sf "$BUN_BIN" /usr/local/bin/bun 2>/dev/null && echo "  Symlinked bun → /usr/local/bin/bun" || true
+if [[ -f "$BUN_BIN" ]]; then
+  sudo cp "$BUN_BIN" /usr/local/bin/bun
+  sudo chmod 755 /usr/local/bin/bun
+  echo "  Copied bun → /usr/local/bin/bun"
 fi
 
 # ── Kill any legacy nohup process so we don't double-run ─────────────────────
