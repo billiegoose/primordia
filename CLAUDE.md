@@ -104,68 +104,51 @@ primordia/
 │   │       └── [id]/
 │   │           └── page.tsx       ← Session-tracking page; publicly viewable; passes canEvolve to hide actions for non-evolvers
 │   ├── login/
-│   │   ├── page.tsx               ← Server component: resolves session + calls getInstalledPluginsWithProps() for each auth plugin; passes results to LoginClient
-│   │   ├── LoginClient.tsx        ← Client component: renders one tab per installed auth plugin; delegates tab UI to components/auth-tabs/
-│   │   └── approve/
-│   │       └── page.tsx           ← Approval page: authenticated device approves a QR sign-in
-│   └── api/
-│       ├── changelog/
-│       │   └── route.ts           ← GET ?filename=...: returns raw markdown body of one changelog file (lazy-load)
-│       ├── chat/
-│       │   └── route.ts           ← Streams Claude responses via SSE
-│       ├── check-keys/
-│       │   └── route.ts           ← Returns list of missing required env vars (called on page load)
-│       ├── rollback/
-│       │   └── route.ts           ← GET hasPrevious check; POST zero-downtime swap to previous slot via lsof kill + bun start health-check (admin only)
-│       ├── admin/
-│       │   ├── permissions/
-│       │   │   └── route.ts       ← POST grant/revoke grantable roles (can_evolve); admin only
-│       │   ├── logs/
-│       │   │   └── route.ts       ← GET SSE stream of production server logs; always proxies /_proxy/prod/logs (REVERSE_PROXY_PORT required); admin only
-│       │   ├── proxy-logs/
-│       │   │   └── route.ts       ← GET SSE stream of `journalctl -u primordia-proxy -f -n 100`; returns informational message on non-Linux platforms (macOS guard); admin only
-│       │   ├── rollback/
-│       │   │   └── route.ts       ← GET list previous prod slots from primordia.productionHistory; POST apply deep rollback to any slot; admin only
-│       │   └── server-health/
-│       │       └── route.ts       ← GET disk/memory usage + oldest non-prod worktree; POST delete oldest non-prod worktree (kill dev server, git worktree remove, git branch -D); admin only
-│       ├── llm-key/
-│       │   └── public-key/
-│       │       └── route.ts       ← GET server's ephemeral RSA-OAEP public key as JWK; used by clients to encrypt API keys before sending
-│       ├── prune-branches/
-│       │   └── route.ts           ← POST delete all local branches merged into main; streams SSE progress
-│       ├── auth/
-│       │   ├── session/
-│       │   │   └── route.ts       ← GET current session user
-│       │   ├── logout/
-│       │   │   └── route.ts       ← POST clear session
-│       │   ├── exe-dev/
-│       │   │   └── route.ts       ← GET exe.dev SSO login: reads injected headers, creates/finds user + session
-│       │   ├── passkey/
-│       │   │   ├── register/
-│       │   │   │   ├── start/route.ts  ← Generate WebAuthn registration options
-│       │   │   │   └── finish/route.ts ← Verify registration, create user+session
-│       │   │   └── login/
-│       │   │       ├── start/route.ts  ← Generate WebAuthn authentication options
-│       │   │       └── finish/route.ts ← Verify authentication, create session
-│       │   └── cross-device/
-│       │       ├── start/route.ts      ← POST create a cross-device token; returns tokenId
-│       │       ├── poll/route.ts       ← GET poll token status; sets session cookie on approval
-│       │       ├── approve/route.ts    ← POST approve a token (requires auth on approver device)
-│       │       └── qr/route.ts         ← GET SVG QR code encoding the approval URL for a tokenId
+│   │   ├── page.tsx               ← Server component: auto-discovers providers via readdirSync(lib/auth-providers/); collects server props; passes to LoginClient
+│   │   └── LoginClient.tsx        ← Client component: renders one tab per provider; loads tab components via next/dynamic template-literal import (no static map)
+│   ├── (auth-exe-dev)/
+│   │   └── api/auth/exe-dev/route.ts  ← GET exe.dev SSO login: reads injected headers, creates/finds user + session
+│   ├── (auth-passkey)/
+│   │   └── api/auth/passkey/
+│   │       ├── register/start/route.ts  ← Generate WebAuthn registration options
+│   │       ├── register/finish/route.ts ← Verify registration, create user+session
+│   │       ├── login/start/route.ts     ← Generate WebAuthn authentication options
+│   │       └── login/finish/route.ts    ← Verify authentication, create session
+│   └── (auth-cross-device)/
+│       ├── api/auth/cross-device/
+│       │   ├── start/route.ts      ← POST create a cross-device token; returns tokenId
+│       │   ├── poll/route.ts       ← GET poll token status; sets session cookie on approval
+│       │   ├── approve/route.ts    ← POST approve a token (requires auth on approver device)
+│       │   └── qr/route.ts         ← GET SVG QR code encoding the approval URL for a tokenId
+│       └── login/approve/page.tsx      ← Approval page: authenticated device approves a QR sign-in
 │
-├── lib/auth-plugins/              ← Pluggable auth system
-│   ├── types.ts                   ← AuthPlugin interface, AuthPluginServerContext, InstalledPlugin
-│   ├── registry.ts                ← THE integration point: INSTALLED_PLUGINS array + getInstalledPluginsWithProps()
-│   ├── passkey/index.ts           ← passkeyPlugin descriptor (no server props needed)
-│   ├── exe-dev/index.ts           ← exeDevPlugin descriptor (reads X-ExeDev-Email header in getServerProps)
-│   └── cross-device/index.ts     ← crossDevicePlugin descriptor (no server props needed)
+├── app/api/auth/
+│   ├── session/route.ts           ← GET current session user
+│   └── logout/route.ts            ← POST clear session
 │
-├── components/auth-tabs/          ← Client-side auth plugin tab components
-│   ├── types.ts                   ← AuthTabProps interface (serverProps, nextUrl, onSuccess)
-│   ├── index.tsx                  ← THE client integration point: TAB_COMPONENT_MAP (plugin id → component)
-│   ├── PasskeyTab.tsx             ← WebAuthn passkey register/login UI
-│   ├── ExeDevTab.tsx              ← exe.dev SSO tab UI
-│   └── CrossDeviceTab.tsx         ← QR-code cross-device sign-in UI
+│   app/api/ also contains:
+│   ├── changelog/route.ts         ← GET ?filename=...: returns raw markdown body of one changelog file (lazy-load)
+│   ├── chat/route.ts              ← Streams Claude responses via SSE
+│   ├── check-keys/route.ts        ← Returns list of missing required env vars (called on page load)
+│   ├── rollback/route.ts          ← GET hasPrevious check; POST zero-downtime swap to previous slot (admin only)
+│   ├── llm-key/public-key/route.ts ← GET server's ephemeral RSA-OAEP public key as JWK
+│   ├── prune-branches/route.ts    ← POST delete all local branches merged into main; streams SSE progress
+│   ├── admin/permissions/route.ts ← POST grant/revoke grantable roles (can_evolve); admin only
+│   ├── admin/logs/route.ts        ← GET SSE stream of production server logs; admin only
+│   ├── admin/proxy-logs/route.ts  ← GET SSE stream of journalctl -u primordia-proxy; admin only
+│   ├── admin/rollback/route.ts    ← GET/POST previous prod slots from primordia.productionHistory; admin only
+│   └── admin/server-health/route.ts ← GET disk/memory usage; POST delete oldest worktree; admin only
+│
+├── lib/auth-providers/              ← Auth provider system (no registry — auto-discovered by login page)
+│   ├── types.ts                     ← AuthPlugin, AuthPluginServerContext, InstalledPlugin, AuthTabProps
+│   ├── passkey/index.ts             ← default export: passkeyPlugin descriptor
+│   ├── exe-dev/index.ts             ← default export: exeDevPlugin (reads X-ExeDev-Email header)
+│   └── cross-device/index.ts       ← default export: crossDevicePlugin
+│
+├── components/auth-tabs/            ← Client-side auth tab components (no registry — loaded via dynamic import)
+│   ├── passkey/index.tsx            ← default export: PasskeyTab
+│   ├── exe-dev/index.tsx            ← default export: ExeDevTab
+│   └── cross-device/index.tsx      ← default export: CrossDeviceTab
 │       ├── git/
 │       │   └── [...path]/
 │       │       └── route.ts       ← GET/POST git http-backend proxy (read-only clone/fetch); push (receive-pack) blocked with 403

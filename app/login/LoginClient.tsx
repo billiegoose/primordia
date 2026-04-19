@@ -1,19 +1,39 @@
 "use client";
 
 // app/login/LoginClient.tsx — Interactive login UI (client component).
-// Renders one tab per installed auth plugin; delegates tab content to the
-// plugin's tab component from components/auth-tabs/.
+// Renders one tab per installed auth provider. Tab components are loaded via
+// next/dynamic using the provider's id — no static import map required.
+//
+// Webpack creates a context module for the @/components/auth-tabs/*/index
+// pattern at build time, bundling every installed tab component automatically.
 
-import { Suspense, useState } from "react";
+import { Suspense, useState, type ComponentType } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import type { InstalledPlugin } from "@/lib/auth-plugins/types";
-import { TAB_COMPONENT_MAP } from "@/components/auth-tabs";
+import dynamic from "next/dynamic";
+import type { InstalledPlugin, AuthTabProps } from "@/lib/auth-providers/types";
 
 interface LoginClientProps {
   initialUser: { id: string; username: string } | null;
-  /** Resolved list of installed plugins with their server props. */
   plugins: InstalledPlugin[];
+}
+
+// Module-level cache so each dynamic component is only created once, not on
+// every render. Keys are provider ids (e.g. "passkey", "exe-dev").
+const tabCache = new Map<string, ComponentType<AuthTabProps>>();
+
+function getTabComponent(pluginId: string): ComponentType<AuthTabProps> {
+  if (!tabCache.has(pluginId)) {
+    tabCache.set(
+      pluginId,
+      // Webpack resolves this template literal to a context module containing
+      // all files matching components/auth-tabs/*/index at build time.
+      // The correct component is selected at runtime by pluginId.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      dynamic<AuthTabProps>(() => import(`@/components/auth-tabs/${pluginId}/index`) as Promise<any>)
+    );
+  }
+  return tabCache.get(pluginId)!;
 }
 
 export default function LoginClient(props: LoginClientProps) {
@@ -30,13 +50,11 @@ function LoginPageInner({ initialUser, plugins }: LoginClientProps) {
   const nextUrl = searchParams.get("next") ?? "/";
 
   const [ignoringSession, setIgnoringSession] = useState(false);
-  // Default to the first installed plugin's id.
   const [activeTab, setActiveTab] = useState<string>(plugins[0]?.id ?? "");
 
   const showLoggedInBanner = initialUser !== null && !ignoringSession;
 
-  function handleSuccess(username: string) {
-    void username; // available for future use (e.g. analytics, welcome toast)
+  function handleSuccess(_username: string) {
     router.push(nextUrl);
     router.refresh();
   }
@@ -88,7 +106,7 @@ function LoginPageInner({ initialUser, plugins }: LoginClientProps) {
         {/* Tab switcher + content */}
         {!showLoggedInBanner && plugins.length > 0 && (
           <>
-            {/* Only show the tab bar when there are multiple plugins. */}
+            {/* Tab bar — hidden when only one provider is installed */}
             {plugins.length > 1 && (
               <div className="flex rounded-lg bg-gray-800 p-1 gap-1">
                 {plugins.map((plugin) => (
@@ -111,18 +129,9 @@ function LoginPageInner({ initialUser, plugins }: LoginClientProps) {
             {/* Active plugin tab content */}
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 space-y-4">
               {plugins.map((plugin) => {
-                const TabComponent = TAB_COMPONENT_MAP[plugin.id];
-                if (!TabComponent) {
-                  // Plugin registered server-side but no client component found.
-                  return activeTab === plugin.id ? (
-                    <p key={plugin.id} className="text-sm text-red-400 text-center">
-                      Tab component not found for plugin &quot;{plugin.id}&quot;.
-                      Add it to components/auth-tabs/index.tsx.
-                    </p>
-                  ) : null;
-                }
-                // Render all tab components but hide inactive ones with CSS so
-                // their internal state (e.g. QR polling) is preserved on tab switch.
+                const TabComponent = getTabComponent(plugin.id);
+                // Render all tabs; hide inactive ones with CSS to preserve
+                // internal state (e.g. QR polling timers).
                 return (
                   <div key={plugin.id} className={activeTab === plugin.id ? "" : "hidden"}>
                     <TabComponent
@@ -135,7 +144,6 @@ function LoginPageInner({ initialUser, plugins }: LoginClientProps) {
               })}
             </div>
 
-            {/* Back link */}
             <p className="text-center">
               <Link href="/" className="text-sm text-blue-400 hover:text-blue-300">
                 &larr; Back to Primordia
@@ -144,11 +152,11 @@ function LoginPageInner({ initialUser, plugins }: LoginClientProps) {
           </>
         )}
 
-        {/* Edge case: no plugins installed */}
+        {/* Edge case: no providers discovered */}
         {!showLoggedInBanner && plugins.length === 0 && (
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 text-center text-sm text-gray-400">
-            No authentication methods are configured.
-            Add plugins to <code className="text-gray-300">lib/auth-plugins/registry.ts</code>.
+            No authentication providers are configured. Create a directory under{" "}
+            <code className="text-gray-300">lib/auth-providers/</code> to add one.
           </div>
         )}
       </div>

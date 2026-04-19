@@ -1,6 +1,6 @@
 "use client";
 
-// components/auth-tabs/PasskeyTab.tsx
+// components/auth-tabs/passkey/index.tsx
 // Login tab for WebAuthn passkey authentication.
 // Handles both sign-in (login) and new account registration.
 
@@ -8,9 +8,9 @@ import { useState } from "react";
 import { startRegistration, startAuthentication } from "@simplewebauthn/browser";
 import { withBasePath } from "@/lib/base-path";
 import { Key } from "lucide-react";
-import type { AuthTabProps } from "./types";
+import type { AuthTabProps } from "@/lib/auth-providers/types";
 
-export function PasskeyTab({ nextUrl, onSuccess }: AuthTabProps) {
+export default function PasskeyTab({ onSuccess }: AuthTabProps) {
   const [username, setUsername] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<"register" | "login" | null>(null);
@@ -109,8 +109,6 @@ export function PasskeyTab({ nextUrl, onSuccess }: AuthTabProps) {
       setLoading(null);
     }
   }
-
-  void nextUrl; // nextUrl used by onSuccess caller; not needed directly here
 
   return (
     <>

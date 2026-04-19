@@ -1,6 +1,6 @@
 "use client";
 
-// components/auth-tabs/ExeDevTab.tsx
+// components/auth-tabs/exe-dev/index.tsx
 // Login tab for exe.dev SSO authentication.
 //
 // serverProps shape: { email: string | null }
@@ -8,9 +8,9 @@
 
 import { withBasePath } from "@/lib/base-path";
 import { ChevronRight } from "lucide-react";
-import type { AuthTabProps } from "./types";
+import type { AuthTabProps } from "@/lib/auth-providers/types";
 
-export function ExeDevTab({ serverProps, nextUrl }: AuthTabProps) {
+export default function ExeDevTab({ serverProps, nextUrl }: AuthTabProps) {
   const email = (serverProps.email as string | null) ?? null;
 
   return (

@@ -1,6 +1,6 @@
 "use client";
 
-// components/auth-tabs/CrossDeviceTab.tsx
+// components/auth-tabs/cross-device/index.tsx
 // Login tab for cross-device QR-code sign-in.
 //
 // The "requester" device shows a QR code; an already-authenticated
@@ -8,17 +8,17 @@
 
 import { useState, useRef, useEffect } from "react";
 import { withBasePath } from "@/lib/base-path";
-import type { AuthTabProps } from "./types";
+import type { AuthTabProps } from "@/lib/auth-providers/types";
 
 type QrPhase = "idle" | "loading" | "polling" | "approved" | "expired" | "error";
 
-export function CrossDeviceTab({ onSuccess }: AuthTabProps) {
+export default function CrossDeviceTab({ onSuccess }: AuthTabProps) {
   const [phase, setPhase] = useState<QrPhase>("idle");
   const [tokenId, setTokenId] = useState<string | null>(null);
   const [qrError, setQrError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Start flow automatically when tab mounts (or when re-triggered).
+  // Start flow automatically when tab mounts.
   useEffect(() => {
     startQrFlow();
     return stopPolling;
