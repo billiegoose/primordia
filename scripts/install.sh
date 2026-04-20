@@ -65,6 +65,20 @@ echo "" >&2
 echo -e "${DIM}  Service status:${RESET}" >&2
 systemctl status primordia-proxy --no-pager 2>/dev/null >&2 || true' ERR
 
+# ── Banner ────────────────────────────────────────────────────────────────────
+
+echo ""
+cat << 'ASCII'
+  ___     _                  _ _
+ | _ \_ _(_)_ __  ___ _ _ __| (_)__ _
+ |  _/ '_| | '  \/ _ \ '_/ _` | / _` |
+ |_| |_| |_|_|_|_\___/_| \__,_|_\__,_|
+
+          . _  __|_ _ || _  _
+          || |_\ | (_|||(/_|
+
+ASCII
+
 # ── Locate repo root ──────────────────────────────────────────────────────────
 
 _CURRENT_STEP="locate repo root"

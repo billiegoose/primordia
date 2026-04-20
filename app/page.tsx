@@ -1,6 +1,6 @@
 // app/page.tsx — Landing page for Primordia
-// Server component: reads headers() to build the curl install URL, then
-// renders client-side section components so the Pick tool sees real names.
+// Server component: reads headers() to build the setup URL, then renders
+// section components so the Pick tool sees real names.
 
 import type { Metadata } from "next";
 import { headers } from "next/headers";
@@ -26,16 +26,14 @@ export default async function LandingPage() {
     headerStore.get("x-forwarded-host") ??
     headerStore.get("host") ??
     "primordia.exe.xyz";
-  const installUrl = `${proto}://${host}${basePath}/install-for-exe-dev.sh`;
-  const curlCmd = `curl -fsSL ${installUrl} | bash`;
-
+  const setupUrl = `${proto}://${host}${basePath}/setup.sh`;
   return (
     <div className="min-h-dvh bg-gray-950 text-gray-100 overflow-x-hidden">
       <LandingNav />
-      <HeroSection curlCmd={curlCmd} />
+      <HeroSection setupUrl={setupUrl} />
       <FeaturesSection />
       <HowItWorksSection />
-      <CTABannerSection curlCmd={curlCmd} />
+      <CTABannerSection setupUrl={setupUrl} />
       <LandingFooter />
     </div>
   );
