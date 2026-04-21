@@ -978,8 +978,8 @@ export default function EvolveSessionView({
   return (
     <div ref={containerRef} className={`flex min-h-dvh w-full${showPreviewSidebar ? ' xl:flex-row xl:items-start' : ''}`}>
     <main
-      className={`flex flex-col w-full px-4 py-6${showPreviewSidebar ? '' : ' max-w-3xl mx-auto'}`}
-      style={showPreviewSidebar ? { width: mainWidthPx, minWidth: mainWidthPx, flexShrink: 0 } : undefined}
+      className={`flex flex-col w-full px-4 py-6${showPreviewSidebar ? ' max-w-full xl:max-w-none' : ' max-w-3xl mx-auto'}`}
+      style={showPreviewSidebar ? { width: mainWidthPx, flexShrink: 0 } : undefined}
     >
       {/* Header */}
       <header className="flex items-center justify-between mb-8 flex-shrink-0">
