@@ -298,7 +298,22 @@ function readAllPorts(): void {
       newWorktreeCache[sessionId] = { worktreePath, port };
     }
   }
+  // Also allow routing by branch name for manually created worktrees that have
+  // a port configured but no sessionId git config entry. This makes
+  // /preview/<branchName> work when branch.<name>.port is set and a worktree
+  // for the branch exists, without requiring branch.<name>.sessionid.
+  for (const [branch, worktreePath] of Object.entries(branchWorktree)) {
+    const port = branchPort[branch];
+    if (port && !branchSessionId[branch] && !newWorktreeCache[branch]) {
+      newWorktreeCache[branch] = { worktreePath, port };
+    }
+  }
   sessionWorktreeCache = newWorktreeCache;
+  // Extend sessionPortCache with the same branch-name fallback so that WebSocket
+  // upgrades (HMR) are also routed correctly for manual worktrees.
+  for (const [branch, entry] of Object.entries(newWorktreeCache)) {
+    if (!sessionPortCache[branch]) sessionPortCache[branch] = entry.port;
+  }
 
   // Determine production branch from git config primordia.productionBranch (set on
   // each accept), falling back to HEAD of the current worktree (initial bootstrap
