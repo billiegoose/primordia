@@ -1,4 +1,4 @@
-# Fix unattached branch visibility on branches page and preview routing
+# Fix unattached branch visibility on branches page
 
 ## What changed
 
@@ -15,32 +15,12 @@ production chain in either direction) and returns an `unattached` list of all
 remaining branches. The page renders these in a new **Other Branches** section
 below Past Sessions.
 
-### Reverse proxy — branch-name routing for manual worktrees
-
-`/preview/<id>` routing works by looking up the session ID in
-`sessionWorktreeCache`, which is built exclusively from `branch.<name>.sessionid`
-+ `branch.<name>.port` git config entries. A manually created worktree has neither
-entry, so `/preview/cleanup-installer` (or any other manually created branch)
-would silently fall through to production and return a 404.
-
-`readAllPorts()` now adds a fallback entry to `sessionWorktreeCache` for every
-branch that has a port configured (`branch.<name>.port`) and an active worktree,
-but no `sessionid` git config. The branch name is used as the routing key, so
-`/preview/<branchName>` routes correctly as long as `branch.<branchName>.port` is
-set.
-
-`sessionPortCache` (used for WebSocket / HMR upgrade routing) is also updated with
-these branch-name entries so that hot-module-reload connections work correctly for
-manual worktrees.
-
 ## Why
 
-A developer created a worktree manually for the `cleanup-installer` branch (e.g.
-`git worktree add ../cleanup-installer cleanup-installer` + setting a port in git
-config) and expected:
+A developer created a worktree manually for the `cleanup-installer` branch and
+expected it to appear on `/branches`. It didn't, because it had no `parent` config
+connecting it to the production tree, so `buildSections` silently dropped it.
 
-1. The branch to appear on `/branches` — it didn't, because it had no `parent`
-   config connecting it to the production tree.
-2. The preview to be accessible at `/preview/cleanup-installer` — it wasn't,
-   because the proxy only knew about sessions created by the evolve flow (which
-   write `branch.<name>.sessionid` to git config).
+With the branch now visible in "Other Branches", the developer can use the
+**+ session** button to create a proper evolve session with a session ID, which
+will then be routable via `/preview/<sessionId>` through the normal flow.
