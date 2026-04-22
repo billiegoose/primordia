@@ -1,6 +1,6 @@
 // app/api/instance/register/route.ts
 // Allows a child Primordia instance to register itself with this instance.
-// On success, the child is added as a graph node and a "fork" edge is created.
+// On success, the child is added as a graph node and a "child_of" edge is created.
 //
 // POST body: { uuid7: string, url: string, name: string, description?: string }
 
@@ -56,14 +56,15 @@ export async function POST(req: NextRequest) {
     registeredAt: now,
   });
 
-  // Create a fork edge from self → child (idempotent by deterministic id).
-  const edgeId = `${config.uuid7}→${uuid7}`;
+  // Create a child_of edge: child → self (idempotent by deterministic id).
+  // Direction: child_of points from the child to its parent.
+  const edgeId = `${uuid7}→child_of→${config.uuid7}`;
   const today = new Date().toISOString().slice(0, 10);
   await db.upsertGraphEdge({
     id: edgeId,
-    from: config.uuid7,
-    to: uuid7,
-    type: "fork",
+    from: uuid7,
+    to: config.uuid7,
+    type: "child_of",
     date: today,
     createdAt: now,
   });

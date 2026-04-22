@@ -86,8 +86,8 @@ const SCHEMA = {
           type: {
             type: "string",
             description:
-              "The relationship type. Known types: fork, merge, sibling, banned. Unknown types should be rendered generically.",
-            examples: ["fork", "merge", "sibling", "banned"],
+              "The relationship type. Known value: child_of (the source node is a fork/child of the target). Unknown types should be rendered generically.",
+            examples: ["child_of"],
           },
           date: {
             type: "string",
