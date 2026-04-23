@@ -16,6 +16,8 @@ import { decryptApiKey } from '../../../lib/llm-encryption';
 import {
   startLocalEvolve,
   runGit,
+  getRepoRoot,
+  getWorktreesDir,
   type LocalSession,
 } from '../../../lib/evolve-sessions';
 import { getSessionUser, hasEvolvePermission } from '../../../lib/auth';
@@ -187,11 +189,8 @@ export async function POST(request: Request) {
   //
   // In the legacy layout (/home/exedev/primordia) we fall back to the classic
   // ../primordia-worktrees/{branch} path so existing installs keep working.
-  const gitCommonDirResult = await runGit(['rev-parse', '--git-common-dir'], repoRoot);
-  const gitCommonDir = path.resolve(repoRoot, gitCommonDirResult.stdout.trim());
-  const worktreesDir = process.env.PRIMORDIA_WORKTREES_DIR
-    ?? path.join(path.dirname(gitCommonDir), 'worktrees');
-  const worktreePath = path.join(worktreesDir, branch);
+  const repoGitRoot = getRepoRoot(repoRoot);
+  const worktreePath = path.join(getWorktreesDir(repoGitRoot), branch);
 
   // Create the git worktree synchronously before returning so the session page
   // is immediately reachable when the client navigates to it after the redirect.

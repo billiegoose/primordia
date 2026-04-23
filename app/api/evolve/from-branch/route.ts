@@ -12,6 +12,8 @@ import { decryptApiKey } from '../../../../lib/llm-encryption';
 import {
   startLocalEvolve,
   runGit,
+  getRepoRoot,
+  getWorktreesDir,
   type LocalSession,
 } from '../../../../lib/evolve-sessions';
 import { getSessionUser, hasEvolvePermission } from '../../../../lib/auth';
@@ -126,11 +128,8 @@ export async function POST(request: Request) {
 
   // Compute the worktree path using the session ID (not the branch name) so
   // that slashes in branch names don't create nested directories.
-  const gitCommonDirResult = await runGit(['rev-parse', '--git-common-dir'], repoRoot);
-  const gitCommonDir = path.resolve(repoRoot, gitCommonDirResult.stdout.trim());
-  const worktreesDir = process.env.PRIMORDIA_WORKTREES_DIR
-    ?? path.join(path.dirname(gitCommonDir), 'worktrees');
-  const worktreePath = path.join(worktreesDir, sessionId);
+  const repoGitRoot = getRepoRoot(repoRoot);
+  const worktreePath = path.join(getWorktreesDir(repoGitRoot), sessionId);
 
   // Check if a worktree for this branch is already registered (e.g. a previous session).
   // If so, reuse that path; otherwise create a new worktree checkout.

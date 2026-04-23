@@ -60,10 +60,34 @@ export interface LocalSession {
   userId: string;
 }
 
-// ─── Branch port management ────────────────────────────────────────────────────
+// ─── Repo / worktree path utilities ──────────────────────────────────────────
 
-const WORKTREES_DIR =
-  process.env.PRIMORDIA_WORKTREES_DIR ?? '/home/exedev/primordia-worktrees';
+/**
+ * Returns the shared git repo root (the bare repo or the .git common dir)
+ * given any path inside a worktree. Git commands work correctly from this
+ * path whether it is a bare repo (source.git) or a non-bare .git directory.
+ */
+export function getRepoRoot(worktreePath: string): string {
+  const { execFileSync } = require('child_process') as typeof import('child_process');
+  const commonDir = execFileSync('git', ['rev-parse', '--git-common-dir'], {
+    cwd: worktreePath,
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+  }).trim();
+  return path.resolve(worktreePath, commonDir);
+}
+
+/**
+ * Returns the directory where session worktrees are created.
+ * Prefers PRIMORDIA_WORKTREES_DIR, falling back to a `worktrees/` sibling of
+ * the git common dir (works for both bare-repo and non-bare layouts).
+ */
+export function getWorktreesDir(repoRoot: string): string {
+  if (process.env.PRIMORDIA_WORKTREES_DIR) return process.env.PRIMORDIA_WORKTREES_DIR;
+  return path.join(path.dirname(repoRoot), 'worktrees');
+}
+
+// ─── Branch port management ────────────────────────────────────────────────────
 
 /**
  * Returns the ephemeral port assigned to a branch in git config, assigning a
