@@ -12,7 +12,8 @@ import {
   listSessionsFromFilesystem,
   type SessionEvent,
 } from './session-events';
-import { HARNESS_OPTIONS, MODEL_OPTIONS_BY_HARNESS, DEFAULT_HARNESS, DEFAULT_MODEL } from './agent-config';
+import { HARNESS_OPTIONS, DEFAULT_HARNESS, DEFAULT_MODEL } from './agent-config';
+import { getModelLabel } from './pi-model-registry.server';
 
 export type LocalSessionStatus =
   | 'starting'
@@ -547,7 +548,7 @@ export async function startLocalEvolve(
     const harnessId = session.harness ?? DEFAULT_HARNESS;
     const modelId = session.model ?? DEFAULT_MODEL;
     const harnessLabel = HARNESS_OPTIONS.find((h) => h.id === harnessId)?.label ?? harnessId;
-    const modelLabel = (MODEL_OPTIONS_BY_HARNESS[harnessId] ?? []).find((m) => m.id === modelId)?.label ?? modelId;
+    const modelLabel = getModelLabel(harnessId, modelId);
     appendSessionEvent(ndjsonPath, { type: 'section_start', sectionType: 'agent', harness: harnessLabel, model: modelLabel, harnessId, modelId, label: `🤖 ${harnessLabel} (${modelLabel})`, ts: Date.now() });
 
     const attachmentSection = worktreeAttachmentPaths.length > 0
@@ -629,7 +630,7 @@ export async function runFollowupInWorktree(
       appendSessionEvent(ndjsonPath, { type: 'followup_request', request: followupRequest, attachments: attachmentPaths.map(p => path.basename(p)), ts: Date.now() });
       const fuModelId = session.model ?? DEFAULT_MODEL;
       const fuHarnessLabel = HARNESS_OPTIONS.find((h) => h.id === fuHarnessId)?.label ?? fuHarnessId;
-      const fuModelLabel = (MODEL_OPTIONS_BY_HARNESS[fuHarnessId] ?? []).find((m) => m.id === fuModelId)?.label ?? fuModelId;
+      const fuModelLabel = getModelLabel(fuHarnessId, fuModelId);
       appendSessionEvent(ndjsonPath, { type: 'section_start', sectionType: 'agent', harness: fuHarnessLabel, model: fuModelLabel, harnessId: fuHarnessId, modelId: fuModelId, label: `🤖 ${fuHarnessLabel} (${fuModelLabel})`, ts: Date.now() });
     }
     session.status = inProgressStatus;

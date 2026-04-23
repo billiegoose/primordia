@@ -21,7 +21,7 @@ import { DiffFileExpander } from "./DiffFileExpander";
 import { WebPreviewPanel, type ElementSelection } from "./WebPreviewPanel";
 import HorizontalResizeHandle from "./HorizontalResizeHandle";
 import type { SessionEvent } from "@/lib/session-events";
-import { HARNESS_OPTIONS, MODEL_OPTIONS_BY_HARNESS } from "@/lib/agent-config";
+import { HARNESS_OPTIONS, type ModelOption } from "@/lib/agent-config";
 
 // ─── Metrics ──────────────────────────────────────────────────────────────────
 
@@ -561,6 +561,14 @@ export default function EvolveSessionView({
   initialCavemanMode,
   initialCavemanIntensity,
 }: EvolveSessionViewProps) {
+  const [modelOptionsByHarness, setModelOptionsByHarness] = useState<Record<string, ModelOption[]>>({});
+  useEffect(() => {
+    fetch(withBasePath('/api/evolve/models'))
+      .then((r) => r.json())
+      .then((data: Record<string, ModelOption[]>) => setModelOptionsByHarness(data))
+      .catch(() => { /* silently fall back to empty list */ });
+  }, []);
+
   const [events, setEvents] = useState<SessionEvent[]>(initialEvents);
   const [status, setStatus] = useState(initialStatus);
   const [previewUrl, setPreviewUrl] = useState<string | null>(initialPreviewUrl);
@@ -967,7 +975,7 @@ export default function EvolveSessionView({
       : undefined);
   const sessionModel = lastAgentSection?.modelId
     ?? (lastAgentSection?.model && sessionHarness
-      ? MODEL_OPTIONS_BY_HARNESS[sessionHarness]?.find((m) => m.label === lastAgentSection.model)?.id
+      ? modelOptionsByHarness[sessionHarness]?.find((m) => m.label === lastAgentSection.model)?.id
       : undefined);
   // Setup is active while it's the only section and session isn't terminal
   const isSetupActive = !isTerminal && contentSections.length === 0;

@@ -17,9 +17,9 @@ import { withBasePath } from "../lib/base-path";
 import { encryptStoredApiKey } from "../lib/api-key-client";
 import {
   HARNESS_OPTIONS,
-  MODEL_OPTIONS_BY_HARNESS,
   DEFAULT_HARNESS,
   DEFAULT_MODEL,
+  type ModelOption,
 } from "../lib/agent-config";
 import {
   CAVEMAN_INTENSITIES,
@@ -161,6 +161,17 @@ export function EvolveRequestForm({
   const [cavemanIntensity, setCavemanIntensity] = useState<CavemanIntensity>(
     initialCavemanIntensity ?? DEFAULT_CAVEMAN_INTENSITY,
   );
+  // ── Dynamic model list (fetched from /api/evolve/models) ──────────────────
+  const [modelOptionsByHarness, setModelOptionsByHarness] = useState<Record<string, ModelOption[]>>({});
+  useEffect(() => {
+    fetch(withBasePath('/api/evolve/models'))
+      .then((r) => r.json())
+      .then((data: Record<string, ModelOption[]>) => {
+        setModelOptionsByHarness(data);
+      })
+      .catch(() => { /* silently fall back to empty list */ });
+  }, []);
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -536,7 +547,7 @@ export function EvolveRequestForm({
                   value={selectedHarness}
                   onChange={(e) => {
                     const harness = e.target.value;
-                    const models = MODEL_OPTIONS_BY_HARNESS[harness];
+                    const models = modelOptionsByHarness[harness];
                     const newModel = models?.[0]?.id ?? DEFAULT_MODEL;
                     setSelectedHarness(harness);
                     setSelectedModel(newModel);
@@ -560,7 +571,7 @@ export function EvolveRequestForm({
                   disabled={isLoading}
                   className="flex-1 text-xs bg-gray-800 text-gray-200 border border-gray-700 rounded px-2 py-1.5 focus:outline-none focus:border-gray-500 disabled:opacity-50"
                 >
-                  {(MODEL_OPTIONS_BY_HARNESS[selectedHarness] ?? []).map((m) => (
+                  {(modelOptionsByHarness[selectedHarness] ?? []).map((m) => (
                     <option key={m.id} value={m.id}>
                       {m.label}
                     </option>

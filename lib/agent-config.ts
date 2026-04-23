@@ -1,6 +1,10 @@
 // lib/agent-config.ts
-// Definitions for supported coding agent harnesses and the models they support.
-// Add new harnesses here as they become available.
+// Definitions for supported coding agent harnesses and global defaults.
+//
+// The per-harness model list is intentionally NOT hard-coded here — it is
+// generated at runtime from the pi ModelRegistry so it stays current when the
+// pi SDK is updated.  Server code imports from lib/pi-model-registry.server.ts;
+// client components fetch from GET /api/evolve/models.
 
 export interface HarnessOption {
   id: string;
@@ -26,58 +30,6 @@ export const HARNESS_OPTIONS: HarnessOption[] = [
     description: "Mario Zechner's pi coding agent",
   },
 ];
-
-export const MODEL_OPTIONS_BY_HARNESS: Record<string, ModelOption[]> = {
-  'claude-code': [
-    {
-      id: 'claude-sonnet-4-6',
-      label: 'Claude Sonnet 4',
-      description: 'Balanced — default',
-    },
-    {
-      id: 'claude-opus-4-6',
-      label: 'Claude Opus 4',
-      description: 'Most capable',
-    },
-    {
-      id: 'claude-haiku-4-5-20251001',
-      label: 'Claude Haiku 4',
-      description: 'Fastest',
-    },
-  ],
-  'pi': [
-    {
-      id: 'claude-sonnet-4-6',
-      label: 'Claude Sonnet 4',
-      description: 'Balanced — default',
-    },
-    {
-      id: 'claude-opus-4-6',
-      label: 'Claude Opus 4',
-      description: 'Most capable',
-    },
-    {
-      id: 'claude-haiku-4-5-20251001',
-      label: 'Claude Haiku 4',
-      description: 'Fastest',
-    },
-    {
-      id: 'gpt-4.1',
-      label: 'GPT-4.1',
-      description: 'OpenAI — balanced',
-    },
-    {
-      id: 'o4-mini',
-      label: 'o4-mini',
-      description: 'OpenAI — fast reasoning',
-    },
-    {
-      id: 'o3',
-      label: 'o3',
-      description: 'OpenAI — powerful reasoning',
-    },
-  ],
-};
 
 export const DEFAULT_HARNESS = 'pi';
 export const DEFAULT_MODEL = 'claude-sonnet-4-6';

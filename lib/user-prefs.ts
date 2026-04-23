@@ -7,8 +7,8 @@ import {
   DEFAULT_HARNESS,
   DEFAULT_MODEL,
   HARNESS_OPTIONS,
-  MODEL_OPTIONS_BY_HARNESS,
 } from "./agent-config";
+import { resolveValidModel } from "./pi-model-registry.server";
 
 export const PREF_HARNESS = "evolve:preferred-harness";
 export const PREF_MODEL = "evolve:preferred-model";
@@ -43,10 +43,7 @@ export async function getEvolvePrefs(userId: string): Promise<EvolvePrefs> {
 
     const validHarness =
       harness && HARNESS_OPTIONS.find((h) => h.id === harness) ? harness : DEFAULT_HARNESS;
-    const validModel =
-      model && MODEL_OPTIONS_BY_HARNESS[validHarness]?.find((m) => m.id === model)
-        ? model
-        : MODEL_OPTIONS_BY_HARNESS[validHarness]?.[0]?.id ?? DEFAULT_MODEL;
+    const validModel = resolveValidModel(validHarness, model, DEFAULT_MODEL);
 
     const cavemanMode = prefs[PREF_CAVEMAN] === "true";
     const rawIntensity = prefs[PREF_CAVEMAN_INTENSITY];
