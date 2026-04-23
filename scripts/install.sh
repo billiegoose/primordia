@@ -19,9 +19,10 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
 # ── Colours / formatting ──────────────────────────────────────────────────────
-# Keep all user-visible messages short and free of variable-length strings
-# (branch names, paths, etc.) so the output looks good on narrow screens
-# and mobile devices.
+# Happy-path progress messages (info/success/warn/_step/_done) should be short
+# and free of variable-length strings (branch names, paths, etc.) so the
+# output looks good on narrow screens and mobile devices. Error and diagnostic
+# messages (die/diag and the ERR trap) may include full detail.
 
 if [[ -t 1 ]] || [[ -e /dev/tty ]]; then
   BOLD="\033[1m"; GREEN="\033[0;32m"; CYAN="\033[0;36m"
