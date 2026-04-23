@@ -198,7 +198,9 @@ else
   _step "Creating worktree..."
   # Create a local tracking branch from the remote ref and check it out in
   # the new worktree.
-  git -C "${BARE_REPO}" worktree add "${INSTALL_DIR}" "${BRANCH}" 2>/dev/null;
+  _log=$(mktemp)
+  if ! git -C "${BARE_REPO}" worktree add "${INSTALL_DIR}" "${BRANCH}" >"$_log" 2>&1; then _spin_kill; cat "$_log" >&2; rm -f "$_log"; exit 1; fi
+  rm -f "$_log"
   _done "Worktree created"
 fi
 
@@ -376,21 +378,21 @@ UNIT
 
   # Enable the service so it starts automatically on boot
   if ! systemctl is-enabled --quiet primordia 2>/dev/null; then
-    sudo systemctl enable primordia
+    sudo systemctl enable --quiet primordia 2>/dev/null
     success "Enabled primordia systemd service"
   fi
 
   # Restart the service if it changed
   if [[ "$PROXY_CHANGED" == true || "$SERVICE_CHANGED" == true ]]; then
     if systemctl is-active --quiet primordia; then
-      sudo systemctl restart primordia
+      sudo systemctl restart --quiet primordia
       success "Restarted primordia systemd service"
     fi
   fi
 
   # Start the service
   if ! systemctl is-active --quiet primordia 2>/dev/null; then
-    sudo systemctl start primordia
+    sudo systemctl start --quiet primordia
     success "Started primordia systemd service"
   fi
 fi
