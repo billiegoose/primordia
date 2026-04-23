@@ -27,15 +27,15 @@ export default async function LandingPage() {
     headerStore.get("x-forwarded-host") ??
     headerStore.get("host") ??
     "primordia.exe.xyz";
-  const setupUrl = `${proto}://${host}${basePath}/setup.sh`;
+  const installUrl = `${proto}://${host}${basePath}/install.sh`;
   const defaultVmName = createNameId();
   return (
     <div className="min-h-dvh bg-gray-950 text-gray-100 overflow-x-hidden">
       <LandingNav />
-      <HeroSection setupUrl={setupUrl} defaultVmName={defaultVmName} />
+      <HeroSection installUrl={installUrl} defaultVmName={defaultVmName} />
       <FeaturesSection />
       <HowItWorksSection />
-      <CTABannerSection setupUrl={setupUrl} defaultVmName={defaultVmName} />
+      <CTABannerSection installUrl={installUrl} defaultVmName={defaultVmName} />
       <LandingFooter />
     </div>
   );

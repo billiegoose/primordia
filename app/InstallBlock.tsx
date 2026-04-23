@@ -28,7 +28,7 @@ function CopyBtn({ text }: { text: string }) {
   );
 }
 
-export default function InstallBlock({ setupUrl, defaultName }: { setupUrl: string; defaultName: string }) {
+export default function InstallBlock({ installUrl, defaultName }: { installUrl: string; defaultName: string }) {
   const [name, setName] = useState(defaultName);
   // caretPos: character index (selectionEnd). null = unfocused.
   const [caretPos, setCaretPos] = useState<number | null>(null);
@@ -48,7 +48,7 @@ export default function InstallBlock({ setupUrl, defaultName }: { setupUrl: stri
   const atEnd = caretPos !== null && caretPos >= name.length;
 
   const sshCmd = `ssh exe.dev new --name=${name}`;
-  const curlCmd = `curl -fsSL ${setupUrl} | ssh ${name}.exe.xyz 'bash -s'`;
+  const curlCmd = `curl -fsSL ${installUrl} | ssh ${name}.exe.xyz 'bash -s'`;
 
   return (
     <div className="rounded-xl border border-white/10 bg-gray-900/80 backdrop-blur overflow-hidden">
