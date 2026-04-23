@@ -54,7 +54,7 @@
   50%       { opacity: 0; }
 }
 
-.animate-blink { animation: blink 1s step-start infinite; }
+.animate-blink { animation: blink 1s step-end infinite; }
 @media (prefers-reduced-motion: reduce) { .animate-blink { animation: none; } }
 
 /* CSS-only block cursor for the install block — no JS needed for initial paint.
@@ -67,7 +67,7 @@
   left: 100%;
   width: 0.55em;
   background: #4ade80; /* green-400 */
-  animation: blink 1s step-start infinite;
+  animation: blink 1s step-end infinite;
   pointer-events: none;
 }
 .install-cursor.is-focused::after { display: none; }

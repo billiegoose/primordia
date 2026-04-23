@@ -85,9 +85,11 @@ export default function InstallBlock({ setupUrl, defaultName }: { setupUrl: stri
                 requestAnimationFrame(updateCaret);
               }}
               onSelect={updateCaret}
-              onFocus={() => {
+              onFocus={(e) => {
                 setFocused(true);
                 setFocusCount(n => n + 1);
+                const el = e.currentTarget;
+                el.setSelectionRange(el.value.length, el.value.length);
                 requestAnimationFrame(updateCaret);
               }}
               onBlur={() => { setFocused(false); }}
