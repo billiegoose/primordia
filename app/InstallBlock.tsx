@@ -30,7 +30,7 @@ function CopyBtn({ text }: { text: string }) {
 
 export default function InstallBlock({ setupUrl, defaultName }: { setupUrl: string; defaultName: string }) {
   const [name, setName] = useState(defaultName);
-  // caretPos is the character index of the caret (selectionEnd). null = unfocused.
+  // caretPos: character index (selectionEnd). null = unfocused.
   const [caretPos, setCaretPos] = useState<number | null>(null);
   const [focusCount, setFocusCount] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -43,9 +43,9 @@ export default function InstallBlock({ setupUrl, defaultName }: { setupUrl: stri
   }, []);
 
   const focused = caretPos !== null;
-  // CSS custom property: how many ch to shift the ::after cursor left from the right edge of the input.
-  // At end of word: 0. At beginning: name.length ch.
-  const charsFromEnd = caretPos !== null ? Math.max(name.length, 1) - caretPos : 0;
+  const displayLen = Math.max(name.length, 1);
+  // Cursor is "past end" when at or beyond the last character index.
+  const atEnd = caretPos !== null && caretPos >= name.length;
 
   const sshCmd = `ssh exe.dev new --name=${name}`;
   const curlCmd = `curl -fsSL ${setupUrl} | ssh ${name}.exe.xyz 'bash -s'`;
@@ -60,10 +60,9 @@ export default function InstallBlock({ setupUrl, defaultName }: { setupUrl: stri
         <span className="select-none text-gray-600 font-mono text-sm shrink-0">$</span>
         <div className="flex-1 font-mono text-sm text-green-400 text-left flex items-center min-w-0 overflow-hidden">
           <span className="shrink-0 select-none">ssh exe.dev new --name=</span>
-          <span
-            className={`install-cursor relative inline-flex items-center${focused ? " is-focused" : ""}`}
-            style={{ "--caret-offset": `${charsFromEnd}ch` } as React.CSSProperties}
-          >
+
+          {/* Wrapper: input is invisible when focused so display spans show instead */}
+          <span className="relative inline-flex items-center">
             <input
               ref={inputRef}
               value={name}
@@ -77,7 +76,6 @@ export default function InstallBlock({ setupUrl, defaultName }: { setupUrl: stri
               onFocus={(e) => {
                 setFocusCount(n => n + 1);
                 if (!mouseDownRef.current) {
-                  // Keyboard/tab focus — move caret to end
                   const el = e.currentTarget;
                   el.setSelectionRange(el.value.length, el.value.length);
                 }
@@ -90,15 +88,56 @@ export default function InstallBlock({ setupUrl, defaultName }: { setupUrl: stri
               spellCheck={false}
               autoComplete="off"
               aria-label="VM name"
-              className="bg-transparent outline-none text-green-400 font-mono text-sm caret-transparent selection:bg-green-400/30 min-w-[1ch]"
-              style={{ width: `${Math.max(name.length, 1)}ch` }}
+              className={`bg-transparent outline-none font-mono text-sm caret-transparent selection:bg-green-400/30 min-w-[1ch] ${focused ? "text-transparent" : "text-green-400"}`}
+              style={{ width: `${displayLen}ch` }}
             />
-            {/* JS-positioned block cursor — remounts on each focus to restart blink animation */}
+
             {focused && (
+              <>
+                {/* Normal text layer: green text, transparent bg, clipped to exclude cursor char */}
+                <span
+                  key={`text-${focusCount}`}
+                  aria-hidden="true"
+                  className="absolute inset-0 font-mono text-sm text-green-400 pointer-events-none overflow-hidden whitespace-pre"
+                  style={atEnd ? undefined : {
+                    clipPath: `inset(0 ${(name.length - caretPos!) * 1}ch 0 0) padding-box, inset(0 0 0 ${(caretPos! + 1) * 1}ch) padding-box`,
+                  }}
+                >
+                  {name || " "}
+                </span>
+
+                {/* Inverted layer: green bg, dark text, clipped to cursor char only */}
+                <span
+                  key={`inv-${focusCount}`}
+                  aria-hidden="true"
+                  className="absolute inset-0 font-mono text-sm pointer-events-none overflow-hidden whitespace-pre animate-blink"
+                  style={atEnd ? { clipPath: "inset(0 0 0 100%)" } : {
+                    clipPath: `inset(0 ${(name.length - caretPos! - 1) * 1}ch 0 ${caretPos! * 1}ch)`,
+                    color: "rgb(17 24 39)", /* gray-900 to match bg */
+                    background: "#4ade80",
+                  }}
+                >
+                  {name || " "}
+                </span>
+
+                {/* Block cursor shown only when caret is past last char */}
+                {atEnd && (
+                  <span
+                    key={`end-${focusCount}`}
+                    aria-hidden="true"
+                    className="absolute top-0 bottom-0 animate-blink pointer-events-none"
+                    style={{ left: `${name.length}ch`, width: "0.55em", background: "#4ade80" }}
+                  />
+                )}
+              </>
+            )}
+
+            {/* Unfocused CSS-only cursor at end of word */}
+            {!focused && (
               <span
-                key={focusCount}
                 aria-hidden="true"
-                className="install-cursor-js animate-blink"
+                className="install-cursor-unfocused absolute top-0 bottom-0 pointer-events-none"
+                style={{ left: `${displayLen}ch` }}
               />
             )}
           </span>
