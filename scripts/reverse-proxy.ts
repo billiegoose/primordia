@@ -329,8 +329,23 @@ function readAllPorts(): void {
   }
   if (prodBranch) {
     currentProdBranch = prodBranch;
-    const port = branchPort[prodBranch];
-    if (port && port !== upstreamPort) {
+    let port = branchPort[prodBranch];
+    if (!port) {
+      // No port assigned yet — pick LISTEN_PORT+1 and persist it so all future
+      // reads (including startProdServerIfNeeded) see a consistent value.
+      port = LISTEN_PORT + 1;
+      try {
+        execFileSync('git', ['config', `branch.${prodBranch}.port`, String(port)], {
+          cwd: MAIN_REPO,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+        console.log(`[proxy] auto-assigned port :${port} to branch '${prodBranch}'`);
+        branchPort[prodBranch] = port;
+      } catch (err) {
+        console.warn(`[proxy] could not persist port for '${prodBranch}': ${(err as Error).message}`);
+      }
+    }
+    if (port !== upstreamPort) {
       console.log(`[proxy] upstream port: ${upstreamPort} → ${port} (PROD branch: ${prodBranch})`);
       upstreamPort = port;
     }

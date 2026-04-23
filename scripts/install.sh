@@ -291,19 +291,6 @@ else
   PROBABLY_A_SERVER=true
 fi
 
-# ── Assign production app port ────────────────────────────────────────────────
-# The proxy reads branch.{name}.port from git config to know where to forward
-# traffic and what port to spawn the production app on.  Only assign if not
-# already set (idempotent).
-if ! git -C "${BARE_REPO}" config --get branch."$BRANCH".port >/dev/null 2>&1; then
-  PROD_APP_PORT=$((REVERSE_PROXY_PORT + 1))
-  git -C "${BARE_REPO}" config branch."$BRANCH".port "$PROD_APP_PORT"
-  success "Assigned port ${PROD_APP_PORT} to branch ${BRANCH}"
-else
-  PROD_APP_PORT="$(git -C "${BARE_REPO}" config --get branch."$BRANCH".port)"
-  success "Using port ${PROD_APP_PORT} for branch ${BRANCH}"
-fi
-
 # ── Install systemd service ───────────────────────────────────────────────────
 
 _CURRENT_STEP="install systemd service"
