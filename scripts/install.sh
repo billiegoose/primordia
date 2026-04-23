@@ -266,6 +266,35 @@ else
   success "Using reverse-proxy.ts"
 fi
 
+# ── Copy DB from old production slot (if one exists) ─────────────────────────
+# Mirrors what blueGreenAccept() does: VACUUM INTO for an atomic snapshot,
+# so the new slot inherits users/sessions/passkeys without missing writes.
+_CURRENT_STEP="copy production DB"
+DB_NAME=".primordia-auth.db"
+OLD_PROD_BRANCH="$(git -C "${BARE_REPO}" config --get primordia.productionBranch 2>/dev/null || true)"
+if [[ -n "$OLD_PROD_BRANCH" && "$OLD_PROD_BRANCH" != "$BRANCH" ]]; then
+  # Find the worktree path for the current production branch.
+  OLD_SLOT="$(git -C "${BARE_REPO}" worktree list --porcelain \
+    | awk '/^worktree /{p=$2} /^branch refs\/heads\/'"${OLD_PROD_BRANCH}"'$/{print p; exit}')"
+  if [[ -n "$OLD_SLOT" && -f "${OLD_SLOT}/${DB_NAME}" ]]; then
+    _step "Copying production DB from ${OLD_PROD_BRANCH}..."
+    NEW_DB="${INSTALL_DIR}/${DB_NAME}"
+    rm -f "${NEW_DB}" "${NEW_DB}-wal" "${NEW_DB}-shm"
+    sqlite3 "${OLD_SLOT}/${DB_NAME}" "VACUUM INTO '${NEW_DB}'"
+    _done "DB copied from ${OLD_PROD_BRANCH}"
+  fi
+fi
+
+# ── Fix .env.local symlink ────────────────────────────────────────────────────
+# Point to the primordia dir's .env.local (never deleted), not the old slot's
+# copy (which may be removed on the next deploy).
+ENV_SRC="${PRIMORDIA_DIR}/.env.local"
+ENV_DST="${INSTALL_DIR}/.env.local"
+if [[ -f "$ENV_SRC" ]]; then
+  rm -f "$ENV_DST"
+  ln -s "$ENV_SRC" "$ENV_DST"
+fi
+
 # ── Mark production branch ────────────────────────────────────────────────────
 git -C "${BARE_REPO}" config primordia.productionBranch "$BRANCH"
 git -C "${BARE_REPO}" config branch."$BRANCH".sessionid "$BRANCH"
