@@ -105,7 +105,9 @@ export function inferStatusFromEvents(events: SessionEvent[]): string {
  * all worktrees live alongside the current one under the same parent directory.
  */
 export function getCandidateWorktreePath(sessionId: string): string {
-  return path.join(path.dirname(process.cwd()), sessionId);
+  const worktreesDir = process.env.PRIMORDIA_WORKTREES_DIR
+    ?? path.dirname(process.cwd());
+  return path.join(worktreesDir, sessionId);
 }
 
 /**
