@@ -28,8 +28,7 @@ function CopyBtn({ text }: { text: string }) {
   );
 }
 
-// Measures pixel width of a string in a monospace font by rendering it into a
-// hidden canvas — no DOM span needed, zero layout thrash.
+// Measures pixel width of a string in a monospace font via a hidden canvas.
 function measureText(text: string, font: string): number {
   if (typeof document === "undefined") return 0;
   const canvas =
@@ -48,7 +47,6 @@ export default function InstallBlock({ setupUrl }: { setupUrl: string }) {
   const [endPx, setEndPx] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Resolve the computed font string once the input is mounted.
   const fontRef = useRef<string>("");
   useLayoutEffect(() => {
     if (inputRef.current && !fontRef.current) {
@@ -72,23 +70,19 @@ export default function InstallBlock({ setupUrl }: { setupUrl: string }) {
     setEndPx(measureText(el.value, fontRef.current));
   }, []);
 
-  const cmds = [
-    `VM_NAME=${name}`,
-    `ssh exe.dev new --name=$VM_NAME`,
-    `curl -fsSL ${setupUrl} | ssh $VM_NAME.exe.xyz 'bash -s'`,
-  ];
+  const sshCmd = `ssh exe.dev new --name=${name}`;
+  const curlCmd = `curl -fsSL ${setupUrl} | ssh ${name}.exe.xyz 'bash -s'`;
 
   return (
     <div className="rounded-xl border border-white/10 bg-gray-900/80 backdrop-blur overflow-hidden">
-      {/* Line 1 — editable VM_NAME */}
+      {/* Line 1 — editable name inline in the ssh command */}
       <div
         className="flex items-center px-4 py-3 gap-3 border-b border-white/5 hover:bg-white/[0.03] transition-colors cursor-text"
         onClick={() => inputRef.current?.focus()}
       >
         <span className="select-none text-gray-600 font-mono text-sm shrink-0">$</span>
-        <div className="flex-1 font-mono text-sm text-green-400 text-left flex items-center min-w-0">
-          <span className="shrink-0 select-none">VM_NAME=</span>
-          {/* Container that holds the input + our fake block cursor */}
+        <div className="flex-1 font-mono text-sm text-green-400 text-left flex items-center min-w-0 overflow-hidden">
+          <span className="shrink-0 select-none">ssh exe.dev new --name=</span>
           <span className="relative inline-flex items-center">
             <input
               ref={inputRef}
@@ -102,7 +96,6 @@ export default function InstallBlock({ setupUrl }: { setupUrl: string }) {
               onFocus={() => { setFocused(true); updateCaret(); }}
               onBlur={(e) => {
                 setFocused(false);
-                // Reset selection to end so the idle cursor sits at the end
                 const el = e.currentTarget;
                 requestAnimationFrame(() => {
                   el.setSelectionRange(el.value.length, el.value.length);
@@ -114,9 +107,7 @@ export default function InstallBlock({ setupUrl }: { setupUrl: string }) {
               spellCheck={false}
               autoComplete="off"
               aria-label="VM name"
-              // caret-transparent hides the native caret; we draw our own
               className="bg-transparent outline-none text-green-400 font-mono text-sm caret-transparent selection:bg-green-400/30 min-w-[1ch]"
-              // Auto-size: 1 ch per character, minimum 1
               style={{ width: `${Math.max(name.length, 1)}ch` }}
             />
             {/* Block cursor — tracks real caret when focused, sits at end when idle */}
@@ -129,20 +120,15 @@ export default function InstallBlock({ setupUrl }: { setupUrl: string }) {
             )}
           </span>
         </div>
-        <CopyBtn text={cmds[0]} />
+        <CopyBtn text={sshCmd} />
       </div>
 
-      {/* Lines 2 & 3 — static, but reflect the live name */}
-      {cmds.slice(1).map((cmd, i) => (
-        <div
-          key={i}
-          className={`flex items-center px-4 py-3 gap-3 hover:bg-white/[0.03] transition-colors${i === 0 ? " border-b border-white/5" : ""}`}
-        >
-          <span className="select-none text-gray-600 font-mono text-sm shrink-0">$</span>
-          <code className="flex-1 font-mono text-sm text-green-400 truncate text-left">{cmd}</code>
-          <CopyBtn text={cmd} />
-        </div>
-      ))}
+      {/* Line 2 — curl command, auto-synced with name */}
+      <div className="flex items-center px-4 py-3 gap-3 hover:bg-white/[0.03] transition-colors">
+        <span className="select-none text-gray-600 font-mono text-sm shrink-0">$</span>
+        <code className="flex-1 font-mono text-sm text-green-400 truncate text-left">{curlCmd}</code>
+        <CopyBtn text={curlCmd} />
+      </div>
     </div>
   );
 }
