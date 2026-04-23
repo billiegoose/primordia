@@ -92,7 +92,8 @@ echo -e "${DIM}  Service status:${RESET}" >&2
 systemctl status primordia --no-pager 2>/dev/null >&2 || true' ERR
 
 # ── Banner ────────────────────────────────────────────────────────────────────
-# Show only on initial install (git unavailable = fresh machine, or
+# Show only on initial install (git unavailable = fresh machine, or the current
+# working directory is not a git repo = first run OR running over SSH, or
 # primordia.productionBranch not yet set = first run).
 if ! command -v git &>/dev/null || ! git config --get primordia.productionBranch &>/dev/null 2>&1; then
   echo ""
@@ -169,12 +170,15 @@ fi
 # ── Calculate branch name ─────────────────────────────────────────────────────
 
 _CURRENT_STEP="Calculate branch name"
-if [[ -z "${1:-}" ]]; then
-  # Find the remote branch that points to the same commit as origin/main
-  BRANCH="$(git -C "${BARE_REPO}" branch --format '%(refname:short)' --points-at "$(git -C "${BARE_REPO}" rev-parse main)" | grep -v 'main' | head -1)"
-else
-  # Branch name provided to installer
-  BRANCH="$1"
+# Skip if it was already calculated in the 'Locate directories' step
+if [[ -z "${BRANCH:-}" ]]; then
+  if [[ -n "${1:-}" ]]; then
+    # Branch name provided to installer
+    BRANCH="$1"
+  else
+    # Find the remote branch that points to the same commit as origin/main
+    BRANCH="$(git -C "${BARE_REPO}" branch --format '%(refname:short)' --points-at "$(git -C "${BARE_REPO}" rev-parse main)" | grep -v 'main' | head -1)"
+  fi
 fi
 
 # Confirm such a branch exists
