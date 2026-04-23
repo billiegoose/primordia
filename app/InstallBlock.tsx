@@ -49,13 +49,6 @@ export default function InstallBlock({ setupUrl, defaultName }: { setupUrl: stri
   const mouseDownRef = useRef(false);
 
   const fontRef = useRef<string>("");
-  useLayoutEffect(() => {
-    if (inputRef.current && !fontRef.current) {
-      const s = window.getComputedStyle(inputRef.current);
-      fontRef.current = `${s.fontWeight} ${s.fontSize} ${s.fontFamily}`;
-      updateCaret();
-    }
-  }, [updateCaret]);
 
   const updateCaret = useCallback(() => {
     const el = inputRef.current;
@@ -63,6 +56,14 @@ export default function InstallBlock({ setupUrl, defaultName }: { setupUrl: stri
     const pos = el.selectionEnd ?? el.value.length;
     setCaretPx(measureText(el.value.slice(0, pos), fontRef.current));
   }, []);
+
+  useLayoutEffect(() => {
+    if (inputRef.current && !fontRef.current) {
+      const s = window.getComputedStyle(inputRef.current);
+      fontRef.current = `${s.fontWeight} ${s.fontSize} ${s.fontFamily}`;
+      updateCaret();
+    }
+  }, [updateCaret]);
 
   const sshCmd = `ssh exe.dev new --name=${name}`;
   const curlCmd = `curl -fsSL ${setupUrl} | ssh ${name}.exe.xyz 'bash -s'`;
