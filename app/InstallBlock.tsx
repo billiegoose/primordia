@@ -46,6 +46,7 @@ export default function InstallBlock({ setupUrl, defaultName }: { setupUrl: stri
   const [focused, setFocused] = useState(false);
   const [focusCount, setFocusCount] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const mouseDownRef = useRef(false);
 
   const fontRef = useRef<string>("");
   useLayoutEffect(() => {
@@ -85,11 +86,16 @@ export default function InstallBlock({ setupUrl, defaultName }: { setupUrl: stri
                 requestAnimationFrame(updateCaret);
               }}
               onSelect={updateCaret}
+              onMouseDown={() => { mouseDownRef.current = true; }}
               onFocus={(e) => {
                 setFocused(true);
                 setFocusCount(n => n + 1);
-                const el = e.currentTarget;
-                el.setSelectionRange(el.value.length, el.value.length);
+                if (!mouseDownRef.current) {
+                  // Keyboard/tab focus — move caret to end
+                  const el = e.currentTarget;
+                  el.setSelectionRange(el.value.length, el.value.length);
+                }
+                mouseDownRef.current = false;
                 requestAnimationFrame(updateCaret);
               }}
               onBlur={() => { setFocused(false); }}
