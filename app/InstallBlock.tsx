@@ -53,8 +53,9 @@ export default function InstallBlock({ setupUrl, defaultName }: { setupUrl: stri
     if (inputRef.current && !fontRef.current) {
       const s = window.getComputedStyle(inputRef.current);
       fontRef.current = `${s.fontWeight} ${s.fontSize} ${s.fontFamily}`;
+      updateCaret();
     }
-  }, []);
+  }, [updateCaret]);
 
   const updateCaret = useCallback(() => {
     const el = inputRef.current;
