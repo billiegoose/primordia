@@ -128,11 +128,9 @@ export async function POST(request: Request) {
   // that slashes in branch names don't create nested directories.
   const gitCommonDirResult = await runGit(['rev-parse', '--git-common-dir'], repoRoot);
   const gitCommonDir = path.resolve(repoRoot, gitCommonDirResult.stdout.trim());
-  const mainRepoRoot = path.dirname(gitCommonDir);
-  const worktreePath =
-    path.basename(mainRepoRoot) === 'main'
-      ? path.join(path.dirname(mainRepoRoot), sessionId)
-      : path.join(mainRepoRoot, '..', 'primordia-worktrees', sessionId);
+  const worktreesDir = process.env.PRIMORDIA_WORKTREES_DIR
+    ?? path.join(path.dirname(gitCommonDir), 'worktrees');
+  const worktreePath = path.join(worktreesDir, sessionId);
 
   // Check if a worktree for this branch is already registered (e.g. a previous session).
   // If so, reuse that path; otherwise create a new worktree checkout.

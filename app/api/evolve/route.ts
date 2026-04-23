@@ -189,11 +189,9 @@ export async function POST(request: Request) {
   // ../primordia-worktrees/{branch} path so existing installs keep working.
   const gitCommonDirResult = await runGit(['rev-parse', '--git-common-dir'], repoRoot);
   const gitCommonDir = path.resolve(repoRoot, gitCommonDirResult.stdout.trim());
-  const mainRepoRoot = path.dirname(gitCommonDir); // strip trailing /.git
-  const worktreePath =
-    path.basename(mainRepoRoot) === 'main'
-      ? path.join(path.dirname(mainRepoRoot), branch)           // flat layout
-      : path.join(mainRepoRoot, '..', 'primordia-worktrees', branch); // legacy
+  const worktreesDir = process.env.PRIMORDIA_WORKTREES_DIR
+    ?? path.join(path.dirname(gitCommonDir), 'worktrees');
+  const worktreePath = path.join(worktreesDir, branch);
 
   // Create the git worktree synchronously before returning so the session page
   // is immediately reachable when the client navigates to it after the redirect.

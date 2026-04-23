@@ -163,7 +163,7 @@ async function blueGreenAccept(
   // install-service.sh path and as the fallback old-slot on first accept.
   const gitCommonResult = await runGit(['rev-parse', '--git-common-dir'], worktreePath);
   const mainRepoRoot = gitCommonResult.code === 0
-    ? path.dirname(path.resolve(worktreePath, gitCommonResult.stdout.trim()))
+    ? path.resolve(worktreePath, gitCommonResult.stdout.trim())
     : path.resolve(repoRoot); // fallback: assume repoRoot is the main repo
 
   // Find the current production slot via primordia.productionBranch in git config.
@@ -255,7 +255,7 @@ async function moveMainAndPush(
   // commands against the repo rather than just the worktree checkout.
   const gitCommonResult = await runGit(['rev-parse', '--git-common-dir'], worktreePath);
   const mainRepoRoot = gitCommonResult.code === 0
-    ? path.dirname(path.resolve(worktreePath, gitCommonResult.stdout.trim()))
+    ? path.resolve(worktreePath, gitCommonResult.stdout.trim())
     : worktreePath;
 
   await onStep('- Advancing main branch pointer…\n');
