@@ -14,6 +14,7 @@ import {
   CTABannerSection,
   LandingFooter,
 } from "./LandingSections";
+import { createNameId } from "mnemonic-id";
 
 export function generateMetadata(): Metadata {
   return { title: buildPageTitle() };
@@ -27,13 +28,14 @@ export default async function LandingPage() {
     headerStore.get("host") ??
     "primordia.exe.xyz";
   const setupUrl = `${proto}://${host}${basePath}/setup.sh`;
+  const defaultVmName = createNameId();
   return (
     <div className="min-h-dvh bg-gray-950 text-gray-100 overflow-x-hidden">
       <LandingNav />
-      <HeroSection setupUrl={setupUrl} />
+      <HeroSection setupUrl={setupUrl} defaultVmName={defaultVmName} />
       <FeaturesSection />
       <HowItWorksSection />
-      <CTABannerSection setupUrl={setupUrl} />
+      <CTABannerSection setupUrl={setupUrl} defaultVmName={defaultVmName} />
       <LandingFooter />
     </div>
   );

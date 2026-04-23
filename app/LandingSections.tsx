@@ -9,6 +9,7 @@
 import Link from "next/link";
 import { MessageSquare, RefreshCw, GitBranch, ChevronDown } from "lucide-react";
 import InstallBlock from "./InstallBlock";
+import { createNameId } from "mnemonic-id";
 
 // ── Feature card data ────────────────────────────────────────────────────────
 
@@ -53,7 +54,7 @@ const STEPS = [
 
 // ── Sections ─────────────────────────────────────────────────────────────────
 
-export function HeroSection({ setupUrl }: { setupUrl: string }) {
+export function HeroSection({ setupUrl, defaultVmName }: { setupUrl: string; defaultVmName: string }) {
   return (
     <section className="relative flex flex-col items-center justify-center min-h-dvh px-6 text-center overflow-hidden">
       {/* Animated gradient blobs */}
@@ -90,7 +91,7 @@ export function HeroSection({ setupUrl }: { setupUrl: string }) {
         <p className="text-xs font-mono text-gray-500 mb-2 text-center uppercase tracking-widest">
           Deploy your own instance
         </p>
-        <InstallBlock setupUrl={setupUrl} />
+        <InstallBlock setupUrl={setupUrl} defaultName={defaultVmName} />
         <p className="text-xs text-gray-600 text-center mt-2 font-mono">
           Requires an{" "}
           <a href="https://exe.dev" data-id="landing/exedev-link" className="text-gray-500 hover:text-gray-300 underline underline-offset-2 transition-colors">
@@ -197,7 +198,7 @@ function HowItWorksStep({
   );
 }
 
-export function CTABannerSection({ setupUrl }: { setupUrl: string }) {
+export function CTABannerSection({ setupUrl, defaultVmName }: { setupUrl: string; defaultVmName: string }) {
   return (
     <section className="relative px-6 py-24">
       <div className="relative max-w-3xl mx-auto rounded-3xl overflow-hidden">
@@ -212,7 +213,7 @@ export function CTABannerSection({ setupUrl }: { setupUrl: string }) {
           <p className="text-gray-400 max-w-md mx-auto mb-8 leading-relaxed">
             Two commands create a VM and install Primordia end-to-end.
           </p>
-          <InstallBlock setupUrl={setupUrl} />
+          <InstallBlock setupUrl={setupUrl} defaultName={defaultVmName} />
         </div>
       </div>
     </section>
