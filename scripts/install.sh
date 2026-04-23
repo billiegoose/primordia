@@ -92,9 +92,11 @@ echo -e "${DIM}  Service status:${RESET}" >&2
 systemctl status primordia --no-pager 2>/dev/null >&2 || true' ERR
 
 # ── Banner ────────────────────────────────────────────────────────────────────
-
-echo ""
-cat << 'ASCII'
+# Show only on initial install (git unavailable = fresh machine, or
+# primordia.productionBranch not yet set = first run).
+if ! command -v git &>/dev/null || ! git config --get primordia.productionBranch &>/dev/null 2>&1; then
+  echo ""
+  cat << 'ASCII'
   ___     _                  _ _
  | _ \_ _(_)_ __  ___ _ _ __| (_)__ _
  |  _/ '_| | '  \/ _ \ '_/ _` | / _` |
@@ -104,6 +106,7 @@ cat << 'ASCII'
           || |_\ | (_|||(/_|
 
 ASCII
+fi
 
 # ── Install git ───────────────────────────────────────────────────────────────
 
@@ -142,10 +145,11 @@ else
   success "Created ${PRIMORDIA_DIR}"
 fi
 
+BARE_REPO="${PRIMORDIA_DIR}/source.git"
+
 # ── Clone Primordia ───────────────────────────────────────────────────────────
 
 _CURRENT_STEP="Clone primordia"
-BARE_REPO="${PRIMORDIA_DIR}/source.git"
 if [[ ! -d "${BARE_REPO}" ]]; then
   _step "Cloning Primordia..."
   _log=$(mktemp)
