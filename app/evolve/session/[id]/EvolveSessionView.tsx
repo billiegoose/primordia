@@ -1003,6 +1003,17 @@ export default function EvolveSessionView({
     ?? (lastAgentSection?.model && sessionHarness
       ? MODEL_OPTIONS_BY_HARNESS[sessionHarness]?.find((m) => m.label === lastAgentSection.model)?.id
       : undefined);
+  // Human-readable agent label for UI messages like "Waiting for X to finish…"
+  const sessionHarnessLabel = sessionHarness
+    ? (HARNESS_OPTIONS.find((h) => h.id === sessionHarness)?.label ?? sessionHarness)
+    : undefined;
+  const sessionModelLabel = sessionModel && sessionHarness
+    ? (MODEL_OPTIONS_BY_HARNESS[sessionHarness]?.find((m) => m.id === sessionModel)?.label ?? sessionModel)
+    : undefined;
+  const agentRunningLabel = sessionHarnessLabel
+    ? (sessionModelLabel ? `${sessionHarnessLabel} (${sessionModelLabel})` : sessionHarnessLabel)
+    : 'the agent';
+
   // Setup is active while it's the only section and session isn't terminal
   const isSetupActive = !isTerminal && contentSections.length === 0;
   const setupStepCount = setupSection
@@ -1388,7 +1399,7 @@ export default function EvolveSessionView({
                 placeholder="Describe what to fix or improve…"
                 submitLabel="Submit follow-up"
                 disabled={isClaudeRunning}
-                disabledLabel="Waiting for Claude to finish…"
+                disabledLabel={`Waiting for ${agentRunningLabel} to finish…`}
                 autoFocus
                 defaultHarness={sessionHarness}
                 defaultModel={sessionModel}
