@@ -6,7 +6,7 @@ import { NextResponse } from "next/server";
 
 const SCHEMA = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
-  $id: "https://primordia.app/schemas/instance/v1.json",
+  $id: "https://primordia.exe.xyz/schemas/instance/v1.json",
   title: "Primordia Instance Manifest",
   description:
     "Machine-readable metadata for a Primordia instance, served at /.well-known/primordia.json",
@@ -16,7 +16,7 @@ const SCHEMA = {
   properties: {
     $schema: {
       type: "string",
-      const: "https://primordia.app/schemas/instance/v1.json",
+      const: "https://primordia.exe.xyz/schemas/instance/v1.json",
     },
     canonical_url: {
       type: "string",
