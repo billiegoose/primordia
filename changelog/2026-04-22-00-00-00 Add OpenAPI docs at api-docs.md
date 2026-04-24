@@ -4,7 +4,7 @@
 
 - Added `next-openapi-gen` and `@scalar/api-reference-react` to generate and serve interactive API documentation.
 - New page at `/api-docs` renders a Scalar API reference UI (dark "moon" theme, modern layout).
-- `openapi-gen.config.json` configures the generator: scans `./app/api`, outputs to `public/openapi.json`, targets the `scalar` UI at `api-docs`.
+- `openapi-gen.config.json` configures the generator: scans `./app/api`, outputs to `public/openapi.json`, targets the `scalar` UI at `api-docs`. The API description explicitly states this is an **internal** API — not a stable public API — and that endpoints may change at any time.
 - `public/openapi.json` committed as the generated OpenAPI 3.0 spec (38 endpoints across Chat, Auth, Evolve, Changelog, Config groups).
 - Added `@openapi` JSDoc annotations to the key public-facing routes:
   - `GET /api/auth/session` — current session
