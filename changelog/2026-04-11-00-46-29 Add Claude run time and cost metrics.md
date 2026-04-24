@@ -22,6 +22,7 @@ Metrics are now always reported, even when the agent errors or is aborted:
 Running agent sections now show metrics in real time — users can see elapsed time and token/cost data while deciding whether to abort:
 
 - **`scripts/pi-worker.ts`** — emits a `metrics` event after every assistant turn (`message_end`) so the UI always has the latest token and cost snapshot.
+- **`scripts/claude-worker.ts`** — same treatment: each `SDKAssistantMessage` carries a `BetaMessage` with per-turn `usage.{input_tokens,output_tokens}`. The worker now accumulates those token counts and emits a partial `metrics` event after every assistant turn. Cost stays `null` until the final `result` message (where `total_cost_usd` is available), but elapsed time and token counts update live. Error result messages (`SDKResultError`) also carry `total_cost_usd` and `usage`, so those are captured before throwing — meaning failure metrics are now complete, not just the time fallback.
 - **`app/evolve/session/[id]/EvolveSessionView.tsx`** — `RunningClaudeSection` now:
   - Shows a live elapsed-time counter (updated every second via `setInterval`) in the section header, next to the pulsing indicator.
   - Reads the latest `metrics` event from the section's event stream and renders it as a `MetricsRow` at the section footer. The elapsed time shown there overrides the `durationMs` from the event so it stays live.

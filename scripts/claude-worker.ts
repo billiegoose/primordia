@@ -152,6 +152,12 @@ async function main(): Promise<void> {
   let capturedOutputTokens: number | null = null;
   let capturedCostUsd: number | null = null;
 
+  // Accumulated token counts from per-turn usage in assistant messages.
+  // Emitted as partial metrics events after each assistant turn so the
+  // session view shows live token data while the agent runs.
+  let accumulatedInputTokens = 0;
+  let accumulatedOutputTokens = 0;
+
   // Wall-clock start time — used as fallback for durationMs when the SDK does
   // not return a result message (e.g. on errors).
   const startTime = Date.now();
@@ -192,6 +198,14 @@ async function main(): Promise<void> {
     try {
       for await (const message of run) {
         if (message.type === 'assistant') {
+          // Accumulate per-turn token usage for live partial metrics.
+          // Each BetaMessage carries usage.{input_tokens,output_tokens} for that turn.
+          const turnUsage = (message as unknown as { message: { usage?: { input_tokens?: number; output_tokens?: number } } }).message.usage;
+          if (turnUsage) {
+            accumulatedInputTokens += turnUsage.input_tokens ?? 0;
+            accumulatedOutputTokens += turnUsage.output_tokens ?? 0;
+          }
+
           for (const block of message.message.content) {
             if (block.type === 'text' && block.text.trim()) {
               appendSessionEvent(ndjsonPath, { type: 'text', content: block.text, ts: ts() });
@@ -204,6 +218,18 @@ async function main(): Promise<void> {
               });
             }
           }
+
+          // Emit partial metrics after each assistant turn so the UI can show
+          // live token counts while the agent is running. Cost is only available
+          // in the final result message, so it stays null until then.
+          appendSessionEvent(ndjsonPath, {
+            type: 'metrics',
+            durationMs: Date.now() - startTime,
+            inputTokens: accumulatedInputTokens > 0 ? accumulatedInputTokens : null,
+            outputTokens: accumulatedOutputTokens > 0 ? accumulatedOutputTokens : null,
+            costUsd: null,
+            ts: ts(),
+          });
         } else if (message.type === 'result') {
           if (message.subtype === 'success') {
             capturedDurationMs = (message as { duration_ms?: number }).duration_ms ?? null;
@@ -212,6 +238,14 @@ async function main(): Promise<void> {
             capturedInputTokens = usage?.input_tokens ?? null;
             capturedOutputTokens = usage?.output_tokens ?? null;
           } else {
+            // Capture final token/cost data from the error result before throwing
+            // so the failure metrics event has accurate values. SDKResultError
+            // carries total_cost_usd and usage just like SDKResultSuccess.
+            capturedCostUsd = (message as { total_cost_usd?: number }).total_cost_usd ?? null;
+            const usage = (message as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
+            capturedInputTokens = usage?.input_tokens ?? null;
+            capturedOutputTokens = usage?.output_tokens ?? null;
+
             const sdkErrors = (message as { errors?: string[] }).errors ?? [];
             const stderrStr = stderrLines.join('\n').trim();
             const details = [sdkErrors.filter(Boolean).join('\n'), stderrStr].filter(Boolean).join('\n');
