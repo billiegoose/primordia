@@ -1,83 +1,24 @@
 // app/api/evolve/from-branch/route.ts
 // Start an evolve session on an existing git branch (e.g. from an external contributor).
-// The branch must already exist locally. The session ID is a generated slug distinct
-// from the branch name (since branch names can contain slashes).
+// The branch must already exist locally and must not contain a slash.
 //
-// POST { branchName: string; request?: string }
+// POST { branchName: string }
 // Returns: { sessionId: string }
 
 import * as path from 'path';
-import { getLlmClient } from '../../../../lib/llm-client';
-import { decryptApiKey } from '../../../../lib/llm-encryption';
 import {
   startLocalEvolve,
   runGit,
+  getRepoRoot,
+  getWorktreesDir,
   type LocalSession,
 } from '../../../../lib/evolve-sessions';
 import { getSessionUser, hasEvolvePermission } from '../../../../lib/auth';
 import {
-  getCandidateWorktreePath,
   appendSessionEvent,
   getSessionNdjsonPath,
+  getCandidateWorktreePath,
 } from '../../../../lib/session-events';
-
-/** Ask Haiku to choose a short kebab-case slug from a branch name.
- *  Falls back to sanitising the branch name directly. */
-async function slugFromBranchName(branchName: string): Promise<string> {
-  try {
-    const { client } = getLlmClient();
-    const response = await client.messages.create({
-      model: 'claude-haiku-4-5',
-      max_tokens: 32,
-      messages: [
-        {
-          role: 'user',
-          content:
-            `Generate a short kebab-case slug (2–4 words, lowercase, hyphens only) that ` +
-            `captures the essence of this git branch name. Reply with only the slug, nothing else.\n\n` +
-            `Branch name: ${branchName}`,
-        },
-      ],
-    });
-    const block = response.content[0];
-    if (block.type === 'text') {
-      const cleaned = block.text
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9-]/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, '');
-      if (cleaned.length > 0) return cleaned;
-    }
-  } catch {
-    // Fall through to simple fallback
-  }
-  // Fallback: sanitise the branch name directly (replace slashes and non-slug chars)
-  return branchName
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 60);
-}
-
-/** Return a session ID that doesn't already exist as a branch or worktree. */
-async function findUniqueSessionId(base: string, repoRoot: string): Promise<string> {
-  const taken = async (id: string): Promise<boolean> => {
-    const r = await runGit(['branch', '--list', id], repoRoot);
-    if (r.stdout.trim().length > 0) return true;
-    // Also check if the candidate worktree path already has a session ndjson file
-    const { existsSync } = await import('fs');
-    const candidatePath = getCandidateWorktreePath(id);
-    return existsSync(path.join(candidatePath, '.primordia-session.ndjson'));
-  };
-  if (!(await taken(base))) return base;
-  for (let i = 2; i <= 99; i++) {
-    const candidate = `${base}-${i}`;
-    if (!(await taken(candidate))) return candidate;
-  }
-  return `${base}-${Date.now()}`;
-}
 
 export async function POST(request: Request) {
   const user = await getSessionUser();
@@ -89,28 +30,25 @@ export async function POST(request: Request) {
     return Response.json({ error: 'You do not have permission to use the evolve flow' }, { status: 403 });
   }
 
-  const body = (await request.json()) as { branchName?: string; request?: string; encryptedApiKey?: string };
+  const body = (await request.json()) as { branchName?: string };
   if (!body.branchName || typeof body.branchName !== 'string') {
     return Response.json({ error: 'branchName is required' }, { status: 400 });
   }
 
   const branchName = body.branchName.trim();
-  const requestText = (body.request ?? '').trim() ||
-    `Review and continue development on branch \`${branchName}\`.`;
 
-  // Decrypt the user's API key right before use.
-  let decryptedApiKey: string | undefined;
-  if (body.encryptedApiKey) {
-    try {
-      decryptedApiKey = await decryptApiKey(body.encryptedApiKey);
-    } catch {
-      return Response.json({ error: 'Could not decrypt API key. Please try submitting again.' }, { status: 400 });
-    }
+  // Branches with slashes are not supported — they can't be used as URL path
+  // segments or directory names without ambiguity.
+  if (branchName.includes('/')) {
+    return Response.json(
+      { error: `Branch \`${branchName}\` contains a slash and is not supported. Only simple branch names are supported.` },
+      { status: 400 },
+    );
   }
 
   const repoRoot = process.cwd();
 
-  // Validate that the branch exists locally
+  // Validate that the branch exists locally.
   const branchCheck = await runGit(['branch', '--list', branchName], repoRoot);
   if (!branchCheck.stdout.trim()) {
     return Response.json(
@@ -119,20 +57,12 @@ export async function POST(request: Request) {
     );
   }
 
-  // Generate a session ID slug from the branch name (branch names can contain
-  // slashes which are not valid as directory names or session IDs).
-  const slug = await slugFromBranchName(branchName);
-  const sessionId = await findUniqueSessionId(slug, repoRoot);
+  // The session ID is the branch name directly.
+  const sessionId = branchName;
 
-  // Compute the worktree path using the session ID (not the branch name) so
-  // that slashes in branch names don't create nested directories.
-  const gitCommonDirResult = await runGit(['rev-parse', '--git-common-dir'], repoRoot);
-  const gitCommonDir = path.resolve(repoRoot, gitCommonDirResult.stdout.trim());
-  const mainRepoRoot = path.dirname(gitCommonDir);
-  const worktreePath =
-    path.basename(mainRepoRoot) === 'main'
-      ? path.join(path.dirname(mainRepoRoot), sessionId)
-      : path.join(mainRepoRoot, '..', 'primordia-worktrees', sessionId);
+  // Compute the worktree path.
+  const repoGitRoot = getRepoRoot(repoRoot);
+  const worktreePath = path.join(getWorktreesDir(repoGitRoot), sessionId);
 
   // Check if a worktree for this branch is already registered (e.g. a previous session).
   // If so, reuse that path; otherwise create a new worktree checkout.
@@ -140,7 +70,6 @@ export async function POST(request: Request) {
   let actualWorktreePath = worktreePath;
   let worktreeAlreadyCreated = false;
 
-  // Find existing worktree for this branch from porcelain output
   let curPath: string | null = null;
   for (const line of listResult.stdout.split('\n')) {
     if (line.startsWith('worktree ')) {
@@ -155,6 +84,16 @@ export async function POST(request: Request) {
   }
 
   if (!worktreeAlreadyCreated) {
+    // Also check if a session already exists at the candidate path
+    const { existsSync } = await import('fs');
+    const candidatePath = getCandidateWorktreePath(sessionId);
+    if (existsSync(path.join(candidatePath, '.primordia-session.ndjson'))) {
+      actualWorktreePath = candidatePath;
+      worktreeAlreadyCreated = true;
+    }
+  }
+
+  if (!worktreeAlreadyCreated) {
     const wtResult = await runGit(['worktree', 'add', actualWorktreePath, branchName], repoRoot);
     if (wtResult.code !== 0) {
       return Response.json({ error: `Failed to create session worktree: ${wtResult.stderr}` }, { status: 500 });
@@ -163,8 +102,9 @@ export async function POST(request: Request) {
 
   // Write the initial_request event synchronously so getSessionFromFilesystem()
   // can find the session immediately (the ndjson file is the session existence marker).
+  // No request text — this session starts as an instant preview with no initial agent run.
   const ndjsonPath = getSessionNdjsonPath(actualWorktreePath);
-  appendSessionEvent(ndjsonPath, { type: 'initial_request', request: requestText, ts: Date.now() });
+  appendSessionEvent(ndjsonPath, { type: 'initial_request', request: '', ts: Date.now() });
 
   const session: LocalSession = {
     id: sessionId,
@@ -174,14 +114,12 @@ export async function POST(request: Request) {
     devServerStatus: 'none',
     port: null,
     previewUrl: null,
-    request: requestText,
+    request: '',
     createdAt: Date.now(),
-    apiKey: decryptedApiKey,
     userId: user.id,
   };
-  decryptedApiKey = undefined;
 
-  void startLocalEvolve(session, requestText, repoRoot, undefined, [], {
+  void startLocalEvolve(session, '', repoRoot, undefined, [], {
     worktreeAlreadyCreated: true,
     initialEventAlreadyWritten: true,
   });

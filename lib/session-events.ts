@@ -9,7 +9,8 @@
 //   git worktree list --porcelain — maps worktree paths to branch names
 //
 // Status is inferred from the NDJSON log via inferStatusFromEvents().
-// Preview URL is always /preview/<sessionId> once the session is ready.
+// Session ID equals the branch name. Branches with slashes are not supported.
+// Preview URL is always /preview/<branchName> once the session is ready.
 // Branch name is read from the git worktree list (or git symbolic-ref HEAD).
 
 import * as fs from 'fs';
@@ -105,7 +106,9 @@ export function inferStatusFromEvents(events: SessionEvent[]): string {
  * all worktrees live alongside the current one under the same parent directory.
  */
 export function getCandidateWorktreePath(sessionId: string): string {
-  return path.join(path.dirname(process.cwd()), sessionId);
+  const worktreesDir = process.env.PRIMORDIA_WORKTREES_DIR
+    ?? path.dirname(process.cwd());
+  return path.join(worktreesDir, sessionId);
 }
 
 /**
@@ -137,10 +140,12 @@ function buildSessionFromWorktreePath(
     if (event.type === 'initial_request') {
       request = event.request;
     } else if (event.type === 'metrics') {
-      durationMs = event.durationMs;
-      inputTokens = event.inputTokens;
-      outputTokens = event.outputTokens;
-      costUsd = event.costUsd;
+      // Sum across all metrics events (each records incremental cost/tokens for
+      // one agent run; follow-ups write a delta rather than a cumulative total).
+      if (event.durationMs != null) durationMs = (durationMs ?? 0) + event.durationMs;
+      if (event.inputTokens != null) inputTokens = (inputTokens ?? 0) + event.inputTokens;
+      if (event.outputTokens != null) outputTokens = (outputTokens ?? 0) + event.outputTokens;
+      if (event.costUsd != null) costUsd = (costUsd ?? 0) + event.costUsd;
     }
   }
 
