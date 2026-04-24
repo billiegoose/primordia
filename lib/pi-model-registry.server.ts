@@ -25,8 +25,76 @@ const PROVIDER_LABELS: Record<string, string> = {
   openai: 'OpenAI',
 };
 
+type RawModel = { id: string; name: string; provider: string; reasoning: boolean };
+
 /**
- * Returns the full model list for all harnesses, keyed by harness ID.
+ * Reduce a flat list of models down to the most recent, non-redundant entries.
+ *
+ * Four rules applied in order:
+ *
+ * R1 — Drop "(latest)" floating aliases and dated snapshots "(YYYY…"
+ *       e.g. "Claude Haiku 4.5 (latest)", "GPT-4o (2024-11-20)"
+ *
+ * R2 — Drop specialised / old-brand variants by keyword:
+ *       Chat, research, Turbo, Spark, Max
+ *       e.g. "GPT-5 Chat Latest", "GPT-4 Turbo", "o3-deep-research"
+ *
+ * R3 — Drop oversized or over-specialised tier qualifiers at the end of the name:
+ *       nano  ·  pro  ·  -pro   (mini is intentionally kept)
+ *       e.g. "GPT-5.4 nano", "GPT-5.4 Pro", "o3-pro"
+ *
+ * R4 — Per (provider, family) group keep only the highest-versioned entry.
+ *       Family key = name with the version number (and any "v2"-style tokens)
+ *       stripped out, normalised to lowercase.  A trailing letter glued to a
+ *       digit (e.g. the "o" in "GPT-4o") is absorbed into the version token so
+ *       "GPT-4o" and "GPT-4.1" map to the same family and the latter wins.
+ *       e.g. GPT-4 / GPT-4.1 / GPT-4o / GPT-5 / … / GPT-5.4 → keep GPT-5.4
+ *            o1 / o3 → keep o3
+ *            o3-mini / o4-mini → keep o4-mini
+ */
+function filterToLatestVersions(models: RawModel[]): RawModel[] {
+  // R1
+  let out = models.filter(
+    (m) => !m.name.includes('(latest)') && !/\(\d{4}/.test(m.name),
+  );
+
+  // R2
+  out = out.filter((m) => !/\b(Chat|research|Turbo|Spark|Max)\b/i.test(m.name));
+
+  // R3
+  out = out.filter((m) => !/(\bnano\b|\bpro\b|-pro)$/i.test(m.name));
+
+  // R4 — build family key and keep highest version per group
+  function familyOf(name: string): { key: string; version: number } {
+    let s = name.toLowerCase();
+    // Strip standalone v<N> variant tokens (e.g. "v2", "v3")
+    s = s.replace(/\bv\d+\b/g, ' ');
+    // Extract the first version token: digits with optional decimal point,
+    // optionally followed by a single trailing letter (e.g. "4o" → extracts "4").
+    const m = s.match(/(\d+(?:\.\d+)?)[a-z]?/);
+    const version = m ? parseFloat(m[1]) : -1;
+    const key = s
+      .replace(/\d+(?:\.\d+)?[a-z]?/, '')  // remove version token
+      .replace(/[-\s]+/g, ' ')              // normalise separators
+      .trim();
+    return { key, version };
+  }
+
+  const groups = new Map<string, { model: RawModel; version: number }>();
+  for (const model of out) {
+    const { key, version } = familyOf(model.name);
+    const gk = `${model.provider}::${key}`;
+    const existing = groups.get(gk);
+    if (!existing || version > existing.version) {
+      groups.set(gk, { model, version });
+    }
+  }
+
+  return Array.from(groups.values()).map((g) => g.model);
+}
+
+/**
+ * Returns the filtered model list for all harnesses, keyed by harness ID.
  * Models are read from the pi ModelRegistry at call time, so the list stays
  * current when the pi SDK is updated without any code changes.
  */
@@ -37,29 +105,27 @@ export function getModelOptionsByHarness(): Record<string, ModelOption[]> {
   auth.setRuntimeApiKey('openai', 'gateway');
 
   const registry = ModelRegistry.create(auth);
-  // getAll() returns every built-in + custom model the registry knows about.
-  const allModels = (registry as unknown as { getAll(): Array<{ id: string; name: string; provider: string; reasoning: boolean }> }).getAll();
+  const allModels = (registry as unknown as { getAll(): RawModel[] }).getAll();
 
   const result: Record<string, ModelOption[]> = {};
 
   for (const [harnessId, providers] of Object.entries(HARNESS_PROVIDERS)) {
-    // Build enriched list retaining provider index for sorting, then strip it.
-    const enriched = allModels
-      .filter((m) => providers.includes(m.provider))
-      .map((m) => ({
-        id: m.id,
-        label: m.name,
-        description: `${PROVIDER_LABELS[m.provider] ?? m.provider}${m.reasoning ? ' · reasoning' : ''}`,
-        _providerIndex: providers.indexOf(m.provider),
-      }));
+    const providerModels = allModels.filter((m) => providers.includes(m.provider));
+    const filtered = filterToLatestVersions(providerModels);
 
-    // Stable sort: by provider order first (anthropic before openai), then alphabetically by label.
-    enriched.sort((a, b) => {
-      if (a._providerIndex !== b._providerIndex) return a._providerIndex - b._providerIndex;
-      return a.label.localeCompare(b.label);
+    // Sort: provider order first (anthropic before openai), then alphabetically.
+    filtered.sort((a, b) => {
+      const pi = providers.indexOf(a.provider);
+      const pj = providers.indexOf(b.provider);
+      if (pi !== pj) return pi - pj;
+      return a.name.localeCompare(b.name);
     });
 
-    result[harnessId] = enriched.map(({ _providerIndex: _p, ...rest }) => rest);
+    result[harnessId] = filtered.map((m) => ({
+      id: m.id,
+      label: m.name,
+      description: `${PROVIDER_LABELS[m.provider] ?? m.provider}${m.reasoning ? ' · reasoning' : ''}`,
+    }));
   }
 
   return result;
