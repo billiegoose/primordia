@@ -436,7 +436,7 @@ function BranchRow({
             className="text-blue-400 hover:text-blue-300 ml-1 shrink-0"
             title={node.isProduction ? "View site" : "Open preview"}
           >
-            <ExternalLink size={13} strokeWidth={2} className="translate-y-[2px]" />
+            <ExternalLink size={13} strokeWidth={2} className="translate-y-[4px]" />
           </a>
         )}
       </div>
