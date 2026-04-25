@@ -454,11 +454,13 @@ advance_main_and_push() {
   fi
 
   if git -C "${BARE_REPO}" remote | grep -qx mirror; then
-    if git -C "${BARE_REPO}" push mirror main 2>/dev/null; then
+    _mirror_err="$(mktemp)"
+    if git -C "${BARE_REPO}" push mirror 2>"$_mirror_err"; then
       success "Pushed to mirror remote"
     else
-      warn "Could not push to mirror remote (non-fatal)"
+      warn "Could not push to mirror remote (non-fatal): $(cat "$_mirror_err" | tail -3)"
     fi
+    rm -f "$_mirror_err"
   fi
 }
 
