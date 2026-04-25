@@ -514,7 +514,7 @@ function StructuredSection({
     const hasDeployError = resultEvent?.subtype === 'error' || resultEvent?.subtype === 'timeout';
 
     if (hasDeployError) {
-      const errorMessage = resultEvent?.message ?? 'The deploy failed with an unknown error.';
+      const errorMessage = (resultEvent?.message ?? 'The deploy failed with an unknown error.').replace(/^❌\s*/, '');
       return (
         <div className="rounded-lg bg-red-900/40 border border-red-700/50 text-sm overflow-hidden">
           <div className="px-4 py-4">
