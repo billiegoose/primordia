@@ -8,7 +8,6 @@ import { execSync } from "child_process";
 import { buildPageTitle } from "@/lib/page-title";
 import { basePath } from "@/lib/base-path";
 import { LandingNav } from "./LandingNav";
-import { ChangelogNewsticker } from "./ChangelogNewsticker";
 import {
   HeroSection,
   FeaturesSection,
@@ -46,7 +45,6 @@ export default async function LandingPage() {
   return (
     <div className="min-h-dvh bg-gray-950 text-gray-100 overflow-x-hidden">
       <LandingNav />
-      <ChangelogNewsticker />
       <HeroSection installUrl={installUrl} defaultVmName={defaultVmName} installBranch={branch} />
       <FeaturesSection />
       <HowItWorksSection />
