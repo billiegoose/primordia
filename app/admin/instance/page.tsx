@@ -4,7 +4,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getSessionUser, isAdmin } from "@/lib/auth";
-import { getEvolvePrefs } from "@/lib/user-prefs";
 import { getDb } from "@/lib/db";
 import { buildPageTitle } from "@/lib/page-title";
 import ForbiddenPage from "@/components/ForbiddenPage";
@@ -37,9 +36,8 @@ export default async function AdminInstancePage() {
   }
 
   const db = await getDb();
-  const [sessionUser, evolvePrefs, config, nodes, edges] = await Promise.all([
+  const [sessionUser, config, nodes, edges] = await Promise.all([
     Promise.resolve({ id: user.id, username: user.username, isAdmin: true }),
-    getEvolvePrefs(user.id),
     db.getInstanceConfig(),
     db.getGraphNodes(),
     db.getGraphEdges(),
@@ -47,7 +45,7 @@ export default async function AdminInstancePage() {
 
   return (
     <main className="flex flex-col w-full max-w-3xl mx-auto px-4 py-6 min-h-dvh">
-      <PageNavBar subtitle="Admin" currentPage="admin" initialSession={sessionUser} initialHarness={evolvePrefs.initialHarness} initialModel={evolvePrefs.initialModel} initialCavemanMode={evolvePrefs.initialCavemanMode} initialCavemanIntensity={evolvePrefs.initialCavemanIntensity} />
+      <PageNavBar subtitle="Admin" currentPage="admin" initialSession={sessionUser} />
       <AdminSubNav currentTab="instance" />
       <InstanceConfigClient
         config={config}

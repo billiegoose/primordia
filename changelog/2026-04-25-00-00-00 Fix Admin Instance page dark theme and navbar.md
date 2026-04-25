@@ -12,10 +12,10 @@
 
 Updated `app/admin/instance/page.tsx` to match the pattern used by `/admin`, `/admin/logs`, and other admin sub-pages:
 
-1. Added `getEvolvePrefs` import and resolved prefs alongside the DB queries.
-2. Replaced the old `<div>` wrapper with `<main className="flex flex-col ...">`.
-3. Passed `subtitle="Admin"`, `initialSession`, and all evolve pref props to `<PageNavBar>`.
-4. Removed the redundant `<h1>` and the extra inner wrapper `<div>`.
+1. Replaced the old `<div>` wrapper with `<main className="flex flex-col ...">`.
+2. Resolved `sessionUser` server-side and passed `subtitle="Admin"` + `initialSession` to `<PageNavBar>` so the navbar renders correctly on first paint.
+3. Removed the redundant `<h1>` and the extra inner wrapper `<div>`.
+4. Did **not** import `getEvolvePrefs` — the evolve harness/model/caveman prefs are optional on `PageNavBar` and pre-loading them would drag in `pi-model-registry.server.ts` → `@mariozechner/pi-coding-agent`, which Turbopack fails to resolve as an external in dev mode, causing a runtime crash. The `FloatingEvolveDialog` falls back to built-in defaults when those props are omitted.
 
 ## Why
 
