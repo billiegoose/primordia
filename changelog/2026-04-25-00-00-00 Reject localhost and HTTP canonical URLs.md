@@ -2,13 +2,15 @@
 
 ## What changed
 
-Three layers of protection now prevent `localhost` or plain-`http://` from ever being saved as the Canonical URL:
+The validation logic lives in a single shared utility (`lib/validate-canonical-url.ts`) used by all three enforcement points, so the rules are defined exactly once:
 
-1. **`lib/auto-canonical.ts`** — the auto-detection logic that runs on the first incoming request now checks the derived origin before persisting it. If the origin is `http://` (any) or any variant of `localhost` (`localhost`, `127.0.0.1`, `::1`, `*.localhost`), it logs a skip message and resets the `checked` flag so it will try again on the next request (e.g. the first real public HTTPS request).
+- **`lib/validate-canonical-url.ts`** *(new)* — exports `validateCanonicalUrl(url)` (returns an error string or `null`) and `isInsecureOrLocalOrigin(origin)` (boolean). Rejects empty-but-non-blank URLs, non-`https:` protocols, and localhost variants (`localhost`, `127.0.0.1`, `::1`, `*.localhost`).
 
-2. **`app/api/instance/config/route.ts`** — the `PATCH` handler validates `canonicalUrl` more strictly: it parses the URL, rejects anything that isn't `https:`, and rejects any hostname that resolves to localhost. Returns a descriptive `400` error in each case.
+- **`lib/auto-canonical.ts`** — the auto-detection logic that runs on the first incoming request now delegates to `isInsecureOrLocalOrigin()`. If the origin fails, it logs a skip message and resets the `checked` flag so it will try again on the next request (e.g. the first real public HTTPS request).
 
-3. **`app/admin/instance/InstanceConfigClient.tsx`** — the admin UI now validates the Canonical URL field client-side on every keystroke and on Save. If the value is non-empty and fails the same rules (not HTTPS, or is localhost), the input border turns red and an inline error message is shown. The Save request is blocked until the value is valid.
+- **`app/api/instance/config/route.ts`** — the `PATCH` handler delegates to `validateCanonicalUrl()` and returns the error string as a `400` response body.
+
+- **`app/admin/instance/InstanceConfigClient.tsx`** — the admin UI imports `validateCanonicalUrl()` from the same utility and runs it on every keystroke and on Save. If the value fails, the input border turns red, an inline error message is shown, and the Save request is blocked.
 
 ## Why
 

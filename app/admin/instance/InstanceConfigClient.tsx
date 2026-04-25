@@ -5,6 +5,7 @@
 
 import { useState } from "react";
 import { withBasePath } from "@/lib/base-path";
+import { validateCanonicalUrl } from "@/lib/validate-canonical-url";
 import type { InstanceConfig, GraphNode, GraphEdge } from "@/lib/db/types";
 
 interface Props {
@@ -22,24 +23,6 @@ export default function InstanceConfigClient({ config: initial, nodes, edges }: 
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [canonicalUrlError, setCanonicalUrlError] = useState<string | null>(null);
-
-  function validateCanonicalUrl(url: string): string | null {
-    const trimmed = url.trim();
-    if (!trimmed) return null; // empty = clear it, that's fine
-    try {
-      const parsed = new URL(trimmed);
-      if (parsed.protocol !== "https:") return "Canonical URL must use HTTPS";
-      const isLocalhost =
-        parsed.hostname === "localhost" ||
-        parsed.hostname === "127.0.0.1" ||
-        parsed.hostname === "::1" ||
-        parsed.hostname.endsWith(".localhost");
-      if (isLocalhost) return "Canonical URL must not be a localhost address";
-    } catch {
-      return "Canonical URL must be a valid URL";
-    }
-    return null;
-  }
 
   async function handleSave() {
     const urlErr = validateCanonicalUrl(canonicalUrl);
