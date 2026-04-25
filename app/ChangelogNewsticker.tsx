@@ -8,7 +8,6 @@ import fs from "fs";
 import path from "path";
 import { execSync } from "child_process";
 import Link from "next/link";
-import { withBasePath } from "@/lib/base-path";
 
 const FILENAME_RE = /^(\d{4}-\d{2}-\d{2})-(\d{2}-\d{2}-\d{2}) (.+)\.md$/;
 
@@ -24,7 +23,6 @@ export function changelogEntrySlug(filename: string): string {
 interface Entry {
   filename: string;
   title: string;
-  date: string; // ISO 8601
 }
 
 function getGitAddedTimestamps(changelogDir: string): Map<string, number> {
@@ -67,9 +65,8 @@ function loadRecentEntries(limit = 12): Entry[] {
 
     return files.map((file) => {
       const m = file.match(FILENAME_RE)!;
-      const [, datePart, timePart, title] = m;
-      const date = `${datePart}T${timePart.replace(/-/g, ":")}`;
-      return { filename: file, title, date };
+      const [, , , title] = m;
+      return { filename: file, title };
     });
   } catch {
     return [];
@@ -86,48 +83,35 @@ export function ChangelogNewsticker() {
 
   return (
     <div
-      className="w-full bg-gray-900/80 border-b border-gray-800 overflow-hidden"
+      className="w-full bg-gray-950/50 border-t border-white/5 overflow-hidden"
       aria-label="Recent changelog headlines"
     >
-      <div className="flex items-center h-9">
-        {/* Static "UPDATES" badge */}
-        <span className="flex-shrink-0 px-3 h-full flex items-center text-[10px] font-bold tracking-widest text-violet-400 bg-gray-800/80 border-r border-gray-700 uppercase select-none">
-          Updates
-        </span>
+      <p className="text-center text-[10px] font-mono uppercase tracking-widest text-gray-600 pt-2 pb-0 select-none">
+        Recent Changes
+      </p>
+      <div className="relative overflow-hidden h-9 flex items-center">
+        {/* Fade edges */}
+        <div className="pointer-events-none absolute inset-y-0 left-0 w-12 z-10 bg-gradient-to-r from-gray-950/50 to-transparent" />
+        <div className="pointer-events-none absolute inset-y-0 right-0 w-12 z-10 bg-gradient-to-l from-gray-950/50 to-transparent" />
 
-        {/* Scrolling strip */}
-        <div className="relative flex-1 overflow-hidden">
-          {/* Fade edges */}
-          <div className="pointer-events-none absolute inset-y-0 left-0 w-8 z-10 bg-gradient-to-r from-gray-900/80 to-transparent" />
-          <div className="pointer-events-none absolute inset-y-0 right-0 w-8 z-10 bg-gradient-to-l from-gray-900/80 to-transparent" />
-
-          <ul className="animate-ticker flex gap-0 whitespace-nowrap" aria-hidden="false">
-            {doubled.map((entry, i) => {
-              const slug = changelogEntrySlug(entry.filename);
-              const dateLabel = new Date(entry.date).toLocaleDateString("en-US", {
-                month: "short",
-                day: "numeric",
-              });
-              return (
-                <li key={`${entry.filename}-${i}`} className="inline-flex items-center">
-                  <Link
-                    href={withBasePath(`/changelog#${slug}`)}
-                    className="inline-flex items-center gap-1.5 px-4 py-0 text-xs text-gray-300 hover:text-violet-300 transition-colors group"
-                    title={entry.title}
-                  >
-                    <span className="text-gray-600 group-hover:text-violet-500 transition-colors">◆</span>
-                    <span className="text-gray-500">{dateLabel}</span>
-                    <span className="max-w-xs truncate">{entry.title}</span>
-                  </Link>
-                  {/* Bullet separator — hidden after last item in each half */}
-                  {i !== entries.length - 1 && i !== doubled.length - 1 && (
-                    <span className="text-gray-700 select-none">·</span>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        </div>
+        <ul className="animate-ticker flex gap-0 whitespace-nowrap" aria-hidden="false">
+          {doubled.map((entry, i) => {
+            const slug = changelogEntrySlug(entry.filename);
+            return (
+              <li key={`${entry.filename}-${i}`} className="inline-flex items-center">
+                <Link
+                  href={`/changelog#${slug}`}
+                  className="inline-flex items-center px-5 py-0 text-xs text-gray-400 hover:text-violet-300 transition-colors"
+                  title={entry.title}
+                >
+                  {entry.title}
+                </Link>
+                {/* Bullet separator */}
+                <span className="text-gray-700 select-none" aria-hidden="true">·</span>
+              </li>
+            );
+          })}
+        </ul>
       </div>
     </div>
   );
