@@ -8,7 +8,7 @@ Added a new **Fetch Updates** tab to the admin panel at `/admin/updates`.
 - `app/admin/updates/page.tsx` — Server-rendered admin page (auth-gated to admins). Reads source list and initial git status at render time.
 - `app/admin/updates/UpdatesClient.tsx` — Interactive client component: per-source cards with fetch/toggle/remove/merge-session actions and an Add Source form.
 - `app/api/admin/updates/route.ts` — API route handling all update-source operations (see below).
-- `lib/update-sources.ts` — Manages the list of update sources using git config subsections (`primordia-update-source.{id}.*`), the same pattern git uses for `remote.{name}.url`. Ensures the built-in Primordia Official source is always present.
+- `lib/update-sources.ts` — Manages the list of update sources by extending the standard `remote.{name}.*` git config namespace with Primordia-specific fields (`updateSource`, `displayName`, `builtin`, `enabled`) — the same pattern already used to extend `branch.{name}` with `.port` and `.parent`. Uses `git remote add` to create sources (making them real git remotes) and `git remote remove` to delete them. Ensures the built-in Primordia Official source is always present.
 
 ### Modified files
 - `components/AdminSubNav.tsx` — Added **Fetch Updates** tab between Git Mirror and Instance.
@@ -16,16 +16,21 @@ Added a new **Fetch Updates** tab to the admin panel at `/admin/updates`.
 ## How it works
 
 ### Multiple update sources
-The page supports multiple named update sources, similar to how Linux distros manage package repositories. Sources are persisted in `.git/config` using the `primordia-update-source.{id}.*` subsection pattern — the same mechanism git uses for remotes and branch config.
+The page supports multiple named update sources, similar to how Linux distros manage package repositories. Sources are stored in `.git/config` by **extending the standard `remote.*` namespace** with Primordia-specific fields — the same pattern used to extend `branch.*` with `.port` and `.parent`.
 
-Example entry in `.git/config`:
+Each source is a real git remote, so `git fetch primordia-official` works without any translation layer. Primordia adds metadata fields alongside the standard `url` and `fetch`:
+
 ```
-[primordia-update-source "primordia-updates"]
-    name    = Primordia Official
-    url     = https://primordia.exe.xyz/api/git
-    enabled = true
-    builtin = true
+[remote "primordia-official"]
+    url          = https://primordia.exe.xyz/api/git
+    fetch        = +refs/heads/*:refs/remotes/primordia-official/*
+    updateSource = true
+    displayName  = Primordia Official
+    builtin      = true
+    enabled      = true
 ```
+
+Sources are enumerated with `git config --get-regexp 'remote\.[^.]+\.updatesource'`.
 
 Each source has:
 - A human-readable **name** and **URL** (a read-only git HTTP endpoint)

@@ -155,12 +155,15 @@ function buildSourceStatus(source: UpdateSource): SourceStatus {
 }
 
 /**
- * Fetch a single source. Adds the remote if missing.
+ * Fetch a single source.
+ * If the git remote was manually removed, recreates it from the stored URL.
  * Returns the updated status, with fetchError set on failure.
  */
 function fetchSource(source: UpdateSource): SourceStatus {
   try {
     if (!remoteExists(source.id)) {
+      // Remote was manually deleted — recreate it using the URL from git config
+      // (source.url comes from remote.{id}.url set by addSource / ensureBuiltin).
       git(["remote", "add", source.id, source.url]);
     }
     git([

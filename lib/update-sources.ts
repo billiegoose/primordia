@@ -1,61 +1,64 @@
 // lib/update-sources.ts
 // Manages the list of git-based update sources for the "Fetch Updates" admin panel.
 //
-// ─── Storage: git config (primordia-update-source subsections) ───────────────
+// ─── Storage: remote.{id}.* in git config ─────────────────────────────────────
 //
-// Each source is stored as a subsection of `primordia-update-source` in the
-// local .git/config file, mirroring exactly how git itself stores remotes:
+// Update sources piggyback on the standard `remote.*` git config namespace,
+// extending it with Primordia-specific fields — exactly the same way the
+// codebase extends `branch.*` with `branch.{name}.port` and `branch.{name}.parent`.
 //
-//   [primordia-update-source "primordia-updates"]
-//       name    = Primordia Official
-//       url     = https://primordia.exe.xyz/api/git
-//       enabled = true
-//       builtin = true
+// A source entry in .git/config looks like:
 //
-// Keys are read with:
-//   git config --get primordia-update-source.{id}.{field}
+//   [remote "primordia-official"]
+//       url         = https://primordia.exe.xyz/api/git
+//       fetch       = +refs/heads/*:refs/remotes/primordia-official/*
+//       updateSource = true
+//       displayName  = Primordia Official
+//       builtin      = true
+//       enabled      = true
 //
-// The full list of sources is enumerated with:
-//   git config --get-regexp 'primordia-update-source\..*\.url'
-//   (outputs "primordia-update-source.{id}.url {value}" per line)
+// The `url` and `fetch` fields are set by `git remote add` (standard git).
+// The `updateSource`, `displayName`, `builtin`, and `enabled` fields are
+// Primordia-specific metadata added on top.
 //
-// A whole source is removed with:
-//   git config --remove-section primordia-update-source.{id}
+// This means every update source is also a fully functional git remote —
+// `git fetch primordia-official` works without any translation layer.
 //
-// This keeps all non-sensitive runtime state in git config alongside branch
-// ports (branch.{name}.port), production branch (primordia.productionBranch),
-// and proxy settings (primordia.previewInactivityMin, etc.).
-// See CLAUDE.md §"Git config as key-value store" for the full pattern.
+// Enumerate all update sources:
+//   git config --get-regexp 'remote\.[^.]+\.updateSource'
+//   (outputs "remote.{id}.updatesource true" per source — git lowercases field names)
+//
+// See CLAUDE.md §"Git Config as Key-Value Store" for the full pattern.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { spawnSync } from "child_process";
 
 export interface UpdateSource {
-  /** Unique identifier — subsection name in git config (no spaces, no slashes). */
+  /** Remote name in git config — also used as the git remote. */
   id: string;
-  /** Human-readable display name. */
+  /** Human-readable display name (stored as remote.{id}.displayName). */
   name: string;
-  /** Git remote URL (read-only HTTP git endpoint). */
+  /** Git remote URL (stored as remote.{id}.url via `git remote add`). */
   url: string;
-  /** Local tracking branch, always `${id}-main`. */
+  /** Local tracking branch for the upstream `main`, always `${id}-main`. */
   trackingBranch: string;
-  /** Whether this source is included in fetch operations. */
+  /** Whether this source is included in fetch operations (remote.{id}.enabled). */
   enabled: boolean;
   /**
    * True for the built-in Primordia Official source. Built-in sources cannot
-   * be deleted, only disabled.
+   * be deleted, only disabled (remote.{id}.builtin = true).
    */
   builtin: boolean;
 }
 
-// ─── Built-in source definition ───────────────────────────────────────────────
+// ─── Built-in source ──────────────────────────────────────────────────────────
 
-const BUILTIN_ID = "primordia-updates";
+const BUILTIN_ID = "primordia-official";
 const BUILTIN_SOURCE: UpdateSource = {
   id: BUILTIN_ID,
   name: "Primordia Official",
   url: "https://primordia.exe.xyz/api/git",
-  trackingBranch: "primordia-updates-main",
+  trackingBranch: "primordia-official-main",
   enabled: true,
   builtin: true,
 };
@@ -77,10 +80,10 @@ function gitGetRegexp(pattern: string, repoRoot: string): Array<{ key: string; v
     .trim()
     .split("\n")
     .map((line) => {
-      const spaceIdx = line.indexOf(" ");
-      return spaceIdx === -1
+      const idx = line.indexOf(" ");
+      return idx === -1
         ? { key: line, value: "" }
-        : { key: line.slice(0, spaceIdx), value: line.slice(spaceIdx + 1) };
+        : { key: line.slice(0, idx), value: line.slice(idx + 1) };
     });
 }
 
@@ -89,53 +92,65 @@ function gitSet(key: string, value: string, repoRoot: string): void {
   if (r.status !== 0) throw new Error(`git config ${key} failed: ${r.stderr?.trim()}`);
 }
 
-function gitRemoveSection(section: string, repoRoot: string): void {
-  const r = spawnSync("git", ["config", "--remove-section", section], {
-    cwd: repoRoot,
-    encoding: "utf8",
-  });
-  if (r.status !== 0) throw new Error(`git config --remove-section ${section} failed: ${r.stderr?.trim()}`);
-}
+// ─── Source helpers ────────────────────────────────────────────────────────────
 
-// ─── Source section helpers ────────────────────────────────────────────────────
-
-function sectionName(id: string): string {
-  return `primordia-update-source.${id}`;
-}
-
-/** Write all fields of a source into git config. Idempotent. */
-function writeSource(source: UpdateSource, repoRoot: string): void {
-  const sec = sectionName(source.id);
-  gitSet(`${sec}.name`, source.name, repoRoot);
-  gitSet(`${sec}.url`, source.url, repoRoot);
-  gitSet(`${sec}.enabled`, String(source.enabled), repoRoot);
-  gitSet(`${sec}.builtin`, String(source.builtin), repoRoot);
-}
-
-/** Read a single source from git config by ID. Returns null if not found. */
+/**
+ * Read a single source from git config by remote ID.
+ * Returns null if no remote with that name has updateSource=true.
+ */
 function readSourceById(id: string, repoRoot: string): UpdateSource | null {
-  const sec = sectionName(id);
-  const url = gitGet(`${sec}.url`, repoRoot);
-  if (!url) return null;
-  const name = gitGet(`${sec}.name`, repoRoot) ?? id;
-  const enabled = gitGet(`${sec}.enabled`, repoRoot) !== "false";
-  const builtin = gitGet(`${sec}.builtin`, repoRoot) === "true";
+  const marker = gitGet(`remote.${id}.updateSource`, repoRoot);
+  if (marker !== "true") return null;
+  const url = gitGet(`remote.${id}.url`, repoRoot) ?? "";
+  const name = gitGet(`remote.${id}.displayName`, repoRoot) ?? id;
+  const enabled = gitGet(`remote.${id}.enabled`, repoRoot) !== "false";
+  const builtin = gitGet(`remote.${id}.builtin`, repoRoot) === "true";
   return { id, name, url, trackingBranch: `${id}-main`, enabled, builtin };
 }
 
-/** Ensure the built-in source is present in git config (idempotent). */
+/**
+ * Write Primordia-specific metadata fields onto an existing git remote.
+ * Does NOT create the remote — call `git remote add` first.
+ */
+function writeSourceMeta(source: UpdateSource, repoRoot: string): void {
+  gitSet(`remote.${source.id}.updateSource`, "true", repoRoot);
+  gitSet(`remote.${source.id}.displayName`, source.name, repoRoot);
+  gitSet(`remote.${source.id}.builtin`, String(source.builtin), repoRoot);
+  gitSet(`remote.${source.id}.enabled`, String(source.enabled), repoRoot);
+}
+
+/**
+ * Ensure the built-in source exists as a git remote with correct metadata.
+ * Idempotent — safe to call on every readSources().
+ */
 function ensureBuiltin(repoRoot: string): UpdateSource {
-  const existing = readSourceById(BUILTIN_ID, repoRoot);
-  if (existing) {
-    // Always keep url + builtin flag correct (in case someone edited config manually)
-    if (existing.url !== BUILTIN_SOURCE.url || !existing.builtin) {
-      gitSet(`${sectionName(BUILTIN_ID)}.url`, BUILTIN_SOURCE.url, repoRoot);
-      gitSet(`${sectionName(BUILTIN_ID)}.builtin`, "true", repoRoot);
+  const url = gitGet(`remote.${BUILTIN_ID}.url`, repoRoot);
+  if (!url) {
+    // Remote doesn't exist at all — create it.
+    const r = spawnSync("git", ["remote", "add", BUILTIN_ID, BUILTIN_SOURCE.url], {
+      cwd: repoRoot,
+      encoding: "utf8",
+    });
+    if (r.status !== 0) {
+      // Could not create (e.g. no git repo in test env) — return the default.
+      return BUILTIN_SOURCE;
     }
-    return { ...existing, url: BUILTIN_SOURCE.url, builtin: true };
+  } else if (url !== BUILTIN_SOURCE.url) {
+    // URL drifted — correct it.
+    spawnSync("git", ["remote", "set-url", BUILTIN_ID, BUILTIN_SOURCE.url], {
+      cwd: repoRoot,
+      encoding: "utf8",
+    });
   }
-  writeSource(BUILTIN_SOURCE, repoRoot);
-  return BUILTIN_SOURCE;
+
+  // Always (re)write the metadata, forcing builtin=true.
+  const existing = readSourceById(BUILTIN_ID, repoRoot);
+  const source: UpdateSource = {
+    ...BUILTIN_SOURCE,
+    enabled: existing?.enabled ?? true,
+  };
+  writeSourceMeta(source, repoRoot);
+  return source;
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -143,27 +158,25 @@ function ensureBuiltin(repoRoot: string): UpdateSource {
 /**
  * Read all update sources from git config.
  * Always includes the built-in source (initialising it if absent).
- * Returns sources with the built-in first, then user-added in insertion order.
+ * Returns sources with the built-in first, then user-added in git config order.
  */
 export function readSources(repoRoot: string): UpdateSource[] {
   const builtin = ensureBuiltin(repoRoot);
 
-  // Enumerate all source IDs by looking for *.url keys.
-  // Key format (git lowercases section + field names but NOT subsection names):
-  //   primordia-update-source.{id}.url {value}
-  const entries = gitGetRegexp("primordia-update-source\\..*\\.url", repoRoot);
-  const seenIds = new Set<string>();
+  // Enumerate all remotes tagged with updateSource=true.
+  // git lowercases key names in --get-regexp output, so the field appears as
+  // "remote.{id}.updatesource" (no camel casing in the key portion of output).
+  const entries = gitGetRegexp("remote\\.[^.]+\\.updatesource", repoRoot);
+  const seen = new Set<string>([BUILTIN_ID]);
   const sources: UpdateSource[] = [builtin];
-  seenIds.add(BUILTIN_ID);
 
   for (const { key } of entries) {
-    // key = "primordia-update-source.{id}.url"
-    // Section name is lowercased by git; subsection (id) is NOT.
-    const match = key.match(/^primordia-update-source\.([^.]+)\.url$/);
+    // key = "remote.{id}.updatesource"
+    const match = key.match(/^remote\.([^.]+)\.updatesource$/);
     if (!match) continue;
     const id = match[1];
-    if (seenIds.has(id)) continue;
-    seenIds.add(id);
+    if (seen.has(id)) continue;
+    seen.add(id);
     const source = readSourceById(id, repoRoot);
     if (source) sources.push(source);
   }
@@ -173,7 +186,7 @@ export function readSources(repoRoot: string): UpdateSource[] {
 
 /**
  * Add a new user-defined update source.
- * The source ID is derived from the name (kebab-case, unique).
+ * Creates a real git remote (`git remote add`) and tags it with Primordia metadata.
  * Returns the newly created source.
  */
 export function addSource(repoRoot: string, name: string, url: string): UpdateSource {
@@ -188,29 +201,40 @@ export function addSource(repoRoot: string, name: string, url: string): UpdateSo
     enabled: true,
     builtin: false,
   };
-  writeSource(source, repoRoot);
+
+  // Create the git remote first so `git fetch {id}` works immediately.
+  const r = spawnSync("git", ["remote", "add", id, url], { cwd: repoRoot, encoding: "utf8" });
+  if (r.status !== 0) {
+    throw new Error(`git remote add ${id} failed: ${r.stderr?.trim()}`);
+  }
+
+  writeSourceMeta(source, repoRoot);
   return source;
 }
 
 /**
- * Remove a non-built-in update source from git config.
+ * Remove a non-built-in update source.
+ * Uses `git remote remove` which deletes the entire [remote "{id}"] section,
+ * including all Primordia metadata fields.
  * Throws if the source is built-in or not found.
  */
 export function removeSource(repoRoot: string, id: string): void {
   const source = readSourceById(id, repoRoot);
-  if (!source) throw new Error(`Source not found: ${id}`);
+  if (!source) throw new Error(`Update source not found: ${id}`);
   if (source.builtin) throw new Error(`Cannot delete the built-in source "${id}".`);
-  gitRemoveSection(sectionName(id), repoRoot);
+
+  const r = spawnSync("git", ["remote", "remove", id], { cwd: repoRoot, encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`git remote remove ${id} failed: ${r.stderr?.trim()}`);
 }
 
 /**
- * Set the enabled flag for a source.
- * Works for both built-in and user-defined sources.
+ * Toggle the enabled flag for an update source.
+ * Works for both built-in (can disable) and user-defined sources.
  */
 export function setSourceEnabled(repoRoot: string, id: string, enabled: boolean): void {
   const source = readSourceById(id, repoRoot);
-  if (!source) throw new Error(`Source not found: ${id}`);
-  gitSet(`${sectionName(id)}.enabled`, String(enabled), repoRoot);
+  if (!source) throw new Error(`Update source not found: ${id}`);
+  gitSet(`remote.${id}.enabled`, String(enabled), repoRoot);
 }
 
 // ─── Private helpers ──────────────────────────────────────────────────────────
