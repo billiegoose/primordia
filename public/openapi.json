@@ -288,12 +288,30 @@
       },
       "post": {
         "operationId": "post-admin-rollback",
-        "summary": "",
-        "description": "",
+        "summary": "Roll back to a previous production slot",
+        "description": "Starts the target worktree's server, health-checks it, then zero-downtime swaps it into production. Admin only.",
         "tags": [
           "Admin"
         ],
         "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["worktreePath"],
+                "properties": {
+                  "worktreePath": {
+                    "type": "string",
+                    "description": "Absolute path of the target registered git worktree to roll back to.",
+                    "example": "/home/exedev/primordia-worktrees/feature-x"
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful response",
@@ -424,12 +442,38 @@
       },
       "patch": {
         "operationId": "patch-admin-proxy-settings",
-        "summary": "",
-        "description": "",
+        "summary": "Update proxy settings",
+        "description": "Updates one or more reverse-proxy tuning knobs stored in git config. Admin only.",
         "tags": [
           "Admin"
         ],
         "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "previewInactivityMin": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1440,
+                    "description": "Minutes of inactivity before a preview server is stopped.",
+                    "example": 30
+                  },
+                  "diskCleanupThresholdPct": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "description": "Disk usage percentage at which automatic worktree cleanup is triggered.",
+                    "example": 90
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful response",
@@ -489,12 +533,30 @@
     "/admin/git-mirror": {
       "post": {
         "operationId": "post-admin-git-mirror",
-        "summary": "",
-        "description": "",
+        "summary": "Add or update the push mirror remote",
+        "description": "Adds (or updates) a 'mirror' git remote as a push mirror and verifies the connection with an initial push. Admin only.",
         "tags": [
           "Admin"
         ],
         "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["url"],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "description": "SSH or HTTPS URL of the remote repository to mirror pushes to.",
+                    "example": "git@github.com:example/primordia-mirror.git"
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful response",
@@ -651,12 +713,42 @@
     "/admin/permissions": {
       "post": {
         "operationId": "post-admin-permissions",
-        "summary": "",
-        "description": "",
+        "summary": "Grant or revoke a user role",
+        "description": "Grants or revokes a grantable role (e.g. `can_evolve`) for a user. The `admin` role cannot be granted via this endpoint. Admin only.",
         "tags": [
           "Admin"
         ],
         "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["userId", "role", "action"],
+                "properties": {
+                  "userId": {
+                    "type": "string",
+                    "description": "UUID of the user to modify.",
+                    "example": "01927f3e-0000-7000-8000-abcdef012345"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": ["can_evolve"],
+                    "description": "The role to grant or revoke.",
+                    "example": "can_evolve"
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": ["grant", "revoke"],
+                    "description": "Whether to grant or revoke the role.",
+                    "example": "grant"
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful response",
@@ -1091,12 +1183,30 @@
     "/auth/cross-device/approve": {
       "post": {
         "operationId": "post-auth-cross-device-approve",
-        "summary": "",
-        "description": "",
+        "summary": "Approve a cross-device sign-in token",
+        "description": "Called by the already-authenticated approver device (e.g. phone) to approve a pending cross-device sign-in token. Requires an active session.",
         "tags": [
           "Auth"
         ],
         "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["tokenId"],
+                "properties": {
+                  "tokenId": {
+                    "type": "string",
+                    "description": "The cross-device token ID returned by POST /auth/cross-device/start.",
+                    "example": "01927f3e-0000-7000-8000-abcdef012345"
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful response",
@@ -1493,12 +1603,80 @@
     "/evolve": {
       "post": {
         "operationId": "post-evolve",
-        "summary": "",
-        "description": "",
+        "summary": "Start a new evolve session",
+        "description": "Start a new AI-powered code-change session. Accepts `multipart/form-data` (supports file attachments) or JSON. Requires `can_evolve` or `admin` role.",
         "tags": [
           "Evolve"
         ],
         "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["request"],
+                "properties": {
+                  "request": {
+                    "type": "string",
+                    "description": "The natural-language change request for Claude Code to implement.",
+                    "example": "Add a dark mode toggle to the header"
+                  },
+                  "harness": {
+                    "type": "string",
+                    "description": "Agent harness to use (e.g. 'claude-code'). Defaults to the server default.",
+                    "example": "claude-code"
+                  },
+                  "model": {
+                    "type": "string",
+                    "description": "AI model identifier to pass to the agent harness.",
+                    "example": "claude-sonnet-4-5"
+                  },
+                  "cavemanMode": {
+                    "type": "string",
+                    "enum": ["true", "false"],
+                    "description": "Enable caveman communication mode for Claude. Pass the string 'true' to enable.",
+                    "example": "false"
+                  },
+                  "cavemanIntensity": {
+                    "type": "string",
+                    "description": "Caveman mode intensity level (lite, full, ultra, wenyan-lite, wenyan-full, wenyan-ultra). Only relevant when cavemanMode is 'true'.",
+                    "example": "full"
+                  },
+                  "encryptedApiKey": {
+                    "type": "string",
+                    "description": "Optional RSA-OAEP encrypted Anthropic API key (ciphertext from /api/llm-key/public-key). Used instead of the server's gateway key when provided."
+                  },
+                  "attachments": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "binary"
+                    },
+                    "description": "Optional file attachments (images, text files, etc.) to include in the session context. Files are copied into the worktree's attachments/ directory."
+                  }
+                }
+              }
+            },
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["request"],
+                "properties": {
+                  "request": {
+                    "type": "string",
+                    "description": "The natural-language change request for Claude Code to implement.",
+                    "example": "Add a dark mode toggle to the header"
+                  },
+                  "encryptedApiKey": {
+                    "type": "string",
+                    "description": "Optional RSA-OAEP encrypted Anthropic API key."
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful response",
@@ -1665,12 +1843,36 @@
     "/evolve/manage": {
       "post": {
         "operationId": "post-evolve-manage",
-        "summary": "",
-        "description": "",
+        "summary": "Accept or reject an evolve session",
+        "description": "Accept (deploy) or reject (discard) a ready evolve session. Requires `can_evolve` or `admin` role.",
         "tags": [
           "Evolve"
         ],
         "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["action", "sessionId"],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": ["accept", "reject"],
+                    "description": "'accept' deploys the session branch to production (or merges it in dev). 'reject' discards the worktree and branch.",
+                    "example": "accept"
+                  },
+                  "sessionId": {
+                    "type": "string",
+                    "description": "The session ID (same as the git branch name) to accept or reject.",
+                    "example": "add-dark-mode-toggle"
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful response",
@@ -1814,12 +2016,36 @@
     "/evolve/upstream-sync": {
       "post": {
         "operationId": "post-evolve-upstream-sync",
-        "summary": "",
-        "description": "",
+        "summary": "Merge parent branch into a session",
+        "description": "Merges the session's parent branch into the session worktree to pick up upstream changes. Auto-resolves conflicts via Claude if needed.",
         "tags": [
           "Evolve"
         ],
         "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["sessionId", "action"],
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "description": "The session ID (git branch name) to sync upstream changes into.",
+                    "example": "add-dark-mode-toggle"
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": ["merge"],
+                    "description": "The sync strategy. Currently only 'merge' is supported.",
+                    "example": "merge"
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful response",
@@ -1891,12 +2117,30 @@
     "/evolve/abort": {
       "post": {
         "operationId": "post-evolve-abort",
-        "summary": "",
-        "description": "",
+        "summary": "Abort the running Claude Code agent",
+        "description": "Signals the active Claude Code process to stop and transitions the session back to 'ready' with whatever work was completed.",
         "tags": [
           "Evolve"
         ],
         "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["sessionId"],
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "description": "The session ID (git branch name) of the running session to abort.",
+                    "example": "add-dark-mode-toggle"
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful response",
@@ -1982,12 +2226,79 @@
     "/evolve/followup": {
       "post": {
         "operationId": "post-evolve-followup",
-        "summary": "",
-        "description": "",
+        "summary": "Submit a follow-up evolve request",
+        "description": "Send an additional change request to an already-ready evolve session. Accepts `multipart/form-data` (supports file attachments) or JSON.",
         "tags": [
           "Evolve"
         ],
         "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["sessionId", "request"],
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "description": "The session ID (git branch name) of the ready session to continue.",
+                    "example": "add-dark-mode-toggle"
+                  },
+                  "request": {
+                    "type": "string",
+                    "description": "The follow-up change request text for Claude Code.",
+                    "example": "Also update the README to document the new toggle"
+                  },
+                  "harness": {
+                    "type": "string",
+                    "description": "Agent harness override for this follow-up run.",
+                    "example": "claude-code"
+                  },
+                  "model": {
+                    "type": "string",
+                    "description": "AI model override for this follow-up run.",
+                    "example": "claude-sonnet-4-5"
+                  },
+                  "encryptedApiKey": {
+                    "type": "string",
+                    "description": "Optional RSA-OAEP encrypted Anthropic API key."
+                  },
+                  "attachments": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "binary"
+                    },
+                    "description": "Optional additional file attachments to include in this follow-up run."
+                  }
+                }
+              }
+            },
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["sessionId", "request"],
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "description": "The session ID (git branch name) of the ready session to continue.",
+                    "example": "add-dark-mode-toggle"
+                  },
+                  "request": {
+                    "type": "string",
+                    "description": "The follow-up change request text for Claude Code.",
+                    "example": "Also update the README to document the new toggle"
+                  },
+                  "encryptedApiKey": {
+                    "type": "string",
+                    "description": "Optional RSA-OAEP encrypted Anthropic API key."
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful response",
@@ -2055,12 +2366,30 @@
     "/evolve/from-branch": {
       "post": {
         "operationId": "post-evolve-from-branch",
-        "summary": "",
-        "description": "",
+        "summary": "Start an evolve session on an existing branch",
+        "description": "Attaches the full AI preview pipeline to an existing local git branch (e.g. from an external contributor). The branch must exist locally and must not contain a slash. Requires `can_evolve` or `admin` role.",
         "tags": [
           "Evolve"
         ],
         "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["branchName"],
+                "properties": {
+                  "branchName": {
+                    "type": "string",
+                    "description": "Name of the existing local git branch to attach a session to. Must not contain a slash.",
+                    "example": "feature-login-redesign"
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful response",
@@ -2128,12 +2457,30 @@
     "/evolve/kill-restart": {
       "post": {
         "operationId": "post-evolve-kill-restart",
-        "summary": "",
-        "description": "",
+        "summary": "Kill and restart a session's preview dev server",
+        "description": "Delegates to the reverse proxy to kill the session's running preview dev server process and start a fresh one in the same worktree.",
         "tags": [
           "Evolve"
         ],
         "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["sessionId"],
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "description": "The session ID (git branch name) whose preview server should be restarted.",
+                    "example": "add-dark-mode-toggle"
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful response",
@@ -2628,12 +2975,35 @@
       },
       "post": {
         "operationId": "post-llm-key-encrypted-key",
-        "summary": "",
-        "description": "",
+        "summary": "Store an encrypted API key",
+        "description": "Stores an AES-GCM encrypted Anthropic API key ciphertext for the authenticated user. The server never sees the AES decryption key — only the ciphertext is persisted.",
         "tags": [
           "Llm-key"
         ],
         "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["iv", "ciphertext"],
+                "properties": {
+                  "iv": {
+                    "type": "string",
+                    "description": "Base64-encoded AES-GCM initialisation vector.",
+                    "example": "dGVzdGl2MTIzNDU2Nzg="
+                  },
+                  "ciphertext": {
+                    "type": "string",
+                    "description": "Base64-encoded AES-GCM ciphertext of the Anthropic API key.",
+                    "example": "U2FsdGVkX1..."
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful response",
