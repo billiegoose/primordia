@@ -14,7 +14,7 @@ export interface CrossDeviceApproveBody {
 /**
  * Approve a cross-device sign-in token
  * @description Called by the already-authenticated device to approve a pending cross-device sign-in token. Requires an active session.
- * @tags Auth
+ * @tag Auth
  * @body CrossDeviceApproveBody
  */
 export async function POST(request: NextRequest) {

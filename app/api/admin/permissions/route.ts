@@ -24,7 +24,7 @@ export interface AdminPermissionsBody {
 /**
  * Grant or revoke a user role
  * @description Grants or revokes a grantable role for a user. The `admin` role cannot be managed via this endpoint. Admin only.
- * @tags Admin
+ * @tag Admin
  * @body AdminPermissionsBody
  */
 export async function POST(request: Request) {

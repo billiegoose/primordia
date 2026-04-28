@@ -434,7 +434,7 @@ export interface EvolveManageBody {
 /**
  * Accept or reject an evolve session
  * @description POST to accept (deploy) or reject (discard) a ready evolve session. Requires `can_evolve` or `admin` role.
- * @tags Evolve
+ * @tag Evolve
  * @body EvolveManageBody
  */
 export async function POST(request: Request) {

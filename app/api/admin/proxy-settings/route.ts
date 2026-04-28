@@ -65,7 +65,7 @@ export interface ProxySettingsPatch {
 /**
  * Update proxy settings
  * @description Updates one or more reverse-proxy tuning knobs stored in git config. Admin only.
- * @tags Admin
+ * @tag Admin
  * @body ProxySettingsPatch
  */
 export async function PATCH(req: Request) {

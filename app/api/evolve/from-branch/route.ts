@@ -28,7 +28,7 @@ export interface EvolveFromBranchBody {
 /**
  * Start an evolve session on an existing branch
  * @description Attaches the full AI preview pipeline to an existing local git branch (e.g. from an external contributor). Requires `can_evolve` or `admin` role.
- * @tags Evolve
+ * @tag Evolve
  * @body EvolveFromBranchBody
  */
 export async function POST(request: Request) {

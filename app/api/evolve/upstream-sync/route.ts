@@ -17,7 +17,7 @@ export interface EvolveUpstreamSyncBody {
 /**
  * Merge parent branch into a session
  * @description Merges the session's parent branch into the session worktree to pick up upstream changes. Auto-resolves conflicts via Claude if needed.
- * @tags Evolve
+ * @tag Evolve
  * @body EvolveUpstreamSyncBody
  */
 export async function POST(request: Request) {

@@ -39,7 +39,7 @@ export interface EncryptedKeyBody {
 /**
  * Store an encrypted API key
  * @description Stores an AES-GCM encrypted Anthropic API key for the authenticated user. The server never sees the AES decryption key — only the ciphertext is persisted.
- * @tags Llm-key
+ * @tag Llm-key
  * @body EncryptedKeyBody
  */
 export async function POST(req: Request) {

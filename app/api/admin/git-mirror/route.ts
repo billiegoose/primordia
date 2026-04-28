@@ -42,7 +42,7 @@ export interface AdminGitMirrorBody {
 /**
  * Add or update the push mirror remote
  * @description Adds (or updates) a 'mirror' git remote as a push mirror and verifies the connection with an initial push. Admin only.
- * @tags Admin
+ * @tag Admin
  * @body AdminGitMirrorBody
  */
 export async function POST(request: Request) {

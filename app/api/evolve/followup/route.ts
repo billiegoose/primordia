@@ -29,7 +29,7 @@ export interface EvolveFollowupFormData {
 /**
  * Submit a follow-up evolve request
  * @description Send an additional change request to an already-ready evolve session. Accepts multipart/form-data (supports file attachments) or JSON `{ sessionId, request, encryptedApiKey? }`.
- * @tags Evolve
+ * @tag Evolve
  * @contentType multipart/form-data
  * @body EvolveFollowupFormData
  */

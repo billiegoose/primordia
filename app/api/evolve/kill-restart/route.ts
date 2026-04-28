@@ -19,7 +19,7 @@ export interface EvolveKillRestartBody {
 /**
  * Restart a session's preview dev server
  * @description Delegates to the reverse proxy to kill and restart the session's preview dev server process.
- * @tags Evolve
+ * @tag Evolve
  * @body EvolveKillRestartBody
  */
 export async function POST(request: Request) {

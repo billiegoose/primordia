@@ -22,7 +22,7 @@ import {
 /**
  * Abort the running Claude Code agent
  * @description Signals the active Claude Code process to stop and transitions the session back to 'ready' with whatever work was completed.
- * @tags Evolve
+ * @tag Evolve
  * @body EvolveAbortBody
  */
 export async function POST(request: Request) {

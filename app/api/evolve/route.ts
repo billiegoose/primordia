@@ -102,7 +102,7 @@ export interface EvolvePostFormData {
 /**
  * Start a new evolve session
  * @description Start a new AI-powered code-change session. Accepts multipart/form-data (supports file attachments) or JSON `{ request, encryptedApiKey? }`. Requires `can_evolve` or `admin` role.
- * @tags Evolve
+ * @tag Evolve
  * @contentType multipart/form-data
  * @body EvolvePostFormData
  */

@@ -132,7 +132,7 @@ export interface AdminRollbackBody {
 /**
  * Roll back to a previous production slot
  * @description Starts the target worktree's server, health-checks it, then zero-downtime swaps it into production. Admin only.
- * @tags Admin
+ * @tag Admin
  * @body AdminRollbackBody
  */
 export async function POST(req: Request) {
