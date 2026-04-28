@@ -6,6 +6,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { GitBranch, Loader2, FileText, Copy, Check, RotateCw } from "lucide-react";
+import { AnsiRenderer } from "@/components/AnsiRenderer";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { NavHeader } from "@/components/NavHeader";
 
@@ -22,6 +23,7 @@ import { WebPreviewPanel, type ElementSelection } from "./WebPreviewPanel";
 import HorizontalResizeHandle from "./HorizontalResizeHandle";
 import type { SessionEvent } from "@/lib/session-events";
 import { HARNESS_OPTIONS, type ModelOption } from "@/lib/agent-config";
+import { deriveSmartPreviewUrl } from "@/lib/smart-preview-url";
 
 // ─── Metrics ──────────────────────────────────────────────────────────────────
 
@@ -493,10 +495,13 @@ function StructuredSection({
 
   // ── Deploy ───────────────────────────────────────────────────────────────
   if (type === 'deploy') {
-    const logLines = events
+    // Concatenate log_line chunks verbatim — no added separators — so that
+    // \r and ANSI erase-EOL sequences in the ANSI-mode install.sh output are
+    // preserved for AnsiRenderer to process into the correct final lines.
+    const rawLog = events
       .filter((e): e is Extract<SessionEvent, { type: 'log_line' }> => e.type === 'log_line')
-      .map((e) => e.content.replace(/\n+$/, ''))
-      .join('\n');
+      .map((e) => e.content)
+      .join('');
     const resultEvent = events.find((e): e is Extract<SessionEvent, { type: 'result' }> => e.type === 'result');
     const decisionEvent = events.find((e): e is Extract<SessionEvent, { type: 'decision' }> => e.type === 'decision');
     const isProduction = label.includes("production");
@@ -518,7 +523,7 @@ function StructuredSection({
               Running…
             </span>
           </div>
-          {logLines && <div className="px-4 py-3"><pre className="text-xs text-gray-400 whitespace-pre-wrap font-mono">{logLines}</pre></div>}
+          {rawLog && <div className="px-4 py-3"><AnsiRenderer text={rawLog} /></div>}
         </div>
       );
     }
@@ -531,14 +536,14 @@ function StructuredSection({
             <p className="text-red-200 font-semibold">❌ Deploy failed</p>
             <p className="text-red-300/80 text-xs mt-1">{errorMessage}</p>
           </div>
-          {logLines && (
+          {rawLog && (
             <details className="group border-t border-red-800/50">
               <summary className="flex items-center gap-2 px-4 py-2 cursor-pointer select-none hover:bg-red-900/30 transition-colors list-none text-xs">
                 <span className="text-red-700 group-open:rotate-90 transition-transform">▶</span>
                 <span className="text-red-700/80">Deploy log</span>
               </summary>
               <div className="px-4 py-3 border-t border-red-800/50">
-                <pre className="text-xs text-gray-400 whitespace-pre-wrap font-mono">{logLines}</pre>
+                <AnsiRenderer text={rawLog} />
               </div>
             </details>
           )}
@@ -556,7 +561,7 @@ function StructuredSection({
             <span className="font-semibold text-xs text-gray-400">{label}</span>
             <span className="ml-auto text-gray-600 text-xs">paused — fixing type errors</span>
           </div>
-          {logLines && <div className="px-4 py-3"><pre className="text-xs text-gray-500 whitespace-pre-wrap font-mono">{logLines}</pre></div>}
+          {rawLog && <div className="px-4 py-3"><AnsiRenderer text={rawLog} className="opacity-60" /></div>}
         </div>
       );
     }
@@ -573,14 +578,14 @@ function StructuredSection({
                 : "The branch was accepted and the worktree has been removed."}
           </p>
         </div>
-        {logLines && (
+        {rawLog && (
           <details className="group border-t border-green-800/50">
             <summary className="flex items-center gap-2 px-4 py-2 cursor-pointer select-none hover:bg-green-900/30 transition-colors list-none text-xs">
               <span className="text-green-700 group-open:rotate-90 transition-transform">▶</span>
               <span className="text-green-700/80">Deploy log</span>
             </summary>
             <div className="px-4 py-3 border-t border-green-800/50">
-              <pre className="text-xs text-gray-400 whitespace-pre-wrap font-mono">{logLines}</pre>
+              <AnsiRenderer text={rawLog} />
             </div>
           </details>
         )}
@@ -1168,6 +1173,15 @@ export default function EvolveSessionView({
   /** Whether to show the preview as a desktop sidebar. */
   const showPreviewSidebar = status === "ready" && !!previewUrl;
 
+  /**
+   * The URL to open in the Web Preview panel when it first becomes available.
+   * Derived once from the initial request so the preview starts on the most
+   * relevant page rather than always defaulting to the landing page.
+   */
+  const smartPreviewUrl = previewUrl
+    ? deriveSmartPreviewUrl(events, previewUrl)
+    : null;
+
   /** Width of the session (left) panel in pixels when sidebar is visible. */
   const [mainWidthPx, setMainWidthPx] = useState(560);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1342,7 +1356,7 @@ export default function EvolveSessionView({
           <div className={showPreviewSidebar ? 'xl:hidden' : ''}>
             <WebPreviewCard
               fullHeight={false}
-              previewUrl={previewUrl}
+              previewUrl={smartPreviewUrl}
               proxyServerStatus={proxyServerStatus}
               serverLogs={serverLogs}
               canEvolve={canEvolve}
@@ -1697,7 +1711,7 @@ export default function EvolveSessionView({
       <aside className="hidden xl:flex xl:flex-col xl:flex-1 xl:sticky xl:top-0 xl:h-dvh bg-gray-950 p-4">
         <WebPreviewCard
           fullHeight
-          previewUrl={previewUrl}
+          previewUrl={smartPreviewUrl}
           proxyServerStatus={proxyServerStatus}
           serverLogs={serverLogs}
           canEvolve={canEvolve}
