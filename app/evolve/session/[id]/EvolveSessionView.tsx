@@ -5,7 +5,7 @@
 // Streams live Claude Code progress via SSE from /api/evolve/stream.
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { GitBranch, Loader2, FileText } from "lucide-react";
+import { GitBranch, Loader2, FileText, RotateCw } from "lucide-react";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { NavHeader } from "@/components/NavHeader";
 
@@ -650,7 +650,7 @@ function WebPreviewCard({
               onClick={(e) => { e.preventDefault(); onRestartServer(); }}
               className="ml-auto text-xs text-gray-400 hover:text-gray-200 transition-colors"
             >
-              ↺ Restart
+              <RotateCw size={12} className="inline-block mr-1" />Restart
             </button>
           )}
         </summary>
