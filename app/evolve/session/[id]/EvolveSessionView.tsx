@@ -1175,7 +1175,7 @@ export default function EvolveSessionView({
    * relevant page rather than always defaulting to the landing page.
    */
   const smartPreviewUrl = previewUrl
-    ? deriveSmartPreviewUrl(initialRequest, previewUrl)
+    ? deriveSmartPreviewUrl(events, previewUrl)
     : null;
 
   /** Width of the session (left) panel in pixels when sidebar is visible. */

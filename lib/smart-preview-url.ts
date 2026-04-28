@@ -1,98 +1,108 @@
 // lib/smart-preview-url.ts
-// Infers the most relevant preview page path from a session request string.
-// Used to open the Web Preview panel on the most contextually appropriate page
-// rather than always defaulting to the landing page.
+// Infers the most relevant preview page path from LLM text output in session events.
+// The LLM often names the page it built at the end of its response, e.g.:
+//   "Done. The test page is at `/ansi-test` and offers: …"
+// We scan all text events for path mentions and return the last one found,
+// since the LLM tends to summarise results at the end of its output.
+
+import type { SessionEvent } from './session-events';
+
+// Paths that are internal infrastructure and should never be used as preview targets.
+const EXCLUDED_PREFIXES = [
+  '/api/',
+  '/preview/',
+  '/_next/',
+  '/_',
+  '/node_modules/',
+  '/components/',
+  '/lib/',
+  '/scripts/',
+  '/app/',
+  '/public/',
+];
+
+// Path segment names that look like filenames rather than routes (have extensions).
+const FILE_EXTENSION_RE = /\.[a-z]{1,5}$/i;
+
+function isValidPreviewPath(p: string): boolean {
+  if (!p || p === '/') return false;
+  // Exclude internal prefixes.
+  if (EXCLUDED_PREFIXES.some((x) => p.startsWith(x))) return false;
+  // Exclude paths that look like filenames (e.g. `/foo.ts`, `/bar.tsx`).
+  if (FILE_EXTENSION_RE.test(p)) return false;
+  return true;
+}
 
 /**
- * Given the initial request text and the base preview URL (e.g. `/preview/my-branch`),
- * returns a URL pointing to the most relevant page within the preview.
- *
- * Strategy:
- * 1. Look for an explicit known-route path mentioned in the request
- *    (e.g. "fix the /chat page", "update /admin/logs").
- * 2. Fall back to keyword matching against known Primordia routes.
- * 3. Return the base URL unchanged if no match is found.
+ * Attempt to extract a page URL path from the LLM's text output.
+ * Collects all candidate paths across multiple regex patterns, each tagged with
+ * their position in the text so we can return the last one overall.
  */
-export function deriveSmartPreviewUrl(request: string, basePreviewUrl: string): string {
-  const lower = request.toLowerCase();
+function extractLastMentionedPath(text: string): string | null {
+  // [position, path] tuples from all pattern matches.
+  const candidates: Array<[number, string]> = [];
 
-  // 1. Explicit route mention — find the first /known-route (with optional sub-path) in the text.
-  const knownTopLevel = ['chat', 'evolve', 'admin', 'login', 'branches', 'changelog'];
-  const explicitPattern = new RegExp(
-    `\\/(${knownTopLevel.join('|')})(?:\\/[^\\s"')\`,.;:!?]*)?`,
-    'i',
-  );
-  const explicitMatch = request.match(explicitPattern);
-  if (explicitMatch) {
-    // Strip trailing punctuation that may have been captured.
-    const routePath = explicitMatch[0].replace(/[.,;:!?]+$/, '');
-    return basePreviewUrl + routePath;
-  }
-
-  // 2. Keyword-to-route mapping — ordered from most-specific to least-specific.
-  const rules: Array<{ keywords: string[]; route: string }> = [
-    {
-      keywords: [
-        'chat interface', 'chat page', 'chat view', 'the chat',
-        'chat window', 'chat box', 'chat input', 'chat message',
-        'in the chat', 'on the chat',
-      ],
-      route: '/chat',
-    },
-    {
-      keywords: [
-        'login page', 'log in page', 'sign in page',
-        'login flow', 'sign in flow', 'sign-in page',
-        'passkey', 'authentication page', 'auth page', 'register page',
-        'login screen', 'sign in screen',
-      ],
-      route: '/login',
-    },
-    {
-      keywords: [
-        'admin panel', 'admin page', 'admin area',
-        'admin interface', 'admin section', 'admin tab',
-        'server logs', 'proxy logs', 'rollback page',
-        'server health',
-      ],
-      route: '/admin',
-    },
-    {
-      keywords: [
-        'branches page', 'branch page', 'branch list',
-        'branch view', 'branch tree', 'branch table',
-      ],
-      route: '/branches',
-    },
-    {
-      keywords: [
-        'changelog page', 'change log page', 'changelog entry',
-        'change log entry', 'release notes',
-      ],
-      route: '/changelog',
-    },
-    {
-      keywords: [
-        'evolve page', 'evolve form', 'propose a change',
-        'submit a request', 'submit request', 'change request form',
-      ],
-      route: '/evolve',
-    },
-    {
-      keywords: [
-        'landing page', 'home page', 'homepage', 'front page',
-        'main page', 'index page', 'splash page',
-      ],
-      route: '/',
-    },
-  ];
-
-  for (const { keywords, route } of rules) {
-    if (keywords.some((kw) => lower.includes(kw))) {
-      return route === '/' ? basePreviewUrl : basePreviewUrl + route;
+  const collect = (pattern: RegExp, groupIndex: number) => {
+    // Run a fresh copy of the regex (avoid shared lastIndex state).
+    const re = new RegExp(pattern.source, pattern.flags);
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      const p = m[groupIndex];
+      if (p && isValidPreviewPath(p)) {
+        candidates.push([m.index, p]);
+      }
     }
-  }
+  };
 
-  // 3. Default: return the base URL (landing page).
-  return basePreviewUrl;
+  // Patterns ordered from most to least reliable.
+  // All use case-insensitive matching for paths.
+
+  // 1. Backtick-quoted path: `/path` or `/path/sub`
+  collect(/`(\/[a-z0-9][a-z0-9/_-]*)`/gi, 1);
+
+  // 2. Markdown link target: [link text](/path)
+  collect(/\[[^\]]+\]\((\/[a-z0-9][a-z0-9/_-]*)\)/gi, 1);
+
+  // 3. Double-quoted path: "/path"
+  collect(/"(\/[a-z0-9][a-z0-9/_-]*)"/gi, 1);
+
+  // 4. Single-quoted path: '/path'
+  collect(/'(\/[a-z0-9][a-z0-9/_-]*)'/gi, 1);
+
+  // 5. Contextual phrases: "at /path", "page is at /path", "available at /path", etc.
+  collect(/\b(?:at|to|visit|navigate to|available at|page(?:\s+is)?\s+at)\s+(\/[a-z0-9][a-z0-9/_-]*)/gi, 1);
+
+  if (candidates.length === 0) return null;
+
+  // Sort by position and return the path from the latest occurrence.
+  candidates.sort((a, b) => a[0] - b[0]);
+  return candidates[candidates.length - 1][1];
+}
+
+/**
+ * Given session events (containing LLM text output) and the base preview URL
+ * (e.g. `/preview/my-branch`), returns a URL pointing to the most relevant
+ * page within the preview.
+ *
+ * Scans the LLM's text events for the last mentioned route path. The LLM
+ * typically summarises what it built at the end of its response, e.g.:
+ *   "Done. The test page is at `/ansi-test` and offers: …"
+ * so the last path found is the most likely target page.
+ *
+ * Falls back to the base preview URL (landing page) if no path is detected.
+ */
+export function deriveSmartPreviewUrl(
+  events: SessionEvent[],
+  basePreviewUrl: string,
+): string {
+  // Concatenate all LLM text output in event order.
+  const textContent = events
+    .filter((e): e is Extract<SessionEvent, { type: 'text' }> => e.type === 'text')
+    .map((e) => e.content)
+    .join('');
+
+  if (!textContent) return basePreviewUrl;
+
+  const path = extractLastMentionedPath(textContent);
+  return path ? basePreviewUrl + path : basePreviewUrl;
 }

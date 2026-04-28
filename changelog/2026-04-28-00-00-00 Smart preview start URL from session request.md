@@ -1,19 +1,19 @@
-# Smart Preview Start URL from Session Request
+# Smart Preview Start URL from LLM Output
 
 ## What changed
 
 The Web Preview panel in evolve session pages now opens on the most relevant page for the session, instead of always defaulting to the app's landing page.
 
-A new utility function `deriveSmartPreviewUrl` (in `lib/smart-preview-url.ts`) infers the best starting path from the session's initial request text using two strategies:
+A new utility function `deriveSmartPreviewUrl` (in `lib/smart-preview-url.ts`) infers the best starting path by scanning the **LLM's text output** events from the session log. The LLM typically summarises what it built at the end of its response, e.g.:
 
-1. **Explicit route detection** — scans the request for a mention of a known route path (e.g. "fix the `/chat` page", "update `/admin/logs`"). If found, the matched path (with any sub-path) is appended to the preview base URL.
+> "Done. The test page is at `/ansi-test` and offers: …"
 
-2. **Keyword matching** — falls back to a table of keyword phrases mapped to routes. For example, requests mentioning "admin panel", "server logs", or "rollback page" open `/admin`; requests mentioning "passkey" or "login flow" open `/login`; etc.
+The function collects all candidate path mentions across several regex patterns (backtick-quoted paths, markdown link targets, double/single-quoted paths, and contextual phrases like "at /path"), tags each with its position in the text, then returns the **last** one found — which is usually the most relevant summary statement.
 
-If neither strategy matches, the preview still opens on the landing page as before.
+Paths that are internal infrastructure (e.g. `/api/`, `/_next/`, `/lib/`, `/components/`) and paths that look like filenames (have file extensions) are excluded. If no valid path is found, the preview falls back to the landing page as before.
 
-The computation is applied once when the preview URL first becomes available, so the user's in-panel navigation is not affected. Both the inline (mobile) and sidebar (desktop) preview panels benefit from the change.
+The smart URL is computed from the `events` state array in `EvolveSessionView`. By the time the dev server is ready and the `WebPreviewPanel` mounts, the session events are complete, so the inferred path is stable. Both the inline (mobile) and sidebar (desktop) preview panels use the smart URL.
 
 ## Why
 
-Previously every session's Web Preview always started on the landing page regardless of what the request was about. For example, a request to "fix the /chat page styling" would open the landing page and the user would have to manually navigate. This change saves that navigation step and makes the preview immediately useful.
+Previously the Web Preview always started on the landing page regardless of what the session built. Matching against the initial request text was unreliable — requests describe what to change, not which URL to view. Matching against the LLM's output is far more accurate: the agent explicitly names the pages it creates or modifies in its summary messages.
