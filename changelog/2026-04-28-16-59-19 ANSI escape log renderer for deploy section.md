@@ -13,7 +13,7 @@ A React component that parses and renders terminal output containing ANSI escape
 
 The component uses a virtual-terminal model: it applies every `\r` and `\033[K` sequence to an internal character grid so that intermediate spinner frames are collapsed into their final state. The resulting `RenderedLine[]` array is then rendered as styled `<span>` elements.
 
-For the **last incomplete line while streaming** (i.e. the script is still running and hasn't yet written a `\n`), if that line starts with a shell spinner character (`\ | / -`), the component replaces it with an animated Braille-dot indicator (`⠋⠙⠹…`) that cycles at 80 ms per frame.
+Since install.sh output is streamed live as it arrives, each `\r`-overwrite update renders quickly enough without needing a separate React-side spinner animation. The component simply renders the current accumulated state of each line.
 
 ### `scripts/install.sh` — new `REPORT_STYLE=ansi` mode
 

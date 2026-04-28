@@ -522,7 +522,7 @@ function StructuredSection({
               Running…
             </span>
           </div>
-          {rawLog && <div className="px-4 py-3"><AnsiRenderer text={rawLog} isActive={true} /></div>}
+          {rawLog && <div className="px-4 py-3"><AnsiRenderer text={rawLog} /></div>}
         </div>
       );
     }

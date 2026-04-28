@@ -11,10 +11,9 @@
 //
 // The virtual-terminal model processes \r and \033[K sequences so that spinner
 // animation writes (which repeatedly overwrite the same line) reduce to their
-// final rendered state. For the last incomplete line while still streaming,
-// a CSS spinner replaces the leading spinner character (\ | / -).
+// final rendered state.
 
-import { useState, useEffect, useMemo } from "react";
+import { useMemo } from "react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -159,16 +158,6 @@ export function parseAnsi(raw: string): RenderedLine[] {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** The four characters the install.sh spinner cycles through. */
-const SPINNER_CHARS = new Set(["\\", "|", "/", "-"]);
-
-/** True when this is the last, incomplete line and it starts with a spinner char. */
-function isSpinnerLine(line: RenderedLine, isLastLine: boolean): boolean {
-  if (!isLastLine || line.complete) return false;
-  const firstChar = line.spans[0]?.text.charAt(0) ?? "";
-  return SPINNER_CHARS.has(firstChar);
-}
-
 function colorClass(color: AnsiColor): string {
   switch (color) {
     case "green":  return "text-green-400";
@@ -195,25 +184,6 @@ function SpanEl({ span }: { span: Span }) {
   return cls ? <span className={cls}>{span.text}</span> : <>{span.text}</>;
 }
 
-/** Animated Braille-dot spinner shown for in-progress terminal lines. */
-const BRAILLE_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-
-function SpinnerDot() {
-  const [frame, setFrame] = useState(0);
-  useEffect(() => {
-    const id = setInterval(
-      () => setFrame((f) => (f + 1) % BRAILLE_FRAMES.length),
-      80,
-    );
-    return () => clearInterval(id);
-  }, []);
-  return (
-    <span className="text-gray-400" aria-hidden="true">
-      {BRAILLE_FRAMES[frame]}
-    </span>
-  );
-}
-
 // ─── Public component ─────────────────────────────────────────────────────────
 
 interface AnsiRendererProps {
@@ -222,12 +192,6 @@ interface AnsiRendererProps {
    * Concatenate all log_line event contents in order — do not add separators.
    */
   text: string;
-  /**
-   * When true the stream is still live: the last incomplete line is treated as
-   * a spinner line and its leading spinner character is replaced with an
-   * animated Braille indicator.
-   */
-  isActive?: boolean;
   className?: string;
 }
 
@@ -237,7 +201,7 @@ interface AnsiRendererProps {
  * Designed for the output of `scripts/install.sh REPORT_STYLE=ansi` but
  * handles any text that uses the SGR / carriage-return / erase-EOL subset.
  */
-export function AnsiRenderer({ text, isActive = false, className }: AnsiRendererProps) {
+export function AnsiRenderer({ text, className }: AnsiRendererProps) {
   const lines = useMemo(() => parseAnsi(text), [text]);
 
   if (lines.length === 0) return null;
@@ -245,48 +209,14 @@ export function AnsiRenderer({ text, isActive = false, className }: AnsiRenderer
   return (
     <div className={`font-mono text-xs leading-5 ${className ?? ""}`}>
       {lines.map((line, li) => {
-        const isLast = li === lines.length - 1;
-        const isSpinner = isActive && isSpinnerLine(line, isLast);
-
-        // Empty completed line → thin vertical spacer
-        if (line.spans.length === 0 && line.complete) {
-          return <div key={li} className="h-[0.4em]" />;
-        }
-
-        // Empty incomplete last line while streaming → lone spinner dot
-        if (line.spans.length === 0 && !line.complete && isActive) {
-          return (
-            <div key={li} className="flex items-center gap-1">
-              <SpinnerDot />
-            </div>
-          );
-        }
-
-        // Empty line (not streaming) → nothing
+        // Empty line → thin vertical spacer
         if (line.spans.length === 0) {
           return <div key={li} className="h-[0.4em]" />;
         }
 
         return (
           <div key={li} className="flex items-center flex-wrap">
-            {isSpinner ? (
-              // Replace the leading spinner character with a live Braille dot,
-              // then render the rest of the spans normally.
-              <>
-                <SpinnerDot />
-                {line.spans.map((span, si) => {
-                  if (si === 0) {
-                    // Skip the first character (the spinner char `\ | / -`)
-                    const rest = span.text.slice(1);
-                    if (!rest) return null;
-                    return <SpanEl key={si} span={{ ...span, text: rest }} />;
-                  }
-                  return <SpanEl key={si} span={span} />;
-                })}
-              </>
-            ) : (
-              line.spans.map((span, si) => <SpanEl key={si} span={span} />)
-            )}
+            {line.spans.map((span, si) => <SpanEl key={si} span={span} />)}
           </div>
         );
       })}
