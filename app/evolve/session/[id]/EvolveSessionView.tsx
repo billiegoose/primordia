@@ -1197,50 +1197,9 @@ export default function EvolveSessionView({
           </div>
         )}
 
-        {/* Web preview card — header with URL + restart; inline iframe on mobile; logs collapsible */}
+        {/* Web preview card — inline iframe on mobile; server logs + restart collapsible */}
         {status === "ready" && (
           <div className="rounded-lg border border-emerald-700/50 bg-gray-900 text-sm overflow-hidden">
-            {/* Header: title, status dot, URL link, restart button */}
-            <div className="px-4 py-2.5 border-b border-gray-800 flex items-center gap-2.5 min-w-0">
-              <span className="font-semibold text-xs text-emerald-300 flex-shrink-0">🚀 Web Preview</span>
-              <span
-                title={proxyServerStatus === 'running' ? 'Running' :
-                       proxyServerStatus === 'starting' ? 'Starting…' :
-                       proxyServerStatus === 'stopped' ? 'Stopped' : 'Checking…'}
-                className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                  proxyServerStatus === 'running' ? 'bg-emerald-400' :
-                  proxyServerStatus === 'starting' ? 'bg-yellow-400 animate-pulse' :
-                  proxyServerStatus === 'stopped' ? 'bg-red-400' :
-                  'bg-gray-600'
-                }`}
-              />
-              {previewUrl && (
-                <a
-                  href={previewUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-emerald-400 hover:text-emerald-200 underline text-xs truncate flex-1 min-w-0"
-                >
-                  {previewUrl}
-                </a>
-              )}
-              {canEvolve && (
-                <button
-                  data-id="session/restart-preview"
-                  type="button"
-                  onClick={handleRestartServer}
-                  disabled={isRestartingServer || proxyServerStatus === "starting"}
-                  className="flex-shrink-0 text-xs text-gray-400 hover:text-gray-200 disabled:text-gray-600 transition-colors"
-                >
-                  {isRestartingServer || proxyServerStatus === "starting"
-                    ? "Starting…"
-                    : proxyServerStatus === "running"
-                    ? "↺ Restart"
-                    : "▶ Start"}
-                </button>
-              )}
-            </div>
-
             {restartError && (
               <p className="px-4 py-2 text-red-400 text-xs border-b border-gray-800">{restartError}</p>
             )}
@@ -1276,6 +1235,21 @@ export default function EvolveSessionView({
               <summary className="flex items-center gap-2 px-4 py-2 cursor-pointer select-none hover:bg-gray-800/40 transition-colors list-none text-xs">
                 <span className="text-gray-600 group-open:rotate-90 transition-transform">▶</span>
                 <span className="text-gray-500">🪵 Server logs</span>
+                {canEvolve && (
+                  <button
+                    data-id="session/restart-preview"
+                    type="button"
+                    onClick={(e) => { e.preventDefault(); handleRestartServer(); }}
+                    disabled={isRestartingServer || proxyServerStatus === "starting"}
+                    className="ml-auto text-xs text-gray-400 hover:text-gray-200 disabled:text-gray-600 transition-colors"
+                  >
+                    {isRestartingServer || proxyServerStatus === "starting"
+                      ? "Starting…"
+                      : proxyServerStatus === "running"
+                      ? "↺ Restart"
+                      : "▶ Start"}
+                  </button>
+                )}
               </summary>
               <div className="px-4 py-3 border-t border-gray-800">
                 {serverLogs ? (
