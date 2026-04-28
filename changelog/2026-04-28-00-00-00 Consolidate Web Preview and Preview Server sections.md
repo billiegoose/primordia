@@ -14,22 +14,25 @@ by removing all redundant chrome.
   even on desktop where the iframe already lived in the sidebar.
 
 **After:**
-- A single card replaces both, with no top title row.
-- The iframe is embedded directly in the card body at all screen sizes, with inline
-  "Starting preview…" and "Preview server stopped" states when the server isn't running.
-- A collapsible "🪵 Server logs" section sits at the bottom of the card
-  (auto-expanded when the server is stopped). The restart/start button lives in the
-  `<summary>` row, to the right of the "Server logs" label, so it doesn't open/close logs.
-- On **desktop** (`xl`+), when a preview URL is available the entire card (iframe + logs)
-  moves into the right-hand sidebar — replacing the previous split where the iframe lived
-  in the aside but the server logs stayed in the main column. The main column card is
-  hidden on desktop in this case (`xl:hidden`).
+- A single `WebPreviewCard` component replaces both, with no top title row.
+- The card contains two parts: an iframe/placeholder area and a collapsible
+  "🪵 Server logs" strip at the bottom (auto-expanded when stopped). The restart/start
+  button lives in the `<summary>` row to the right of the label.
+- Stopped/starting states use the same large circular play button on both mobile and
+  desktop — because it is literally the same component rendered in both places.
+- `WebPreviewPanel` gains a `noBorder` prop so it can sit inside `WebPreviewCard`'s own
+  green border without a double outline.
+- On **desktop** (`xl`+), when a preview URL is available the `WebPreviewCard` renders
+  inside the right-hand sidebar (`fullHeight=true`; `h-full flex-col` so the iframe fills
+  the remaining space). The main-column copy is hidden (`xl:hidden`).
+- On **mobile / tablet**, the same `WebPreviewCard` renders inline in the progress list
+  (`fullHeight=false`; 600 px fixed height matching the old `WebPreviewPanel` default).
 
 ## Why
 
 The two sections were redundant — the URL appeared in "Preview server" but was already
 the source of the iframe in "Web preview". The server status was shown as an explicit text
 label, but is implied by whether the iframe is loading. The title row added no information
-beyond what the iframe itself communicates. Keeping iframe and server logs together as one
-logical unit (even on desktop) is cleaner than splitting them across the main column and
-the sidebar.
+beyond what the iframe itself communicates. Extracting a single shared component ensures
+the mobile and desktop experiences are always identical, and keeps the iframe and server
+logs together as one logical unit regardless of where they are rendered.
