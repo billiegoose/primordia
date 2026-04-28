@@ -522,22 +522,8 @@ export async function POST(request: Request) {
           createdAt: session.createdAt,
           userId: user.id,
         };
-        const ndjsonPath = getSessionNdjsonPath(worktreePath);
-        if (fs.existsSync(ndjsonPath)) {
-          appendSessionEvent(ndjsonPath, {
-            type: 'section_start',
-            sectionType: 'followup',
-            label: '📦 Auto-committing uncommitted changes',
-            ts: Date.now(),
-          });
-          appendSessionEvent(ndjsonPath, {
-            type: 'followup_request',
-            request: 'commit changes',
-            attachments: [],
-            ts: Date.now(),
-          });
-        }
-        void runFollowupInWorktree(commitSession, commitPrompt, repoRoot, 'running-claude', /* onSuccess */ undefined, /* skipChangelog */ true);
+        // runFollowupInWorktree will emit the 'auto_commit' section_start itself.
+        void runFollowupInWorktree(commitSession, commitPrompt, repoRoot, 'running-claude', /* onSuccess */ undefined, /* skipChangelog */ true, /* attachmentPaths */ [], /* isAutoCommit */ true);
         return Response.json({ outcome: 'auto-committing' });
       }
 
