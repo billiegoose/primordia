@@ -40,7 +40,21 @@ const nextConfig: NextConfig = {
   // Tell Next.js not to bundle the pi coding agent SDK. It uses native modules
   // (e.g. @mariozechner/clipboard) that can't be processed by Turbopack/webpack.
   // Keeping it external means it runs in the Node.js server process as-is.
-  serverExternalPackages: ['@mariozechner/pi-coding-agent', '@mariozechner/pi-ai', '@mariozechner/clipboard'],
+  // All @mariozechner/* packages must be listed here so Turbopack treats every
+  // package in the namespace as a Node.js external rather than trying to bundle
+  // them.  Omitting sub-packages (pi-tui, pi-agent-core, jiti, the native
+  // clipboard binaries) causes Turbopack to generate content-hashed chunk IDs
+  // for them that the runtime then cannot resolve.
+  serverExternalPackages: [
+    '@mariozechner/pi-coding-agent',
+    '@mariozechner/pi-ai',
+    '@mariozechner/pi-tui',
+    '@mariozechner/pi-agent-core',
+    '@mariozechner/jiti',
+    '@mariozechner/clipboard',
+    '@mariozechner/clipboard-linux-x64-gnu',
+    '@mariozechner/clipboard-linux-x64-musl',
+  ],
 
   // Tell webpack not to bundle bun:sqlite. It's only available at runtime in
   // the Bun environment. The sqlite adapter is always used (no Neon fallback).

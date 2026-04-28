@@ -9,15 +9,15 @@
 //   - On each tick, all enabled sources with fetchFrequency !== "never" are
 //     checked. If more than `frequencyMs[frequency]` time has elapsed since
 //     `lastFetchedAt`, the source is fetched.
-//   - Only `git fetch` is performed — no auto-apply. Whether the fetched commits
-//     become available for merging depends on each source's `fetchDelayDays`
-//     setting (handled in buildSourceStatus when the admin views the page).
+//   - Only `git fetch` is performed — no auto-apply. The delay is applied at
+//     fetch time: the tracking branch is advanced only to the most recent commit
+//     older than fetchDelayDays, so the tracking branch always points to the
+//     "safe" tip with no further post-processing needed.
 //   - Errors are logged but never crash the scheduler.
 //   - The scheduler is a singleton: calling startUpdateSourceScheduler() more
 //     than once is a no-op (idempotent).
 
-import { execFileSync } from "child_process";
-import { readSources, setLastFetchedAt, type UpdateSource } from "./update-sources";
+import { readSources, setLastFetchedAt, fetchSourceUpdates, type UpdateSource } from "./update-sources";
 
 // ─── Frequency → milliseconds ─────────────────────────────────────────────────
 
@@ -78,56 +78,17 @@ function runSchedulerTick(repoRoot: string): void {
     if (elapsed < intervalMs) continue;
 
     // This source is due for a fetch.
-    try {
-      fetchSourceForScheduler(source, repoRoot);
+    const fetchError = fetchSourceUpdates(source, repoRoot);
+    if (fetchError) {
+      console.error(
+        `[update-source-scheduler] Fetch failed for ${source.id}: ${fetchError}`,
+      );
+    } else {
       setLastFetchedAt(repoRoot, source.id, now);
       console.log(`[update-source-scheduler] Fetched ${source.id} (${source.fetchFrequency})`);
-    } catch (err) {
-      console.error(
-        `[update-source-scheduler] Fetch failed for ${source.id}:`,
-        err instanceof Error ? err.message : String(err),
-      );
     }
   }
 }
 
-// ─── Git fetch ────────────────────────────────────────────────────────────────
-
-/**
- * Run `git fetch` for a single source, updating its local tracking branch.
- * Throws on failure so the caller can log and record the error.
- */
-function fetchSourceForScheduler(source: UpdateSource, repoRoot: string): void {
-  // Ensure the remote exists before trying to fetch (it may have been manually removed).
-  const remotes = execFileSync("git", ["remote"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  })
-    .trim()
-    .split("\n")
-    .map((r) => r.trim());
-
-  if (!remotes.includes(source.id)) {
-    execFileSync("git", ["remote", "add", source.id, source.url], {
-      cwd: repoRoot,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-  }
-
-  execFileSync(
-    "git",
-    [
-      "fetch",
-      "--no-tags",
-      source.id,
-      `refs/heads/main:refs/heads/${source.trackingBranch}`,
-    ],
-    {
-      cwd: repoRoot,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
-}
+// All fetch logic (including delay handling) lives in lib/update-sources.ts
+// via fetchSourceUpdates(). No local git helpers needed here.

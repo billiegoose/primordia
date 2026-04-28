@@ -61,16 +61,6 @@ function branchExists(name: string): boolean {
   return gitSafe(["branch", "--list", name]).stdout.trim().length > 0;
 }
 
-function getEffectiveTip(trackingBranch: string, delayDays: number): string | null {
-  if (delayDays <= 0) {
-    const r = gitSafe(["rev-parse", trackingBranch]);
-    return r.code === 0 && r.stdout ? r.stdout.trim() : null;
-  }
-  const before = `${delayDays} days ago`;
-  const r = gitSafe(["log", `--before=${before}`, "--format=%H", "-1", trackingBranch]);
-  return r.code === 0 && r.stdout.trim() ? r.stdout.trim() : null;
-}
-
 function getMergeBase(ref1: string, ref2: string): string | null {
   const r = gitSafe(["merge-base", ref1, ref2]);
   return r.code === 0 && r.stdout ? r.stdout.trim() : null;
@@ -81,10 +71,10 @@ function getAheadCount(mergeBase: string, tipRef: string): number {
   return r.code === 0 ? parseInt(r.stdout.trim() || "0", 10) : 0;
 }
 
-function getNewChangelogEntries(mergeBase: string, tipRef: string, trackingBranch: string): ChangelogEntry[] {
+function getNewChangelogEntries(mergeBase: string, trackingBranch: string): ChangelogEntry[] {
   const r = gitSafe([
     "diff", "--name-only", "--diff-filter=A",
-    `${mergeBase}..${tipRef}`, "--", "changelog/",
+    `${mergeBase}..${trackingBranch}`, "--", "changelog/",
   ]);
   if (r.code !== 0 || !r.stdout.trim()) return [];
 
@@ -99,44 +89,20 @@ function getNewChangelogEntries(mergeBase: string, tipRef: string, trackingBranc
   return entries;
 }
 
+// The delay is applied at fetch time (fetchSourceUpdates), so the tracking
+// branch already points to the safe tip. No getEffectiveTip needed here.
 function buildSourceStatuses(): SourceStatus[] {
   const sources = readSources(process.cwd());
   return sources.map((source) => {
     const remoteConfigured = remoteExists(source.id);
     const trackingBranchExists = branchExists(source.trackingBranch);
-
-    if (!trackingBranchExists) {
-      return {
-        ...source,
-        remoteConfigured,
-        trackingBranchExists,
-        aheadCount: 0,
-        mergeBase: null,
-        changelogEntries: [],
-        hasUpdates: false,
-        fetchError: null,
-      } satisfies SourceStatus;
-    }
-
-    const effectiveTip = getEffectiveTip(source.trackingBranch, source.fetchDelayDays);
-    if (!effectiveTip) {
-      return {
-        ...source,
-        remoteConfigured,
-        trackingBranchExists,
-        aheadCount: 0,
-        mergeBase: null,
-        changelogEntries: [],
-        hasUpdates: false,
-        fetchError: null,
-      } satisfies SourceStatus;
-    }
-
-    const mergeBase = getMergeBase("main", effectiveTip);
-    const aheadCount = mergeBase ? getAheadCount(mergeBase, effectiveTip) : 0;
+    const mergeBase = trackingBranchExists
+      ? getMergeBase("main", source.trackingBranch)
+      : null;
+    const aheadCount = mergeBase ? getAheadCount(mergeBase, source.trackingBranch) : 0;
     const changelogEntries =
       mergeBase && aheadCount > 0
-        ? getNewChangelogEntries(mergeBase, effectiveTip, source.trackingBranch)
+        ? getNewChangelogEntries(mergeBase, source.trackingBranch)
         : [];
     return {
       ...source,

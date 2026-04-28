@@ -99,6 +99,31 @@ const BUILTIN_SOURCE: UpdateSource = {
   lastFetchedAt: null,
 };
 
+// ─── Low-level git helpers ───────────────────────────────────────────────────
+
+/** Run a git command and return stdout. Throws on non-zero exit. */
+function gitRun(args: string[], repoRoot: string): string {
+  const r = spawnSync("git", args, { cwd: repoRoot, encoding: "utf8" });
+  if (r.status !== 0) throw new Error(r.stderr?.trim() || `git ${args[0]} failed`);
+  return r.stdout?.trim() ?? "";
+}
+
+/** Run a git command silently, ignoring failures. */
+function gitRunSafe(args: string[], repoRoot: string): void {
+  spawnSync("git", args, { cwd: repoRoot, encoding: "utf8" });
+}
+
+/** Ensure a git remote exists with the given URL. Creates or corrects it. */
+function ensureRemote(id: string, url: string, repoRoot: string): void {
+  const existing = gitGet(`remote.${id}.url`, repoRoot);
+  if (!existing) {
+    const r = spawnSync("git", ["remote", "add", id, url], { cwd: repoRoot, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git remote add ${id} failed: ${r.stderr?.trim()}`);
+  } else if (existing !== url) {
+    spawnSync("git", ["remote", "set-url", id, url], { cwd: repoRoot, encoding: "utf8" });
+  }
+}
+
 // ─── Low-level git config helpers ─────────────────────────────────────────────
 
 function gitGet(key: string, repoRoot: string): string | null {
@@ -317,6 +342,81 @@ export function setLastFetchedAt(repoRoot: string, id: string, timestampMs: numb
 export function getLastFetchedAt(repoRoot: string, id: string): number {
   const raw = gitGet(`remote.${id}.lastFetchedAt`, repoRoot);
   return raw ? parseInt(raw, 10) || 0 : 0;
+}
+
+// ─── Fetch with delay ─────────────────────────────────────────────────────────
+
+/**
+ * Fetch a single update source, applying the delay filter at fetch time.
+ *
+ * The core idea: the tracking branch always points to the "safe" commit — no
+ * post-processing is needed when reading status. Callers can treat the tracking
+ * branch tip as the effective tip directly.
+ *
+ * When fetchDelayDays === 0:
+ *   A straight `git fetch` advances the tracking branch to the upstream tip.
+ *
+ * When fetchDelayDays > 0:
+ *   1. Fetch the full upstream to a temporary `{trackingBranch}-incoming` branch.
+ *   2. Find the most recent commit on that branch whose committer date is at
+ *      least fetchDelayDays days old (via `git log --before`).
+ *   3. If such a commit exists, advance the tracking branch to it (force-update).
+ *      If not (all upstream commits are newer than the delay window), leave the
+ *      tracking branch where it is — it already points to the last "safe" commit.
+ *   4. Delete the temp branch regardless.
+ *
+ * Returns null on success, or an error message string on failure.
+ */
+export function fetchSourceUpdates(source: UpdateSource, repoRoot: string): string | null {
+  try {
+    ensureRemote(source.id, source.url, repoRoot);
+
+    if (source.fetchDelayDays <= 0) {
+      // Simple path: fetch directly to tracking branch.
+      gitRun(
+        ["fetch", "--no-tags", source.id,
+          `refs/heads/main:refs/heads/${source.trackingBranch}`],
+        repoRoot,
+      );
+      return null;
+    }
+
+    // Delayed path: fetch to a staging branch, then find the safe commit.
+    const tmpBranch = `${source.trackingBranch}-incoming`;
+
+    // Remove any leftover temp branch from a previous interrupted fetch.
+    gitRunSafe(["branch", "-D", tmpBranch], repoRoot);
+
+    try {
+      gitRun(
+        ["fetch", "--no-tags", source.id,
+          `refs/heads/main:refs/heads/${tmpBranch}`],
+        repoRoot,
+      );
+
+      // Find the latest commit on tmpBranch that is old enough.
+      const before = `${source.fetchDelayDays} days ago`;
+      const r = spawnSync(
+        "git", ["log", `--before=${before}`, "--format=%H", "-1", tmpBranch],
+        { cwd: repoRoot, encoding: "utf8" },
+      );
+      const safeCommit = r.status === 0 ? r.stdout.trim() : "";
+
+      if (safeCommit) {
+        // Advance (or create) the tracking branch to the delayed commit.
+        gitRun(["branch", "-f", source.trackingBranch, safeCommit], repoRoot);
+      }
+      // If safeCommit is empty: all upstream commits are newer than the delay
+      // window. Leave the tracking branch as-is (preserves the last safe tip).
+    } finally {
+      // Always clean up the staging branch.
+      gitRunSafe(["branch", "-D", tmpBranch], repoRoot);
+    }
+
+    return null;
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
 }
 
 // ─── Private helpers ──────────────────────────────────────────────────────────
