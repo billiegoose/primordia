@@ -55,7 +55,7 @@ primordia/
 │   ├── update-service.sh         ← Run automatically on every blue-green prod deploy; updates ~/primordia-proxy.ts and the systemd symlink only when they changed; runs daemon-reload only if the service unit changed; runs systemctl restart primordia-proxy only if the proxy script changed
 │   ├── reverse-proxy.ts          ← HTTP reverse proxy for zero-downtime blue/green AND preview servers; listens on REVERSE_PROXY_PORT; reads production branch from git config (primordia.productionBranch), then looks up branch.{name}.port; discovers main repo from any worktree in PRIMORDIA_WORKTREES_DIR; on startup spawns the production Next.js server if not already running and tracks the process; captures prod server stdout/stderr in a 50 KB ring buffer; exposes POST /_proxy/prod/spawn (SSE, body: { branch }) — looks up port and worktree path from git config/worktree list, then spawns, health-checks, updates git config, and SIGTERMs old server; exposes GET /_proxy/prod/logs (SSE) — streams prod server log buffer + live output; watches .git/config for instant cutover; routes /preview/{branchName} paths to session preview servers (branches with slashes not supported); installed to ~/primordia-proxy.ts by install-service.sh
 │   ├── assign-branch-ports.sh    ← Idempotent migration script: assigns ephemeral ports to all local branches in git config (branch.{name}.port); main gets 3001, others get 3002+
-│   ├── rollback.ts               ← Standalone CLI rollback script: updates primordia.productionBranch to the previous slot (second entry in primordia.productionHistory) and restarts primordia-proxy; use when the server itself is broken and /api/rollback is unreachable
+│   ├── rollback.ts               ← Standalone CLI rollback script: updates primordia.productionBranch to the previous slot (second entry in primordia.productionHistory) and restarts primordia-proxy; use when the server itself is broken and /api/admin/rollback is unreachable
 │   └── primordia-proxy.service   ← systemd service unit for the reverse proxy; WorkingDirectory=/home/exedev/primordia; is the sole long-running service — responsible for starting the production Next.js server on boot and routing all traffic
 │
 ├── public/
@@ -117,8 +117,6 @@ primordia/
 │       │   └── route.ts           ← Streams Claude responses via SSE
 │       ├── check-keys/
 │       │   └── route.ts           ← Returns list of missing required env vars (called on page load)
-│       ├── rollback/
-│       │   └── route.ts           ← GET hasPrevious check; POST zero-downtime swap to previous slot (admin only)
 │       ├── llm-key/public-key/
 │       │   └── route.ts           ← GET server's ephemeral RSA-OAEP public key as JWK
 │       ├── prune-branches/
@@ -145,7 +143,6 @@ primordia/
 │   ├── changelog/route.ts         ← GET ?filename=...: returns raw markdown body of one changelog file (lazy-load)
 │   ├── chat/route.ts              ← Streams Claude responses via SSE
 │   ├── check-keys/route.ts        ← Returns list of missing required env vars (called on page load)
-│   ├── rollback/route.ts          ← GET hasPrevious check; POST zero-downtime swap to previous slot (admin only)
 │   ├── llm-key/public-key/route.ts ← GET server's ephemeral RSA-OAEP public key as JWK
 │   ├── prune-branches/route.ts    ← POST delete all local branches merged into main; streams SSE progress
 │   ├── git/[...path]/route.ts      ← GET/POST git http-backend proxy (read-only clone/fetch); push (receive-pack) blocked with 403
