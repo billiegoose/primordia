@@ -1206,17 +1206,34 @@ export default function EvolveSessionView({
           <div className="rounded-lg border border-emerald-700/50 bg-gray-900 text-sm overflow-hidden">
             <div className="px-4 py-2.5 border-b border-gray-800 flex items-center justify-between">
               <span className="font-semibold text-xs text-emerald-300">🚀 Preview server</span>
-              <span className={`text-xs ${
-                proxyServerStatus === 'running' ? 'text-emerald-400' :
-                proxyServerStatus === 'starting' ? 'text-yellow-400 animate-pulse' :
-                proxyServerStatus === 'stopped' ? 'text-red-400' :
-                'text-gray-500'
-              }`}>
-                {proxyServerStatus === 'running' ? 'Running' :
-                 proxyServerStatus === 'starting' ? 'Starting…' :
-                 proxyServerStatus === 'stopped' ? 'Stopped' :
-                 'Checking…'}
-              </span>
+              <div className="flex items-center gap-3">
+                <span className={`text-xs ${
+                  proxyServerStatus === 'running' ? 'text-emerald-400' :
+                  proxyServerStatus === 'starting' ? 'text-yellow-400 animate-pulse' :
+                  proxyServerStatus === 'stopped' ? 'text-red-400' :
+                  'text-gray-500'
+                }`}>
+                  {proxyServerStatus === 'running' ? 'Running' :
+                   proxyServerStatus === 'starting' ? 'Starting…' :
+                   proxyServerStatus === 'stopped' ? 'Stopped' :
+                   'Checking…'}
+                </span>
+                {canEvolve && (
+                  <button
+                    data-id="session/restart-preview"
+                    type="button"
+                    onClick={handleRestartServer}
+                    disabled={isRestartingServer || proxyServerStatus === "starting"}
+                    className="text-xs text-gray-400 hover:text-gray-200 disabled:text-gray-600 transition-colors"
+                  >
+                    {isRestartingServer || proxyServerStatus === "starting"
+                      ? "Starting…"
+                      : proxyServerStatus === "running"
+                      ? "↺ Restart preview"
+                      : "▶ Start preview"}
+                  </button>
+                )}
+              </div>
             </div>
             {previewUrl && (
               <div className="px-4 py-3 border-b border-gray-800">
@@ -1230,6 +1247,9 @@ export default function EvolveSessionView({
                 </a>
                 <span className="text-gray-500 text-xs ml-2">(starts on first visit)</span>
               </div>
+            )}
+            {restartError && (
+              <p className="px-4 py-2 text-red-400 text-xs border-b border-gray-800">{restartError}</p>
             )}
             {serverLogs && (
               <details className="group" open={proxyServerStatus === 'stopped'}>
@@ -1338,28 +1358,11 @@ export default function EvolveSessionView({
               >
                 {isAborting ? "Aborting…" : "⏹ Abort"}
               </button>
-            ) : status === "ready" ? (
-              <button
-                data-id="session/restart-preview"
-                type="button"
-                onClick={handleRestartServer}
-                disabled={isRestartingServer || proxyServerStatus === "starting"}
-                className="text-xs text-gray-400 hover:text-gray-200 disabled:text-gray-600 transition-colors"
-              >
-                {isRestartingServer || proxyServerStatus === "starting"
-                  ? "Starting…"
-                  : proxyServerStatus === "running"
-                  ? "↺ Restart preview"
-                  : "▶ Start preview"}
-              </button>
             ) : null}
           </div>
 
           {abortError && (
             <p className="px-4 py-2 text-red-400 text-xs border-b border-gray-700">{abortError}</p>
-          )}
-          {restartError && (
-            <p className="px-4 py-2 text-red-400 text-xs border-b border-gray-700">{restartError}</p>
           )}
 
           {/* ── Button row (or fixing-types indicator) ── */}
