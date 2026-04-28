@@ -265,6 +265,11 @@ export async function POST(request: Request) {
   return Response.json({ sessionId });
 }
 
+/**
+ * Poll evolve session status
+ * @description Returns the current status, port, preview URL, branch, and original request for a session. Pass `sessionId` as a query parameter.
+ * @tag Evolve
+ */
 export async function GET(request: Request) {
   const user = await getSessionUser();
   if (!user) {

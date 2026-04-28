@@ -83,6 +83,11 @@ export async function POST(request: Request) {
   }
 }
 
+/**
+ * Remove the push mirror remote
+ * @description Removes the 'mirror' git remote. Admin only.
+ * @tag Admin
+ */
 export async function DELETE() {
   const user = await getSessionUser();
   if (!user) return Response.json({ error: "Authentication required" }, { status: 401 });

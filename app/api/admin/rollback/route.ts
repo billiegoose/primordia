@@ -67,6 +67,11 @@ function findFreePort(): Promise<number> {
   });
 }
 
+/**
+ * List rollback targets
+ * @description Returns the current production branch and the list of previous production slots available for rollback. Admin only.
+ * @tag Admin
+ */
 export async function GET() {
   const user = await getSessionUser();
   if (!user) return Response.json({ error: 'Authentication required' }, { status: 401 });

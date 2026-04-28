@@ -40,6 +40,11 @@ function writeGitConfig(key: string, value: string, repoRoot: string): boolean {
   return result.status === 0;
 }
 
+/**
+ * Get proxy settings
+ * @description Returns the current reverse-proxy tuning configuration (with defaults if not set). Admin only.
+ * @tag Admin
+ */
 export async function GET() {
   const user = await getSessionUser();
   if (!user) return Response.json({ error: 'Authentication required' }, { status: 401 });

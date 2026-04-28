@@ -18,6 +18,11 @@ import { getDb } from '@/lib/db';
 
 const PREF_KEY = 'encrypted_api_key';
 
+/**
+ * Get stored encrypted API key
+ * @description Returns the stored AES-GCM encrypted API key ciphertext for the authenticated user, or `null` if none is set.
+ * @tag Llm-key
+ */
 export async function GET() {
   const user = await getSessionUser();
   if (!user) return Response.json({ error: 'Authentication required' }, { status: 401 });
@@ -72,6 +77,11 @@ export async function POST(req: Request) {
   return Response.json({ ok: true });
 }
 
+/**
+ * Delete stored encrypted API key
+ * @description Removes the stored encrypted API key for the authenticated user.
+ * @tag Llm-key
+ */
 export async function DELETE() {
   const user = await getSessionUser();
   if (!user) return Response.json({ error: 'Authentication required' }, { status: 401 });
