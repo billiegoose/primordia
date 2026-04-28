@@ -7,7 +7,7 @@
 // passes it down as a prop.
 
 import Link from "next/link";
-import { MessageSquare, RefreshCw, GitBranch, ChevronDown } from "lucide-react";
+import { RefreshCw, GitBranch, ChevronDown } from "lucide-react";
 import { ChangelogNewsticker } from "./ChangelogNewsticker";
 import InstallBlock from "./InstallBlock";
 import { createNameId } from "mnemonic-id";
@@ -15,15 +15,6 @@ import { createNameId } from "mnemonic-id";
 // ── Feature card data ────────────────────────────────────────────────────────
 
 const FEATURES = [
-  {
-    icon: <MessageSquare size={28} strokeWidth={1.5} aria-hidden="true" />,
-    accent: "text-blue-400",
-    ring: "ring-blue-500/20",
-    bg: "bg-blue-500/5",
-    title: "AI Chat",
-    description:
-      "Talk to Claude — Anthropic's latest model — directly in your browser. Ask questions, explore ideas, or just have a conversation.",
-  },
   {
     icon: <RefreshCw size={28} strokeWidth={1.5} aria-hidden="true" />,
     accent: "text-violet-400",
@@ -47,10 +38,9 @@ const FEATURES = [
 // ── How-it-works steps ───────────────────────────────────────────────────────
 
 const STEPS = [
-  { n: "01", label: "Chat", detail: "Ask Primordia anything using the built-in AI chat." },
-  { n: "02", label: "Propose", detail: "See something you'd like to change? Open the menu and propose it." },
-  { n: "03", label: "Review", detail: "Claude Code writes the code and spins up a live preview — inspect it in your browser." },
-  { n: "04", label: "Accept", detail: "Accept the change, and your app updates itself — instantly." },
+  { n: "01", label: "Propose", detail: "See something you'd like to change? Open the menu and propose it." },
+  { n: "02", label: "Review", detail: "Claude Code writes the code and spins up a live preview — inspect it in your browser." },
+  { n: "03", label: "Accept", detail: "Accept the change, and your app updates itself — instantly." },
 ];
 
 // ── Sections ─────────────────────────────────────────────────────────────────
@@ -243,7 +233,6 @@ export function LandingFooter() {
       <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-gray-500 font-mono">
         <span>Primordia — the self-modifying web application</span>
         <div className="flex items-center gap-6">
-          <Link data-id="landing/footer-chat" href="/chat" className="hover:text-gray-300 transition-colors">Chat</Link>
           <Link data-id="landing/footer-evolve" href="/evolve" className="hover:text-gray-300 transition-colors">Evolve</Link>
           <Link data-id="landing/footer-changelog" href="/changelog" className="hover:text-gray-300 transition-colors">Changelog</Link>
           <Link data-id="landing/footer-login" href="/login" className="hover:text-gray-300 transition-colors">Login</Link>

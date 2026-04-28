@@ -1,12 +1,12 @@
 "use client";
 
 // components/HamburgerMenu.tsx
-// Reusable hamburger menu button + dropdown. Used by ChatInterface, EvolveForm,
+// Reusable hamburger menu button + dropdown. Used by EvolveForm,
 // EvolveSessionView, and PageNavBar. Manages open/close state and click-outside
 // behaviour internally; callers pass the session user and page-specific items.
 //
-// buildStandardMenuItems() returns the shared navigation items (Go to chat,
-// Propose a change, Admin) used by every primary app page,
+// buildStandardMenuItems() returns the shared navigation items (Propose a change,
+// Branches, Admin) used by every primary app page,
 // so callers don't have to duplicate the icon JSX. Pass `currentPath` to
 // suppress the link to whichever page the user is already on.
 
@@ -14,7 +14,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { SessionUser } from "../lib/hooks";
-import { MessageSquare, Edit, Shield, X, Menu, LogOut, LogIn, Key, GitBranch } from "lucide-react";
+import { Edit, Shield, X, Menu, LogOut, LogIn, Key, GitBranch } from "lucide-react";
 import { ApiKeyDialog } from "./ApiKeyDialog";
 
 export type { SessionUser };
@@ -41,7 +41,7 @@ interface HamburgerMenuProps {
 }
 
 /**
- * Returns the standard set of navigation items (Go to chat, Propose a change,
+ * Returns the standard set of navigation items (Propose a change, Branches,
  * Admin) shared by all primary app pages. Any item whose `href` matches
  * `currentPath` is omitted, so the menu never links to the page you're already on.
  */
@@ -56,13 +56,6 @@ export function buildStandardMenuItems({
   onEvolveClick?: () => void;
 }): MenuItem[] {
   const items: MenuItem[] = [
-    {
-      label: "Go to chat",
-      hoverColor: "hover:text-blue-400",
-      href: "/chat",
-      dataId: "nav-menu/go-to-chat",
-      icon: <MessageSquare size={16} strokeWidth={2} aria-hidden="true" />,
-    },
     {
       label: "Propose a change",
       hoverColor: "hover:text-amber-400",
