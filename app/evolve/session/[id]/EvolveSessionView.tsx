@@ -5,7 +5,7 @@
 // Streams live Claude Code progress via SSE from /api/evolve/stream.
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { GitBranch, Loader2 } from "lucide-react";
+import { GitBranch, Loader2, FileText } from "lucide-react";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { NavHeader } from "@/components/NavHeader";
 
@@ -33,9 +33,10 @@ interface SectionMetrics {
 }
 
 function formatDuration(ms: number): string {
-  return ms >= 60_000
-    ? `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`
-    : `${(ms / 1000).toFixed(1)}s`;
+  const totalSec = Math.round(ms / 1000);
+  const mins = Math.floor(totalSec / 60);
+  const secs = totalSec % 60;
+  return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
 }
 
 function MetricsRow({ metrics }: { metrics: SectionMetrics }) {
@@ -271,9 +272,6 @@ function RunningAgentSection({ events, label, isTypeFixSection, isAutoCommitSect
       <div className="px-4 py-2.5 border-b border-gray-800 flex items-center gap-2">
         <span className={`font-semibold text-xs ${headingClass}`}>{runningLabel}</span>
         <span className="ml-auto flex items-center gap-1.5 text-gray-500 text-xs">
-          {elapsed > 0 && (
-            <span className="font-mono">{formatDuration(elapsed)}</span>
-          )}
           <span className="flex items-center gap-1.5 animate-pulse">
             <span className="w-1.5 h-1.5 rounded-full bg-current inline-block" />
           </span>
@@ -414,11 +412,13 @@ function DoneAgentSection({ events, label, isTypeFixSection, isAutoCommitSection
 }
 
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.avif', '.bmp', '.ico']);
+const MARKDOWN_EXTENSIONS = new Set(['.md', '.markdown']);
 
 function AttachmentChip({ name, sessionId }: { name: string; sessionId: string }) {
   const url = withBasePath(`/api/evolve/attachment/${encodeURIComponent(sessionId)}?file=${encodeURIComponent(name)}`);
   const ext = name.includes('.') ? ('.' + name.split('.').pop()!.toLowerCase()) : '';
   const isImage = IMAGE_EXTENSIONS.has(ext);
+  const isMarkdown = MARKDOWN_EXTENSIONS.has(ext);
   return (
     <a
       href={url}
@@ -430,6 +430,9 @@ function AttachmentChip({ name, sessionId }: { name: string; sessionId: string }
       {isImage && (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={url} alt="" className="h-4 w-4 rounded object-cover flex-shrink-0" />
+      )}
+      {isMarkdown && (
+        <FileText size={12} className="flex-shrink-0 text-gray-400" aria-hidden="true" />
       )}
       <span className="truncate">{name}</span>
     </a>
