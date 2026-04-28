@@ -5,7 +5,7 @@
 // Streams live Claude Code progress via SSE from /api/evolve/stream.
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { GitBranch, Loader2, FileText } from "lucide-react";
+import { GitBranch, Loader2, FileText, Copy, Check } from "lucide-react";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { NavHeader } from "@/components/NavHeader";
 
@@ -610,6 +610,33 @@ interface EvolveSessionViewProps {
   initialCavemanIntensity?: import("@/lib/user-prefs").CavemanIntensity;
 }
 
+// ─── CopyBranchName ──────────────────────────────────────────────────────────
+
+function CopyBranchName({ branch }: { branch: string }) {
+  const [copied, setCopied] = useState(false);
+
+  function handleCopy() {
+    navigator.clipboard.writeText(branch).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <code className="font-mono text-amber-200 text-sm">{branch}</code>
+      <button
+        onClick={handleCopy}
+        title={copied ? "Copied!" : "Copy branch name"}
+        className="flex-shrink-0 p-1 rounded text-amber-500 hover:text-amber-200 hover:bg-amber-700/40 transition-colors"
+        aria-label={copied ? "Copied!" : "Copy branch name"}
+      >
+        {copied ? <Check size={14} /> : <Copy size={14} />}
+      </button>
+    </div>
+  );
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function EvolveSessionView({
@@ -1149,7 +1176,7 @@ export default function EvolveSessionView({
             "Created branch"
           )}
         </p>
-        <code className="font-mono text-amber-200 text-sm">{sessionBranch}</code>
+        <CopyBranchName branch={sessionBranch} />
 
         {/* Setup steps */}
         {!isSetupActive && setupSection && setupStepCount > 0 && (
