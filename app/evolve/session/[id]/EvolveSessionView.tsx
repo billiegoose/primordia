@@ -1606,10 +1606,27 @@ export default function EvolveSessionView({
         {proxyServerStatus === "running" ? (
           <WebPreviewPanel src={previewUrl!} fullHeight onElementSelected={handleElementSelected} />
         ) : (
-          <div className="flex flex-col flex-1 items-center justify-center gap-2 text-gray-500">
-            <span className={`text-sm ${proxyServerStatus === 'starting' ? 'animate-pulse' : ''}`}>
-              {proxyServerStatus === 'starting' ? '⏳ Starting preview server…' : '🔍 Checking preview server…'}
-            </span>
+          <div className="flex flex-col flex-1 items-center justify-center gap-4 text-gray-400">
+            {proxyServerStatus === 'starting' ? (
+              <>
+                <div className="w-20 h-20 rounded-full border-2 border-gray-600 flex items-center justify-center animate-pulse">
+                  <span className="text-3xl ml-1">▶</span>
+                </div>
+                <span className="text-sm text-gray-500">Starting preview…</span>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={handleRestartServer}
+                  disabled={isRestartingServer}
+                  className="w-20 h-20 rounded-full border-2 border-gray-500 hover:border-white hover:text-white flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <span className="text-3xl ml-1">▶</span>
+                </button>
+                <span className="text-sm">Start Preview</span>
+              </>
+            )}
           </div>
         )}
       </aside>
