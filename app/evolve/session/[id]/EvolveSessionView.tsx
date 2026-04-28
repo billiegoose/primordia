@@ -5,7 +5,7 @@
 // Streams live Claude Code progress via SSE from /api/evolve/stream.
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { GitBranch, Loader2, FileText, Copy, Check } from "lucide-react";
+import { GitBranch, Loader2, FileText, Copy, Check, RotateCw } from "lucide-react";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { NavHeader } from "@/components/NavHeader";
 
@@ -498,10 +498,17 @@ function StructuredSection({
       .map((e) => e.content.replace(/\n+$/, ''))
       .join('\n');
     const resultEvent = events.find((e): e is Extract<SessionEvent, { type: 'result' }> => e.type === 'result');
+    const decisionEvent = events.find((e): e is Extract<SessionEvent, { type: 'decision' }> => e.type === 'decision');
     const isProduction = label.includes("production");
     const mergedIntoBranch = !isProduction ? (label.match(/into `([^`]+)`/) ?? [])[1] ?? null : null;
 
-    if (isActive && !resultEvent) {
+    const hasDeployError = resultEvent?.subtype === 'error' || resultEvent?.subtype === 'timeout';
+    // A deploy section is only truly successful when a decision:accepted event
+    // is present in its events. Without one, the section was interrupted
+    // (e.g. type errors found mid-deploy, triggering a type_fix pass).
+    const hasDeploySuccess = !hasDeployError && decisionEvent?.action === 'accepted';
+
+    if (isActive && !hasDeploySuccess && !hasDeployError) {
       return (
         <div className="rounded-lg border border-gray-700 bg-gray-900 text-sm overflow-hidden">
           <div className="px-4 py-2.5 border-b border-gray-800 flex items-center gap-2">
@@ -515,8 +522,6 @@ function StructuredSection({
         </div>
       );
     }
-
-    const hasDeployError = resultEvent?.subtype === 'error' || resultEvent?.subtype === 'timeout';
 
     if (hasDeployError) {
       const errorMessage = (resultEvent?.message ?? 'The deploy failed with an unknown error.').replace(/^❌\s*/, '');
@@ -537,6 +542,21 @@ function StructuredSection({
               </div>
             </details>
           )}
+        </div>
+      );
+    }
+
+    if (!hasDeploySuccess) {
+      // Deploy section was interrupted before completion (type errors triggered
+      // an auto-fix pass). Show partial logs in a neutral style — the
+      // subsequent deploy section will show the final outcome.
+      return (
+        <div className="rounded-lg border border-gray-700 bg-gray-900 text-sm overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-gray-800 flex items-center gap-2">
+            <span className="font-semibold text-xs text-gray-400">{label}</span>
+            <span className="ml-auto text-gray-600 text-xs">paused — fixing type errors</span>
+          </div>
+          {logLines && <div className="px-4 py-3"><pre className="text-xs text-gray-500 whitespace-pre-wrap font-mono">{logLines}</pre></div>}
         </div>
       );
     }
@@ -572,6 +592,99 @@ function StructuredSection({
 }
 
 // ─── Props ────────────────────────────────────────────────────────────────────
+
+// Shared web-preview card: iframe/placeholder + server logs in one unit.
+// Used for both the inline (mobile) position and the desktop sidebar so the
+// two places are literally the same component.
+function WebPreviewCard({
+  fullHeight,
+  previewUrl,
+  proxyServerStatus,
+  serverLogs,
+  canEvolve,
+  isRestartingServer,
+  restartError,
+  onRestartServer,
+  onElementSelected,
+}: {
+  fullHeight: boolean;
+  previewUrl: string | null;
+  proxyServerStatus: 'starting' | 'running' | 'stopped' | 'unknown';
+  serverLogs: string;
+  canEvolve: boolean;
+  isRestartingServer: boolean;
+  restartError: string | null;
+  onRestartServer: () => void;
+  onElementSelected: (info: ElementSelection) => void;
+}) {
+  return (
+    <div className={`rounded-lg border border-emerald-700/50 bg-gray-900 text-sm overflow-hidden flex flex-col${fullHeight ? ' h-full' : ''}`}>
+      {restartError && (
+        <p className="px-4 py-2 text-red-400 text-xs border-b border-gray-800 flex-shrink-0">{restartError}</p>
+      )}
+
+      {/* Iframe / placeholder area */}
+      <div className={fullHeight ? 'flex-1 min-h-0' : ''}>
+        {proxyServerStatus === 'running' && previewUrl ? (
+          <WebPreviewPanel
+            src={previewUrl}
+            fullHeight={fullHeight}
+            onElementSelected={onElementSelected}
+          />
+        ) : (
+          <div className={`flex flex-col items-center justify-center gap-4${fullHeight ? ' h-full' : ' h-[600px]'}`}>
+            {proxyServerStatus === 'starting' ? (
+              <>
+                <div className="w-20 h-20 rounded-full border-2 border-yellow-600 text-yellow-400 flex items-center justify-center animate-pulse">
+                  <span className="text-3xl ml-1">▶</span>
+                </div>
+                <span className="text-sm text-yellow-600 animate-pulse">Starting preview…</span>
+              </>
+            ) : (
+              <>
+                <button
+                  data-id="session/start-preview"
+                  type="button"
+                  onClick={onRestartServer}
+                  disabled={isRestartingServer}
+                  className="w-20 h-20 rounded-full border-2 border-gray-500 hover:border-white text-gray-400 hover:text-white flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <span className="text-3xl ml-1">▶</span>
+                </button>
+                <span className="text-sm text-gray-400">Start Preview</span>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Server logs — always collapsible; auto-open when stopped */}
+      <details className="group flex-shrink-0 border-t border-emerald-700/50" open={proxyServerStatus === 'stopped'}>
+        <summary className="flex items-center gap-2 px-4 py-2 cursor-pointer select-none hover:bg-gray-800/40 transition-colors list-none text-xs">
+          <span className="text-gray-600 group-open:rotate-90 transition-transform">▶</span>
+          <span className="text-gray-500">🪵 Server logs</span>
+          {canEvolve && proxyServerStatus === 'running' && (
+            <button
+              data-id="session/restart-preview"
+              type="button"
+              onClick={(e) => { e.preventDefault(); onRestartServer(); }}
+              className="ml-auto flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors"
+            >
+              <RotateCw size={12} />Restart
+            </button>
+          )}
+        </summary>
+        <div className="px-4 py-3 border-t border-gray-800">
+          {serverLogs ? (
+            <pre className="text-xs text-gray-400 whitespace-pre-wrap font-mono overflow-x-auto max-h-48 overflow-y-auto">{serverLogs}</pre>
+          ) : (
+            <p className="text-xs text-gray-600 italic">No logs yet…</p>
+          )}
+        </div>
+      </details>
+    </div>
+  );
+}
 
 interface EvolveSessionViewProps {
   sessionId: string;
@@ -1224,76 +1337,20 @@ export default function EvolveSessionView({
           </div>
         )}
 
-        {/* Web preview — shown inline on mobile only; desktop uses sidebar */}
-        {status === "ready" && previewUrl && proxyServerStatus === "running" && (
-          <div className="xl:hidden">
-            <WebPreviewPanel src={previewUrl} onElementSelected={handleElementSelected} />
-          </div>
-        )}
-
-        {/* Preview server status + logs — shown when session is ready and proxy is managing the server */}
+        {/* Web preview card — hidden on desktop when sidebar is active (aside shows it there) */}
         {status === "ready" && (
-          <div className="rounded-lg border border-emerald-700/50 bg-gray-900 text-sm overflow-hidden">
-            <div className="px-4 py-2.5 border-b border-gray-800 flex items-center justify-between">
-              <span className="font-semibold text-xs text-emerald-300">🚀 Preview server</span>
-              <div className="flex items-center gap-3">
-                <span className={`text-xs ${
-                  proxyServerStatus === 'running' ? 'text-emerald-400' :
-                  proxyServerStatus === 'starting' ? 'text-yellow-400 animate-pulse' :
-                  proxyServerStatus === 'stopped' ? 'text-red-400' :
-                  'text-gray-500'
-                }`}>
-                  {proxyServerStatus === 'running' ? 'Running' :
-                   proxyServerStatus === 'starting' ? 'Starting…' :
-                   proxyServerStatus === 'stopped' ? 'Stopped' :
-                   'Checking…'}
-                </span>
-                {canEvolve && (
-                  <button
-                    data-id="session/restart-preview"
-                    type="button"
-                    onClick={handleRestartServer}
-                    disabled={isRestartingServer || proxyServerStatus === "starting"}
-                    className="text-xs text-gray-400 hover:text-gray-200 disabled:text-gray-600 transition-colors"
-                  >
-                    {isRestartingServer || proxyServerStatus === "starting"
-                      ? "Starting…"
-                      : proxyServerStatus === "running"
-                      ? "↺ Restart preview"
-                      : "▶ Start preview"}
-                  </button>
-                )}
-              </div>
-            </div>
-            {previewUrl && (
-              <div className="px-4 py-3 border-b border-gray-800">
-                <a
-                  href={previewUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-emerald-400 hover:text-emerald-200 underline break-all text-xs"
-                >
-                  {previewUrl}
-                </a>
-                <span className="text-gray-500 text-xs ml-2">(starts on first visit)</span>
-              </div>
-            )}
-            {restartError && (
-              <p className="px-4 py-2 text-red-400 text-xs border-b border-gray-800">{restartError}</p>
-            )}
-            <details className="group" open={proxyServerStatus === 'stopped'}>
-              <summary className="flex items-center gap-2 px-4 py-2 cursor-pointer select-none hover:bg-gray-800/40 transition-colors list-none text-xs">
-                <span className="text-gray-600 group-open:rotate-90 transition-transform">▶</span>
-                <span className="text-gray-500">🪵 Server logs</span>
-              </summary>
-              <div className="px-4 py-3 border-t border-gray-800">
-                {serverLogs ? (
-                  <pre className="text-xs text-gray-400 whitespace-pre-wrap font-mono overflow-x-auto max-h-64 overflow-y-auto">{serverLogs}</pre>
-                ) : (
-                  <p className="text-xs text-gray-600 italic">No logs yet…</p>
-                )}
-              </div>
-            </details>
+          <div className={showPreviewSidebar ? 'xl:hidden' : ''}>
+            <WebPreviewCard
+              fullHeight={false}
+              previewUrl={previewUrl}
+              proxyServerStatus={proxyServerStatus}
+              serverLogs={serverLogs}
+              canEvolve={canEvolve}
+              isRestartingServer={isRestartingServer}
+              restartError={restartError}
+              onRestartServer={handleRestartServer}
+              onElementSelected={handleElementSelected}
+            />
           </div>
         )}
 
@@ -1638,32 +1695,17 @@ export default function EvolveSessionView({
         containerRef={containerRef}
       />
       <aside className="hidden xl:flex xl:flex-col xl:flex-1 xl:sticky xl:top-0 xl:h-dvh bg-gray-950 p-4">
-        {proxyServerStatus === "running" ? (
-          <WebPreviewPanel src={previewUrl!} fullHeight onElementSelected={handleElementSelected} />
-        ) : (
-          <div className="flex flex-col flex-1 items-center justify-center gap-4 text-gray-400">
-            {proxyServerStatus === 'starting' ? (
-              <>
-                <div className="w-20 h-20 rounded-full border-2 border-gray-600 flex items-center justify-center animate-pulse">
-                  <span className="text-3xl ml-1">▶</span>
-                </div>
-                <span className="text-sm text-gray-500">Starting preview…</span>
-              </>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={handleRestartServer}
-                  disabled={isRestartingServer}
-                  className="w-20 h-20 rounded-full border-2 border-gray-500 hover:border-white hover:text-white flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <span className="text-3xl ml-1">▶</span>
-                </button>
-                <span className="text-sm">Start Preview</span>
-              </>
-            )}
-          </div>
-        )}
+        <WebPreviewCard
+          fullHeight
+          previewUrl={previewUrl}
+          proxyServerStatus={proxyServerStatus}
+          serverLogs={serverLogs}
+          canEvolve={canEvolve}
+          isRestartingServer={isRestartingServer}
+          restartError={restartError}
+          onRestartServer={handleRestartServer}
+          onElementSelected={handleElementSelected}
+        />
       </aside>
       </>
     )}
