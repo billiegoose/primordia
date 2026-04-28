@@ -61,14 +61,13 @@ function branchExists(name: string): boolean {
   return gitSafe(["branch", "--list", name]).stdout.trim().length > 0;
 }
 
-function getMergeBase(trackingBranch: string): string | null {
-  if (!branchExists(trackingBranch)) return null;
-  const r = gitSafe(["merge-base", "main", trackingBranch]);
+function getMergeBase(ref1: string, ref2: string): string | null {
+  const r = gitSafe(["merge-base", ref1, ref2]);
   return r.code === 0 && r.stdout ? r.stdout.trim() : null;
 }
 
-function getAheadCount(mergeBase: string, trackingBranch: string): number {
-  const r = gitSafe(["rev-list", "--count", `${mergeBase}..${trackingBranch}`]);
+function getAheadCount(mergeBase: string, tipRef: string): number {
+  const r = gitSafe(["rev-list", "--count", `${mergeBase}..${tipRef}`]);
   return r.code === 0 ? parseInt(r.stdout.trim() || "0", 10) : 0;
 }
 
@@ -90,15 +89,21 @@ function getNewChangelogEntries(mergeBase: string, trackingBranch: string): Chan
   return entries;
 }
 
+// The delay is applied at fetch time (fetchSourceUpdates), so the tracking
+// branch already points to the safe tip. No getEffectiveTip needed here.
 function buildSourceStatuses(): SourceStatus[] {
   const sources = readSources(process.cwd());
   return sources.map((source) => {
     const remoteConfigured = remoteExists(source.id);
     const trackingBranchExists = branchExists(source.trackingBranch);
-    const mergeBase = getMergeBase(source.trackingBranch);
+    const mergeBase = trackingBranchExists
+      ? getMergeBase("main", source.trackingBranch)
+      : null;
     const aheadCount = mergeBase ? getAheadCount(mergeBase, source.trackingBranch) : 0;
     const changelogEntries =
-      mergeBase && aheadCount > 0 ? getNewChangelogEntries(mergeBase, source.trackingBranch) : [];
+      mergeBase && aheadCount > 0
+        ? getNewChangelogEntries(mergeBase, source.trackingBranch)
+        : [];
     return {
       ...source,
       remoteConfigured,

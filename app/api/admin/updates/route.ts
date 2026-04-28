@@ -20,6 +20,9 @@
 // POST { action: "toggle-source", sourceId: string, enabled: boolean }
 //   Enables or disables a source.
 //
+// POST { action: "update-source-settings", sourceId: string, fetchFrequency: FetchFrequency, fetchDelayDays: number }
+//   Updates the fetch schedule and delay for a source.
+//
 // POST { action: "create-session", sourceId: string }
 //   Creates an evolve session to merge a source's tracking branch into main.
 //   Returns: { sessionId: string }
@@ -45,7 +48,10 @@ import {
   addSource,
   removeSource,
   setSourceEnabled,
+  setSourceSchedule,
+  fetchSourceUpdates,
   type UpdateSource,
+  type FetchFrequency,
 } from "@/lib/update-sources";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -104,14 +110,13 @@ function branchExists(name: string): boolean {
   return gitSafe(["branch", "--list", name]).stdout.trim().length > 0;
 }
 
-function getMergeBase(trackingBranch: string): string | null {
-  if (!branchExists(trackingBranch)) return null;
-  const r = gitSafe(["merge-base", "main", trackingBranch]);
+function getMergeBase(ref1: string, ref2: string): string | null {
+  const r = gitSafe(["merge-base", ref1, ref2]);
   return r.code === 0 && r.stdout ? r.stdout.trim() : null;
 }
 
-function getAheadCount(mergeBase: string, trackingBranch: string): number {
-  const r = gitSafe(["rev-list", "--count", `${mergeBase}..${trackingBranch}`]);
+function getAheadCount(mergeBase: string, tipRef: string): number {
+  const r = gitSafe(["rev-list", "--count", `${mergeBase}..${tipRef}`]);
   return r.code === 0 ? parseInt(r.stdout.trim() || "0", 10) : 0;
 }
 
@@ -133,10 +138,12 @@ function getNewChangelogEntries(mergeBase: string, trackingBranch: string): Chan
   return entries;
 }
 
+// The delay is applied at fetch time (fetchSourceUpdates), so the tracking
+// branch always points to the safe tip. buildSourceStatus uses it directly.
 function buildSourceStatus(source: UpdateSource): SourceStatus {
   const remoteConfigured = remoteExists(source.id);
   const trackingBranchExists = branchExists(source.trackingBranch);
-  const mergeBase = getMergeBase(source.trackingBranch);
+  const mergeBase = trackingBranchExists ? getMergeBase("main", source.trackingBranch) : null;
   const aheadCount = mergeBase ? getAheadCount(mergeBase, source.trackingBranch) : 0;
   const changelogEntries =
     mergeBase && aheadCount > 0
@@ -155,29 +162,15 @@ function buildSourceStatus(source: UpdateSource): SourceStatus {
 }
 
 /**
- * Fetch a single source.
- * If the git remote was manually removed, recreates it from the stored URL.
+ * Fetch a single source, applying the delay at fetch time.
  * Returns the updated status, with fetchError set on failure.
  */
 function fetchSource(source: UpdateSource): SourceStatus {
-  try {
-    if (!remoteExists(source.id)) {
-      // Remote was manually deleted — recreate it using the URL from git config
-      // (source.url comes from remote.{id}.url set by addSource / ensureBuiltin).
-      git(["remote", "add", source.id, source.url]);
-    }
-    git([
-      "fetch", "--no-tags", source.id,
-      `refs/heads/main:refs/heads/${source.trackingBranch}`,
-    ]);
-    return buildSourceStatus(source);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return {
-      ...buildSourceStatus(source),
-      fetchError: msg.trim(),
-    };
-  }
+  const fetchError = fetchSourceUpdates(source, process.cwd());
+  return {
+    ...buildSourceStatus(source),
+    fetchError,
+  };
 }
 
 // ─── Auth helper ─────────────────────────────────────────────────────────────
@@ -273,6 +266,23 @@ export async function POST(request: Request) {
     }
   }
 
+  // ── update-source-settings ────────────────────────────────────────────────
+  if (action === "update-source-settings") {
+    const sourceId = typeof body.sourceId === "string" ? body.sourceId : "";
+    const freq = typeof body.fetchFrequency === "string" ? body.fetchFrequency : "never";
+    const fetchFrequency: FetchFrequency =
+      freq === "hourly" || freq === "daily" || freq === "weekly" ? freq : "never";
+    const rawDelay = body.fetchDelayDays;
+    const fetchDelayDays = typeof rawDelay === "number" ? Math.max(0, rawDelay) : 0;
+    try {
+      setSourceSchedule(repoRoot, sourceId, fetchFrequency, fetchDelayDays);
+      const updated = readSources(repoRoot).map(buildSourceStatus);
+      return Response.json({ sources: updated } satisfies UpdatesResponse);
+    } catch (err) {
+      return Response.json({ error: String(err) }, { status: 400 });
+    }
+  }
+
   // ── toggle-source ─────────────────────────────────────────────────────────
   if (action === "toggle-source") {
     const sourceId = typeof body.sourceId === "string" ? body.sourceId : "";
@@ -304,7 +314,9 @@ export async function POST(request: Request) {
       return Response.json({ error: "No tracking branch found. Fetch updates first." }, { status: 400 });
     }
 
-    const mergeBase = getMergeBase(source.trackingBranch);
+    // The tracking branch already points to the safe (delay-filtered) commit
+    // because fetchSourceUpdates applies the delay at fetch time.
+    const mergeBase = getMergeBase("main", source.trackingBranch);
     if (!mergeBase) {
       return Response.json({ error: "Could not determine merge base." }, { status: 400 });
     }
@@ -320,8 +332,14 @@ export async function POST(request: Request) {
         ? entries.map((e) => `- ${e.filename}`).join("\n")
         : "(no changelog entries found)";
 
+    const delayNote = source.fetchDelayDays > 0
+      ? `\nNote: a ${source.fetchDelayDays}-day delay is configured. ` +
+        `The tracking branch \`${source.trackingBranch}\` already points to the latest ` +
+        `commit at least ${source.fetchDelayDays} day${source.fetchDelayDays === 1 ? "" : "s"} old.`
+      : "";
+
     const requestText =
-      `Merge the branch \`${source.trackingBranch}\` into the current branch to apply updates from "${source.name}" (${source.url}).\n\n` +
+      `Merge updates from "${source.name}" (${source.url}) into the current branch.${delayNote}\n\n` +
       `Steps:\n` +
       `1. Run: git merge ${source.trackingBranch} --no-edit\n` +
       `2. If there are merge conflicts, resolve them carefully — keep local customisations ` +
