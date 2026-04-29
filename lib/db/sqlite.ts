@@ -51,7 +51,9 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
       id TEXT PRIMARY KEY,
       status TEXT NOT NULL DEFAULT 'pending',
       user_id TEXT,
-      expires_at INTEGER NOT NULL
+      expires_at INTEGER NOT NULL,
+      api_key_jwk TEXT,
+      credentials_key_jwk TEXT
     );
     CREATE TABLE IF NOT EXISTS roles (
       name TEXT PRIMARY KEY,
@@ -94,6 +96,18 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
       PRIMARY KEY (user_id, role_name)
     );
   `);
+
+  // Migration: add push-flow columns to cross_device_tokens
+  try {
+    db.exec("ALTER TABLE cross_device_tokens ADD COLUMN api_key_jwk TEXT");
+  } catch {
+    // Column already exists — ignore
+  }
+  try {
+    db.exec("ALTER TABLE cross_device_tokens ADD COLUMN credentials_key_jwk TEXT");
+  } catch {
+    // Column already exists — ignore
+  }
 
   // Migration: add id and display_name columns to roles (added when roles got UUIDs + customizable names)
   // Must run before the seed inserts below so existing DBs have the columns ready.
@@ -350,7 +364,7 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
     },
     async getCrossDeviceToken(id: string) {
       const r = db
-        .prepare("SELECT * FROM cross_device_tokens WHERE id = ?")
+        .prepare("SELECT id, status, user_id, expires_at FROM cross_device_tokens WHERE id = ?")
         .get(id) as {
         id: string;
         status: string;

@@ -34,9 +34,13 @@ export interface Session {
 
 /**
  * A short-lived token that coordinates cross-device authentication.
- * The "requester" device (e.g. laptop) creates one and shows a QR code.
- * The "approver" device (e.g. phone, already signed in) scans the QR and
- * approves it; the requester then polls until approved and gets a session.
+ *
+ * Pull flow: the "requester" device (e.g. phone) creates one and shows a QR
+ * code; the "approver" device (already signed in) scans and approves it.
+ *
+ * Push flow: the logged-in device creates a pre-approved token (status already
+ * "approved"). AES key transfer happens via the QR code URL fragment — the keys
+ * are embedded client-side and never touch the server.
  */
 export interface CrossDeviceToken {
   id: string;
