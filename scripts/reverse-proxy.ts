@@ -786,12 +786,27 @@ async function handleProdSpawn(
   // ANSI formatting helpers (same palette as scripts/install.sh).
   const G = '\x1b[0;32m'; // green
   const R = '\x1b[0m';    // reset
-  // _step: start an in-progress line (no newline — will be overwritten by _done)
-  const _step = (msg: string) => sendLog(msg);
-  // _done: overwrite the current line with a green ✓ success line
-  const _done = (msg: string) => sendLog(`\r\x1b[K${G}✓${R} ${msg}\n`);
-  // _success: standalone success line (no preceding _step)
+  // Spinner characters: same \|/- sequence used by install.sh.
+  const SPIN = '\\|/-';
+  let _spinTimer: ReturnType<typeof setInterval> | null = null;
+
+  // _step: print '\ msg' and start a 120 ms spinner (same cadence as install.sh).
+  const _step = (msg: string) => {
+    if (_spinTimer) { clearInterval(_spinTimer); _spinTimer = null; }
+    let i = 0;
+    sendLog(`\\ ${msg}`);
+    _spinTimer = setInterval(() => { sendLog(`\r${SPIN[i++ % 4]} ${msg}`); }, 120);
+  };
+  // _done: kill the spinner and overwrite the line with a green ✓.
+  const _done = (msg: string) => {
+    if (_spinTimer) { clearInterval(_spinTimer); _spinTimer = null; }
+    sendLog(`\r\x1b[K${G}✓${R} ${msg}\n`);
+  };
+  // _success: standalone ✓ line (no preceding _step).
   const _success = (msg: string) => sendLog(`${G}✓${R} ${msg}\n`);
+
+  // Stop the spinner if the SSE client disconnects mid-deploy.
+  clientReq.on('close', () => { if (_spinTimer) { clearInterval(_spinTimer); _spinTimer = null; } });
 
   try {
     // Snapshot the old upstream port before we change anything.
@@ -845,6 +860,7 @@ async function handleProdSpawn(
 
     if (!healthOk) {
       try { newServer.kill('SIGTERM'); } catch { /* already gone */ }
+      _done('Health-check failed');
       sendDone(false, `New slot failed health check: ${healthError ?? 'server did not respond'}`);
       return;
     }
@@ -885,6 +901,7 @@ async function handleProdSpawn(
     _success('Web traffic is now being directed to this server');
     sendDone(true);
   } catch (err) {
+    if (_spinTimer) { clearInterval(_spinTimer); _spinTimer = null; }
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[proxy] handleProdSpawn error:', msg);
     sendDone(false, msg);
