@@ -44,18 +44,55 @@ export function QrSignInOtherDeviceDialog({ onClose }: QrSignInOtherDeviceDialog
     setError(null);
     setTokenId(null);
 
-    // Read AES key JWKs directly from localStorage — they're stored as raw
-    // JSON strings and can be sent to the server to embed in the token.
-    let apiKeyJwk: string | null = null;
-    let credentialsKeyJwk: string | null = null;
+    // Read raw AES key JWK strings directly from localStorage.
+    // They're stored as JSON strings — we must encrypt them before sending
+    // so they're protected in transit and at rest in the server DB.
+    let rawApiKeyJwk: string | null = null;
+    let rawCredentialsKeyJwk: string | null = null;
     try {
-      apiKeyJwk = localStorage.getItem("primordia_aes_key");
-      credentialsKeyJwk = localStorage.getItem("primordia_credentials_aes_key");
+      rawApiKeyJwk = localStorage.getItem("primordia_aes_key");
+      rawCredentialsKeyJwk = localStorage.getItem("primordia_credentials_aes_key");
     } catch {
       // localStorage unavailable — continue without key transfer
     }
 
     try {
+      // Fetch the server's ephemeral RSA-OAEP public key (same mechanism used
+      // by ApiKeyDialog / CredentialsDialog when sending keys to the server).
+      // Encrypting here means the JWK strings are only readable by this server
+      // process — even a DB dump cannot recover them without the private key.
+      let rsaKey: CryptoKey | null = null;
+      if (rawApiKeyJwk || rawCredentialsKeyJwk) {
+        const pkRes = await fetch(withBasePath("/api/llm-key/public-key"));
+        if (pkRes.ok) {
+          const pkData = (await pkRes.json()) as { publicKey: JsonWebKey };
+          rsaKey = await crypto.subtle.importKey(
+            "jwk",
+            pkData.publicKey,
+            { name: "RSA-OAEP", hash: "SHA-256" },
+            false,
+            ["encrypt"]
+          );
+        }
+      }
+
+      async function rsaEncrypt(plaintext: string): Promise<string> {
+        if (!rsaKey) throw new Error("RSA key unavailable");
+        const enc = await crypto.subtle.encrypt(
+          { name: "RSA-OAEP" },
+          rsaKey,
+          new TextEncoder().encode(plaintext)
+        );
+        return btoa(String.fromCharCode(...new Uint8Array(enc)));
+      }
+
+      // Encrypt each JWK string independently with RSA-OAEP.
+      // AES-256 JWKs are ~100 bytes, well within the 190-byte RSA-OAEP limit.
+      const apiKeyJwk =
+        rawApiKeyJwk && rsaKey ? await rsaEncrypt(rawApiKeyJwk) : null;
+      const credentialsKeyJwk =
+        rawCredentialsKeyJwk && rsaKey ? await rsaEncrypt(rawCredentialsKeyJwk) : null;
+
       const res = await fetch(withBasePath("/api/auth/cross-device/push"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
