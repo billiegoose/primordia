@@ -533,6 +533,25 @@ export function WebPreviewPanel({ src, fullHeight = false, className, onElementS
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [inspectorActive, cancelInspector]);
 
+  // Track whether the user is currently editing the URL bar so we don't clobber their input.
+  const urlBarFocusedRef = useRef(false);
+
+  // Poll the iframe's location to catch client-side (SPA) navigations that don't fire onLoad.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (urlBarFocusedRef.current) return;
+      try {
+        const href = iframeRef.current?.contentWindow?.location?.href;
+        if (href && href !== "about:blank") {
+          setUrlBarValue((prev) => (href !== prev ? href : prev));
+        }
+      } catch {
+        // Cross-origin — cannot read location; ignore.
+      }
+    }, 250);
+    return () => clearInterval(id);
+  }, []);
+
   return (
     <div className={`${fullHeight ? 'flex flex-col h-full' : ''} overflow-hidden${className ? ` ${className}` : ''}`}>
       {/* ── Toolbar ── */}
@@ -573,6 +592,8 @@ export function WebPreviewPanel({ src, fullHeight = false, className, onElementS
             type="text"
             value={urlBarValue}
             onChange={(e) => setUrlBarValue(e.target.value)}
+            onFocus={() => { urlBarFocusedRef.current = true; }}
+            onBlur={() => { urlBarFocusedRef.current = false; }}
             spellCheck={false}
             autoCorrect="off"
             autoCapitalize="off"
