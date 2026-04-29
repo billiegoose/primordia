@@ -5,12 +5,15 @@
 // "Sign in on another device" dialog.
 //
 // Flow:
-//   1. Page reads ?token=<tokenId> from the URL.
-//   2. Immediately polls /api/auth/cross-device/poll (push tokens are
-//      pre-approved, so the first poll should return "approved").
-//   3. On approval: session cookie is set by the poll endpoint, and any
-//      AES encryption key JWKs are stored in this device's localStorage.
-//   4. Redirects to the home page.
+//   1. Page reads ?token=<tokenId> from the URL query string.
+//   2. Reads AES key JWKs from the URL fragment (#k1=...&k2=...) — these
+//      were embedded by Device A when generating the QR code client-side and
+//      never passed through the server.
+//   3. Saves the keys to localStorage immediately, then clears the fragment
+//      from the URL bar so the raw keys don't linger in browser history.
+//   4. Polls /api/auth/cross-device/poll (push tokens are pre-approved, so
+//      the first poll should return "approved" and set the session cookie).
+//   5. Redirects to the home page.
 
 import { Suspense, useEffect, useState, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -19,6 +22,11 @@ import { CheckCircle, Loader2 } from "lucide-react";
 import { withBasePath } from "@/lib/base-path";
 
 type Phase = "loading" | "approved" | "expired" | "error";
+
+// Decode a base64url-encoded string back to its original value.
+function b64uDecode(s: string): string {
+  return atob(s.replace(/-/g, "+").replace(/_/g, "/"));
+}
 
 function ReceivePageInner() {
   const searchParams = useSearchParams();
@@ -34,6 +42,37 @@ function ReceivePageInner() {
   );
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Extract AES key JWKs from the URL fragment and store them in localStorage.
+  // This runs once on mount, before polling starts.
+  // The fragment was embedded by Device A when it generated the QR code client-side —
+  // it was never sent to the server, so we're the first (and only) code that sees it.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const hash = window.location.hash.slice(1); // strip leading #
+    if (hash) {
+      const params = new URLSearchParams(hash);
+      const k1 = params.get("k1");
+      const k2 = params.get("k2");
+      if (k1) {
+        try {
+          localStorage.setItem("primordia_aes_key", b64uDecode(k1));
+        } catch {
+          // localStorage unavailable — not fatal
+        }
+      }
+      if (k2) {
+        try {
+          localStorage.setItem("primordia_credentials_aes_key", b64uDecode(k2));
+        } catch {
+          // localStorage unavailable — not fatal
+        }
+      }
+      // Remove the fragment from the URL bar so the raw keys don't persist
+      // in browser history or get accidentally shared via URL copy-paste.
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+  }, []); // run once on mount
+
   useEffect(() => {
     if (!tokenId) return;
 
@@ -45,8 +84,6 @@ function ReceivePageInner() {
         const data = (await res.json()) as {
           status?: string;
           username?: string;
-          apiKeyJwk?: string;
-          credentialsKeyJwk?: string;
         };
 
         if (data.status === "approved") {
@@ -55,23 +92,6 @@ function ReceivePageInner() {
             clearInterval(pollRef.current);
             pollRef.current = null;
           }
-
-          // Restore AES encryption keys so credentials work on this device too.
-          if (data.apiKeyJwk) {
-            try {
-              localStorage.setItem("primordia_aes_key", data.apiKeyJwk);
-            } catch {
-              // localStorage unavailable — not fatal
-            }
-          }
-          if (data.credentialsKeyJwk) {
-            try {
-              localStorage.setItem("primordia_credentials_aes_key", data.credentialsKeyJwk);
-            } catch {
-              // localStorage unavailable — not fatal
-            }
-          }
-
           setUsername(data.username ?? null);
           setPhase("approved");
 

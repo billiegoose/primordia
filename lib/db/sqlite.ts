@@ -362,30 +362,14 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
         "INSERT INTO cross_device_tokens (id, status, user_id, expires_at) VALUES (?, ?, ?, ?)"
       ).run(token.id, token.status, token.userId ?? null, token.expiresAt);
     },
-    async createCrossDevicePushToken(token: CrossDeviceToken) {
-      db.prepare(
-        `INSERT INTO cross_device_tokens
-           (id, status, user_id, expires_at, api_key_jwk, credentials_key_jwk)
-         VALUES (?, ?, ?, ?, ?, ?)`
-      ).run(
-        token.id,
-        token.status,
-        token.userId ?? null,
-        token.expiresAt,
-        token.apiKeyJwk ?? null,
-        token.credentialsKeyJwk ?? null,
-      );
-    },
     async getCrossDeviceToken(id: string) {
       const r = db
-        .prepare("SELECT * FROM cross_device_tokens WHERE id = ?")
+        .prepare("SELECT id, status, user_id, expires_at FROM cross_device_tokens WHERE id = ?")
         .get(id) as {
         id: string;
         status: string;
         user_id: string | null;
         expires_at: number;
-        api_key_jwk: string | null;
-        credentials_key_jwk: string | null;
       } | null;
       if (!r) return null;
       return {
@@ -393,8 +377,6 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
         status: r.status as CrossDeviceToken["status"],
         userId: r.user_id,
         expiresAt: r.expires_at,
-        apiKeyJwk: r.api_key_jwk ?? null,
-        credentialsKeyJwk: r.credentials_key_jwk ?? null,
       };
     },
     async approveCrossDeviceToken(id: string, userId: string) {

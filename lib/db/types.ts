@@ -35,12 +35,12 @@ export interface Session {
 /**
  * A short-lived token that coordinates cross-device authentication.
  *
- * Pull flow (original): the "requester" device (e.g. phone) creates one and shows
- * a QR code; the "approver" device (already signed in) scans and approves it.
+ * Pull flow: the "requester" device (e.g. phone) creates one and shows a QR
+ * code; the "approver" device (already signed in) scans and approves it.
  *
- * Push flow (new): the logged-in device creates a pre-approved token (status already
- * "approved") and embeds the AES localStorage key JWKs so the scanning device can
- * restore the credential encryption keys alongside the session.
+ * Push flow: the logged-in device creates a pre-approved token (status already
+ * "approved"). AES key transfer happens via the QR code URL fragment — the keys
+ * are embedded client-side and never touch the server.
  */
 export interface CrossDeviceToken {
   id: string;
@@ -49,10 +49,6 @@ export interface CrossDeviceToken {
   /** Set when the approver approves — the userId of the approving user. */
   userId: string | null;
   expiresAt: number;
-  /** JWK JSON string for the API-key AES encryption key (push flow only). */
-  apiKeyJwk: string | null;
-  /** JWK JSON string for the credentials AES encryption key (push flow only). */
-  credentialsKeyJwk: string | null;
 }
 
 /**
@@ -157,8 +153,6 @@ export interface DbAdapter {
   approveCrossDeviceToken(id: string, userId: string): Promise<void>;
   deleteCrossDeviceToken(id: string): Promise<void>;
   deleteExpiredCrossDeviceTokens(): Promise<void>;
-  /** Creates a pre-approved push token that carries optional AES key JWKs for Device B to restore. */
-  createCrossDevicePushToken(token: CrossDeviceToken): Promise<void>;
 
   // Roles (RBAC)
   getAllRoles(): Promise<Role[]>;

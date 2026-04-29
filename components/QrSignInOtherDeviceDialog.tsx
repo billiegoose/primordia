@@ -5,16 +5,19 @@
 //
 // Flow ("push" mode — initiated by the logged-in device):
 //   1. Reads AES encryption key JWKs from localStorage (if any are stored).
-//   2. POSTs to /api/auth/cross-device/push to create a pre-approved token
-//      that also carries the AES keys.
-//   3. Renders a QR code pointing to /login/cross-device-receive?token=<id>
-//      on the other device.
-//   4. The scanning device immediately gets a session AND has its localStorage
-//      populated with the AES keys — so API keys and credentials work there too.
+//   2. POSTs to /api/auth/cross-device/push to create a pre-approved token.
+//      No keys are sent to the server.
+//   3. Builds a receive URL that includes the keys in the URL fragment (#k1=...&k2=...).
+//      Fragments are never sent to the server — they exist only in the browser.
+//   4. Generates the QR code entirely client-side so the server never sees the
+//      fragment, and therefore never sees the AES keys.
+//   5. The scanning device reads the keys from the fragment on its own page
+//      and stores them in localStorage — keys travel only through the QR code.
 
 import { useState, useEffect, useCallback } from "react";
 import { QrCode, X, RefreshCw } from "lucide-react";
-import { withBasePath } from "@/lib/base-path";
+import { withBasePath, basePath } from "@/lib/base-path";
+import QRCode from "qrcode";
 
 interface QrSignInOtherDeviceDialogProps {
   onClose: () => void;
@@ -22,9 +25,14 @@ interface QrSignInOtherDeviceDialogProps {
 
 type Phase = "loading" | "ready" | "error";
 
+// URL-safe base64 encoding (no +, /, or = padding) so fragment params stay compact.
+function b64uEncode(s: string): string {
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+}
+
 export function QrSignInOtherDeviceDialog({ onClose }: QrSignInOtherDeviceDialogProps) {
   const [phase, setPhase] = useState<Phase>("loading");
-  const [tokenId, setTokenId] = useState<string | null>(null);
+  const [qrImgSrc, setQrImgSrc] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleKeyDown = useCallback(
@@ -42,11 +50,10 @@ export function QrSignInOtherDeviceDialog({ onClose }: QrSignInOtherDeviceDialog
   const startPushFlow = useCallback(async () => {
     setPhase("loading");
     setError(null);
-    setTokenId(null);
+    setQrImgSrc(null);
 
-    // Read raw AES key JWK strings directly from localStorage.
-    // They're stored as JSON strings — we must encrypt them before sending
-    // so they're protected in transit and at rest in the server DB.
+    // Read AES key JWK strings from localStorage.
+    // These never leave the browser in this flow — they travel only via the QR code.
     let rawApiKeyJwk: string | null = null;
     let rawCredentialsKeyJwk: string | null = null;
     try {
@@ -57,46 +64,11 @@ export function QrSignInOtherDeviceDialog({ onClose }: QrSignInOtherDeviceDialog
     }
 
     try {
-      // Fetch the server's ephemeral RSA-OAEP public key (same mechanism used
-      // by ApiKeyDialog / CredentialsDialog when sending keys to the server).
-      // Encrypting here means the JWK strings are only readable by this server
-      // process — even a DB dump cannot recover them without the private key.
-      let rsaKey: CryptoKey | null = null;
-      if (rawApiKeyJwk || rawCredentialsKeyJwk) {
-        const pkRes = await fetch(withBasePath("/api/llm-key/public-key"));
-        if (pkRes.ok) {
-          const pkData = (await pkRes.json()) as { publicKey: JsonWebKey };
-          rsaKey = await crypto.subtle.importKey(
-            "jwk",
-            pkData.publicKey,
-            { name: "RSA-OAEP", hash: "SHA-256" },
-            false,
-            ["encrypt"]
-          );
-        }
-      }
-
-      async function rsaEncrypt(plaintext: string): Promise<string> {
-        if (!rsaKey) throw new Error("RSA key unavailable");
-        const enc = await crypto.subtle.encrypt(
-          { name: "RSA-OAEP" },
-          rsaKey,
-          new TextEncoder().encode(plaintext)
-        );
-        return btoa(String.fromCharCode(...new Uint8Array(enc)));
-      }
-
-      // Encrypt each JWK string independently with RSA-OAEP.
-      // AES-256 JWKs are ~100 bytes, well within the 190-byte RSA-OAEP limit.
-      const apiKeyJwk =
-        rawApiKeyJwk && rsaKey ? await rsaEncrypt(rawApiKeyJwk) : null;
-      const credentialsKeyJwk =
-        rawCredentialsKeyJwk && rsaKey ? await rsaEncrypt(rawCredentialsKeyJwk) : null;
-
+      // Create a pre-approved push token on the server (no keys involved).
       const res = await fetch(withBasePath("/api/auth/cross-device/push"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKeyJwk, credentialsKeyJwk }),
+        body: JSON.stringify({}),
       });
       const data = (await res.json()) as { tokenId?: string; error?: string };
       if (!res.ok || !data.tokenId) {
@@ -104,7 +76,29 @@ export function QrSignInOtherDeviceDialog({ onClose }: QrSignInOtherDeviceDialog
         setError(data.error ?? "Failed to generate QR code.");
         return;
       }
-      setTokenId(data.tokenId);
+
+      // Build receive URL. Keys go in the fragment — browsers never send the
+      // fragment to the server, so the AES keys are invisible to the server.
+      const origin = window.location.origin;
+      const base = `${origin}${basePath}/login/cross-device-receive?token=${data.tokenId}`;
+      const parts: string[] = [];
+      if (rawApiKeyJwk) parts.push(`k1=${b64uEncode(rawApiKeyJwk)}`);
+      if (rawCredentialsKeyJwk) parts.push(`k2=${b64uEncode(rawCredentialsKeyJwk)}`);
+      const receiveUrl = parts.length > 0 ? `${base}#${parts.join("&")}` : base;
+
+      // Generate the QR code entirely in the browser.
+      // We convert to SVG then package as a data URL so we can use a plain <img>.
+      const svg = await QRCode.toString(receiveUrl, {
+        type: "svg",
+        margin: 2,
+        color: {
+          dark: "#ffffff",   // white modules on dark theme
+          light: "#111827",  // gray-900 background
+        },
+      });
+      // btoa is safe here: qrcode SVG output is pure ASCII
+      const imgSrc = `data:image/svg+xml;base64,${btoa(svg)}`;
+      setQrImgSrc(imgSrc);
       setPhase("ready");
     } catch {
       setPhase("error");
@@ -143,9 +137,9 @@ export function QrSignInOtherDeviceDialog({ onClose }: QrSignInOtherDeviceDialog
 
         {/* Description */}
         <p className="text-sm text-gray-400 leading-relaxed">
-          Scan this QR code on another device to sign in as you. It will also
-          copy your API key and credential encryption keys to that device, so
-          your stored keys work there too.
+          Scan this QR code on another device to sign in as you. Your API key
+          and credential encryption keys are embedded directly in the QR code —
+          they never pass through the server.
         </p>
 
         {/* QR Code / states */}
@@ -157,14 +151,12 @@ export function QrSignInOtherDeviceDialog({ onClose }: QrSignInOtherDeviceDialog
           </div>
         )}
 
-        {phase === "ready" && tokenId && (
+        {phase === "ready" && qrImgSrc && (
           <div className="space-y-3">
             <div className="flex justify-center">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={withBasePath(
-                  `/api/auth/cross-device/qr?tokenId=${tokenId}&type=push`
-                )}
+                src={qrImgSrc}
                 alt="QR code for signing in on another device"
                 width={200}
                 height={200}

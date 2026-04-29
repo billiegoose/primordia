@@ -6,7 +6,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db/index";
 import { createSession, SESSION_COOKIE, SESSION_DURATION_MS } from "@/lib/auth";
-import { decryptApiKey } from "@/lib/llm-encryption";
 
 /**
  * Poll cross-device sign-in status
@@ -47,28 +46,7 @@ export async function GET(request: NextRequest) {
 
     const sessionId = await createSession(user.id);
 
-    // Include AES key JWKs if this was a push token — the scanning device
-    // stores them in localStorage to restore credential encryption keys.
-    // The JWKs are stored as RSA-OAEP ciphertexts (encrypted by Device A with
-    // this server's ephemeral public key); decrypt them now before sending
-    // to Device B over HTTPS so the raw JWKs never touch the DB.
-    const responseBody: Record<string, unknown> = { status: "approved", username: user.username };
-    if (token.apiKeyJwk) {
-      try {
-        responseBody.apiKeyJwk = await decryptApiKey(token.apiKeyJwk);
-      } catch {
-        // Decryption failure (e.g. server restarted mid-session) — skip key
-      }
-    }
-    if (token.credentialsKeyJwk) {
-      try {
-        responseBody.credentialsKeyJwk = await decryptApiKey(token.credentialsKeyJwk);
-      } catch {
-        // Decryption failure — skip key
-      }
-    }
-
-    const response = NextResponse.json(responseBody);
+    const response = NextResponse.json({ status: "approved", username: user.username });
     response.cookies.set(SESSION_COOKIE, sessionId, {
       httpOnly: true,
       sameSite: "lax",
