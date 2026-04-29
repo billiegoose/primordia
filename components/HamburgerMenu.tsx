@@ -14,8 +14,9 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { SessionUser } from "../lib/hooks";
-import { Edit, Shield, X, Menu, LogOut, LogIn, Key, GitBranch } from "lucide-react";
+import { Edit, Shield, X, Menu, LogOut, LogIn, Key, GitBranch, FileKey } from "lucide-react";
 import { ApiKeyDialog } from "./ApiKeyDialog";
+import { CredentialsDialog } from "./CredentialsDialog";
 
 export type { SessionUser };
 
@@ -86,6 +87,7 @@ export function buildStandardMenuItems({
 export function HamburgerMenu({ sessionUser, onLogout, items, containerRef }: HamburgerMenuProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [apiKeyDialogOpen, setApiKeyDialogOpen] = useState(false);
+  const [credentialsDialogOpen, setCredentialsDialogOpen] = useState(false);
   const localRef = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
   const menuRef = containerRef ?? localRef;
@@ -150,17 +152,28 @@ export function HamburgerMenu({ sessionUser, onLogout, items, containerRef }: Ha
             </Link>
           )}
 
-          {/* API Key settings — available to any logged-in user */}
+          {/* API Key and credentials settings — available to any logged-in user */}
           {sessionUser && (
-            <button
-              data-id="nav-menu/api-key"
-              type="button"
-              onClick={() => { setMenuOpen(false); setApiKeyDialogOpen(true); }}
-              className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-300 hover:text-amber-400 hover:bg-gray-800 transition-colors"
-            >
-              <Key size={16} strokeWidth={2} aria-hidden="true" />
-              API Key
-            </button>
+            <>
+              <button
+                data-id="nav-menu/api-key"
+                type="button"
+                onClick={() => { setMenuOpen(false); setApiKeyDialogOpen(true); }}
+                className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-300 hover:text-amber-400 hover:bg-gray-800 transition-colors"
+              >
+                <Key size={16} strokeWidth={2} aria-hidden="true" />
+                API Key
+              </button>
+              <button
+                data-id="nav-menu/credentials"
+                type="button"
+                onClick={() => { setMenuOpen(false); setCredentialsDialogOpen(true); }}
+                className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-300 hover:text-sky-400 hover:bg-gray-800 transition-colors"
+              >
+                <FileKey size={16} strokeWidth={2} aria-hidden="true" />
+                Claude Credentials
+              </button>
+            </>
           )}
 
           {/* Page-specific items */}
@@ -195,6 +208,11 @@ export function HamburgerMenu({ sessionUser, onLogout, items, containerRef }: Ha
       {/* API Key dialog — rendered outside the dropdown so it is not clipped */}
       {apiKeyDialogOpen && (
         <ApiKeyDialog onClose={() => setApiKeyDialogOpen(false)} />
+      )}
+
+      {/* Claude Credentials dialog */}
+      {credentialsDialogOpen && (
+        <CredentialsDialog onClose={() => setCredentialsDialogOpen(false)} />
       )}
     </div>
   );
