@@ -118,7 +118,7 @@ export function CredentialsDialog({ onClose }: CredentialsDialogProps) {
           </code>{" "}
           file to use your Claude Code session for evolve requests. The JSON is
           encrypted in your browser — the encryption key never leaves this
-          device, and the plaintext is never stored or transmitted.{" "}
+          device, and the decrypted credentials are only kept on the server for the duration of the agent run.{" "}
           <a
             href="https://docs.anthropic.com/en/docs/claude-code/getting-started"
             target="_blank"
