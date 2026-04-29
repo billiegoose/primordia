@@ -11,6 +11,7 @@ import { Suspense, useState, useEffect, type ComponentType } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import dynamic from "next/dynamic";
+import { ArrowRight } from "lucide-react";
 import type { InstalledPlugin, AuthTabProps } from "@/lib/auth-providers/types";
 
 interface LoginClientProps {
@@ -81,13 +82,12 @@ function LoginPageInner({ initialUser, plugins }: LoginClientProps) {
               <p className="text-lg font-semibold text-white">{initialUser!.username}</p>
             </div>
             <div className="space-y-2 pt-1">
-              <button
-                type="button"
-                onClick={() => router.push(nextUrl)}
-                className="w-full px-4 py-2.5 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+              <Link
+                href={nextUrl}
+                className="w-full px-4 py-2.5 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white transition-colors flex items-center justify-center gap-1.5"
               >
-                Proceed to Primordia &rarr;
-              </button>
+                Proceed to Primordia <ArrowRight size={16} />
+              </Link>
               <button
                 type="button"
                 onClick={() => setIgnoringSession(true)}
