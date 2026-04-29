@@ -16,6 +16,8 @@ export interface ModelOption {
   id: string;
   label: string;
   description: string;
+  /** Concise price string, e.g. "$3 in / $15 out /M tok" */
+  pricingLabel?: string;
 }
 
 export const HARNESS_OPTIONS: HarnessOption[] = [

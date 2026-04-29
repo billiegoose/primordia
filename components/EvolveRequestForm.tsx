@@ -568,21 +568,33 @@ export function EvolveRequestForm({
                   ))}
                 </select>
               </div>
-              <div className="flex items-center gap-3">
-                <label className="text-xs text-gray-400 w-14 flex-shrink-0">Model</label>
-                <select
-                  data-id="evolve/model-select"
-                  value={selectedModel}
-                  onChange={(e) => setSelectedModel(e.target.value)}
-                  disabled={isLoading}
-                  className="flex-1 text-xs bg-gray-800 text-gray-200 border border-gray-700 rounded px-2 py-1.5 focus:outline-none focus:border-gray-500 disabled:opacity-50"
-                >
-                  {(modelOptionsByHarness[selectedHarness] ?? []).map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.label}
-                    </option>
-                  ))}
-                </select>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-3">
+                  <label className="text-xs text-gray-400 w-14 flex-shrink-0">Model</label>
+                  <select
+                    data-id="evolve/model-select"
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    disabled={isLoading}
+                    className="flex-1 text-xs bg-gray-800 text-gray-200 border border-gray-700 rounded px-2 py-1.5 focus:outline-none focus:border-gray-500 disabled:opacity-50"
+                  >
+                    {(modelOptionsByHarness[selectedHarness] ?? []).map((m) => (
+                      <option key={m.id} value={m.id} title={m.description}>
+                        {m.pricingLabel ? `${m.label}  ·  ${m.pricingLabel}` : m.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {(() => {
+                  const sel = (modelOptionsByHarness[selectedHarness] ?? []).find(
+                    (m) => m.id === selectedModel,
+                  );
+                  return sel?.description ? (
+                    <p className="ml-[4.25rem] text-[10px] text-gray-500 leading-tight">
+                      {sel.description}
+                    </p>
+                  ) : null;
+                })()}
               </div>
               <div className="flex items-center gap-3">
                 <span className="text-xs text-gray-400 w-14 flex-shrink-0">Caveman</span>
