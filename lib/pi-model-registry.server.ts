@@ -19,13 +19,45 @@ const HARNESS_PROVIDERS: Record<string, string[]> = {
   'pi': ['anthropic', 'openai'],
 };
 
+/**
+ * Format a cost object into a concise human-readable pricing string.
+ * Costs in the registry are USD per million tokens.
+ * Returns null when no cost data is available.
+ */
+function formatPricing(
+  cost: { input: number; output: number } | undefined,
+): { full: string; input: string } | null {
+  if (!cost) return null;
+  const { input, output } = cost;
+  if (input === 0 && output === 0) return null;
+
+  function fmt(n: number): string {
+    if (n === 0) return '$0';
+    // Show up to 2 significant figures, strip trailing zeros
+    if (n >= 10) return `$${Math.round(n)}`;
+    if (n >= 1) return `$${parseFloat(n.toPrecision(2))}`;
+    // sub-dollar: show cents, e.g. 0.08 → "8¢"
+    const cents = n * 100;
+    if (cents >= 1) return `${parseFloat(cents.toPrecision(2))}¢`;
+    return `$${parseFloat(n.toPrecision(2))}`;
+  }
+
+  return { full: `${fmt(input)}→${fmt(output)}/M`, input: `${fmt(input)}/M` };
+}
+
 // User-facing provider labels used in the model description field.
 const PROVIDER_LABELS: Record<string, string> = {
   anthropic: 'Anthropic',
   openai: 'OpenAI',
 };
 
-type RawModel = { id: string; name: string; provider: string; reasoning: boolean };
+type RawModel = {
+  id: string;
+  name: string;
+  provider: string;
+  reasoning: boolean;
+  cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
+};
 
 /**
  * Reduce a flat list of models down to the most recent, non-redundant entries.
@@ -121,11 +153,21 @@ export function getModelOptionsByHarness(): Record<string, ModelOption[]> {
       return a.name.localeCompare(b.name);
     });
 
-    result[harnessId] = filtered.map((m) => ({
-      id: m.id,
-      label: m.name,
-      description: `${PROVIDER_LABELS[m.provider] ?? m.provider}${m.reasoning ? ' · reasoning' : ''}`,
-    }));
+    result[harnessId] = filtered.map((m) => {
+      const providerLabel = PROVIDER_LABELS[m.provider] ?? m.provider;
+      const reasoningLabel = m.reasoning ? ' · reasoning' : '';
+      const pricing = formatPricing(m.cost);
+      const description = pricing
+        ? `${providerLabel}${reasoningLabel} · ${pricing.full}`
+        : `${providerLabel}${reasoningLabel}`;
+      return {
+        id: m.id,
+        label: m.name,
+        description,
+        pricingLabel: pricing?.full,
+        inputPriceLabel: pricing?.input,
+      };
+    });
   }
 
   return result;
