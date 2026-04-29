@@ -1,14 +1,23 @@
 // app/api/auth/cross-device/approve/route.ts
 // Called by the "approver" device (e.g. phone, already signed in) to approve
 // a pending cross-device token.  Requires an active session.
+//
+// Optional: if the requester embedded a `pk=` ECDH public key in the QR URL,
+// the approver computes an encrypted credential bundle client-side and passes
+// it here as `encryptedCredentials`. The server stores it on the token so the
+// requester can retrieve and decrypt it via the poll endpoint.
 
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db/index";
 import { getSessionUser } from "@/lib/auth";
+import type { EncryptedCredBundle } from "@/lib/cross-device-creds";
 
 /** JSON body for POST /auth/cross-device/approve */
 export interface CrossDeviceApproveBody {
-  tokenId: string; // The cross-device token ID returned by POST /auth/cross-device/start.
+  tokenId: string;
+  /** Optional ECDH-encrypted credential bundle. Only present in the pull flow when
+   *  the QR URL contained a `pk=` parameter. */
+  encryptedCredentials?: EncryptedCredBundle | null;
 }
 
 /**
@@ -24,7 +33,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    const body = (await request.json()) as { tokenId?: string };
+    const body = (await request.json()) as CrossDeviceApproveBody;
     const tokenId = body.tokenId?.trim();
     if (!tokenId) {
       return NextResponse.json({ error: "Missing tokenId" }, { status: 400 });
@@ -44,7 +53,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Token already used" }, { status: 409 });
     }
 
-    await db.approveCrossDeviceToken(tokenId, user.id);
+    // Serialize the encrypted credential bundle (if provided) as a JSON string.
+    const encryptedCredsJson = body.encryptedCredentials
+      ? JSON.stringify(body.encryptedCredentials)
+      : null;
+
+    await db.approveCrossDeviceToken(tokenId, user.id, encryptedCredsJson);
 
     return NextResponse.json({ ok: true });
   } catch (err) {

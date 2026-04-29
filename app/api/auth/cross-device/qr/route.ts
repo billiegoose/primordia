@@ -32,9 +32,13 @@ export async function GET(request: NextRequest) {
     // Use forwarded headers so the URL is correct when running behind a reverse proxy.
     // Include basePath so preview server environments with a path prefix work correctly.
     const tokenType = request.nextUrl.searchParams.get("type");
+    // Optional: the requester may embed its ephemeral ECDH public key so the
+    // approver can encrypt credentials for it. Forward it to the destination URL.
+    const pk = request.nextUrl.searchParams.get("pk");
+    const pkSuffix = pk ? `&pk=${encodeURIComponent(pk)}` : "";
     const destPath = tokenType === "push"
       ? `/login/cross-device-receive?token=${tokenId}`
-      : `/login/approve?token=${tokenId}`;
+      : `/login/approve?token=${tokenId}${pkSuffix}`;
     const approvalUrl = `${getPublicOrigin(request)}${basePath}${destPath}`;
 
     const svg = await QRCode.toString(approvalUrl, {

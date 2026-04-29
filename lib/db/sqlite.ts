@@ -97,7 +97,7 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
     );
   `);
 
-  // Migration: add push-flow columns to cross_device_tokens
+  // Migration: add push-flow columns to cross_device_tokens (no longer used but kept for compat)
   try {
     db.exec("ALTER TABLE cross_device_tokens ADD COLUMN api_key_jwk TEXT");
   } catch {
@@ -105,6 +105,12 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
   }
   try {
     db.exec("ALTER TABLE cross_device_tokens ADD COLUMN credentials_key_jwk TEXT");
+  } catch {
+    // Column already exists — ignore
+  }
+  // Migration: add encrypted_credentials column for pull-flow ECDH credential transfer
+  try {
+    db.exec("ALTER TABLE cross_device_tokens ADD COLUMN encrypted_credentials TEXT");
   } catch {
     // Column already exists — ignore
   }
@@ -364,12 +370,13 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
     },
     async getCrossDeviceToken(id: string) {
       const r = db
-        .prepare("SELECT id, status, user_id, expires_at FROM cross_device_tokens WHERE id = ?")
+        .prepare("SELECT id, status, user_id, expires_at, encrypted_credentials FROM cross_device_tokens WHERE id = ?")
         .get(id) as {
         id: string;
         status: string;
         user_id: string | null;
         expires_at: number;
+        encrypted_credentials: string | null;
       } | null;
       if (!r) return null;
       return {
@@ -377,12 +384,13 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
         status: r.status as CrossDeviceToken["status"],
         userId: r.user_id,
         expiresAt: r.expires_at,
+        encryptedCredentials: r.encrypted_credentials ?? null,
       };
     },
-    async approveCrossDeviceToken(id: string, userId: string) {
+    async approveCrossDeviceToken(id: string, userId: string, encryptedCredentials?: string | null) {
       db.prepare(
-        "UPDATE cross_device_tokens SET status = 'approved', user_id = ? WHERE id = ?"
-      ).run(userId, id);
+        "UPDATE cross_device_tokens SET status = 'approved', user_id = ?, encrypted_credentials = ? WHERE id = ?"
+      ).run(userId, encryptedCredentials ?? null, id);
     },
     async deleteCrossDeviceToken(id: string) {
       db.prepare("DELETE FROM cross_device_tokens WHERE id = ?").run(id);

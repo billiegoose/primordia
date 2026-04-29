@@ -1,47 +1,54 @@
-# QR Login Dialog Popup from Hamburger Menu with Credential Key Transfer
+# QR Login Dialog — Credential Sync for Both Flows + Inline Approve Tab
 
 ## What changed
 
-Added a "Sign in on another device" dialog accessible from the hamburger menu for logged-in users. This implements a new **push flow** for cross-device authentication — where the already-authenticated device generates the QR code instead of the new device. AES encryption keys are transferred directly through the QR code URL fragment, bypassing the server entirely.
-
 ### New files
 
-- **`components/QrSignInOtherDeviceDialog.tsx`** — Modal dialog that generates a pre-approved QR code **client-side**. Reads AES encryption key JWKs from localStorage, encodes them as base64url in the URL fragment (`#k1=...&k2=...`), and generates the QR code in the browser using `qrcode`. The keys are embedded only in the QR code — they never leave the browser.
-- **`app/api/auth/cross-device/push/route.ts`** — New `POST /api/auth/cross-device/push` endpoint. Requires an active session. Creates a cross-device token pre-approved with the caller's userId. Token expires in 10 minutes like pull tokens. No keys involved.
-- **`app/login/cross-device-receive/page.tsx`** — Landing page for the scanning device. Reads AES key JWKs from `window.location.hash` on mount, stores them in localStorage, then clears the fragment from the URL bar (to keep keys out of browser history). Polls the token, sets the session cookie (via the poll endpoint), then redirects home.
+- **`lib/cross-device-creds.ts`** — Client-side ECDH P-256 helpers shared by the requester and approver sides of the pull flow. Exports `generateEcdhKeypair`, `exportEcdhPubKeyB64u`, `encryptCredentialsForRequester`, and `decryptReceivedCredentials`.
 
 ### Modified files
 
-- **`components/HamburgerMenu.tsx`** — Added "Sign in on another device" menu item (with QrCode icon, blue hover) under the "Signed in as" section, above "Sign out". Opens `QrSignInOtherDeviceDialog`.
-- **`app/api/auth/cross-device/qr/route.ts`** — Added `?type=push` query param support for the pull-flow QR (push-flow QR is now generated client-side and does not use this endpoint).
-- **`app/api/auth/cross-device/poll/route.ts`** — Simplified: returns only `{ status, username }` on approval. No longer decrypts or returns AES key JWKs (keys travel via the QR code fragment instead).
-- **`app/api/auth/cross-device/start/route.ts`** — Removed obsolete null JWK fields from `createCrossDeviceToken` call.
-- **`lib/db/types.ts`** — Removed `apiKeyJwk` and `credentialsKeyJwk` from `CrossDeviceToken` (keys no longer stored in DB). Removed `createCrossDevicePushToken` from `DbAdapter` (push now uses the regular `createCrossDeviceToken` with `status: "approved"`).
-- **`lib/db/sqlite.ts`** — Removed `createCrossDevicePushToken` implementation. Simplified `getCrossDeviceToken` to not read JWK columns (columns remain in DB schema but are unused — no migration needed).
-- **`components/auth-tabs/cross-device/index.tsx`** — Fixed description text on the login page: accurately describes the pull flow (scan with camera → approval screen) and points users to the hamburger "Sign in on another device" option when they also want credential keys copied.
+- **`components/QrSignInOtherDeviceDialog.tsx`** — The "Sign in on another device" hamburger dialog now has two tabs:
+  - **"Sign in another device"** (push flow, unchanged): shows a QR code with AES keys in the URL fragment for immediate sign-in + credential copy.
+  - **"Approve a sign-in"** (new): lets the logged-in user paste a QR URL or bare token ID from the login page and click "Approve sign-in" inline — no need to scan a QR code or navigate away. If the pasted URL contains a `pk=` credential key, credentials are also encrypted and sent along with the approval.
+
+- **`components/auth-tabs/cross-device/index.tsx`** — The login-page pull-flow QR tab now participates in credential sync. On mount it generates an ephemeral ECDH P-256 keypair; the public key is appended to the QR image URL as `pk=<b64url>`. When the poll returns "approved" with an `encryptedCredentials` bundle, the tab decrypts it with the in-memory private key and saves the keys to localStorage. Description updated to reflect that credentials transfer now also works in the pull flow.
+
+- **`app/login/approve/page.tsx`** — The approval page now reads an optional `pk=<ecdhPubKey>` query param. After the user approves, it reads its own AES keys from localStorage, encrypts them for the requester using ECDH P-256, and sends the encrypted bundle alongside the approval POST. A blue "Your credential keys will also be copied" notice appears before the Approve button when a `pk` is present and the approver has credentials. The success message confirms whether credentials were synced.
+
+- **`lib/db/types.ts`** — Added `encryptedCredentials: string | null` to `CrossDeviceToken`. Updated `approveCrossDeviceToken` signature to accept an optional `encryptedCredentials` argument.
+
+- **`lib/db/sqlite.ts`** — Added migration (`ALTER TABLE cross_device_tokens ADD COLUMN encrypted_credentials TEXT`). Updated `getCrossDeviceToken` to read the new column. Updated `approveCrossDeviceToken` to write it.
+
+- **`app/api/auth/cross-device/approve/route.ts`** — Now accepts optional `encryptedCredentials: EncryptedCredBundle` in the POST body and stores it (as JSON string) on the token.
+
+- **`app/api/auth/cross-device/poll/route.ts`** — When returning an "approved" response, includes the parsed `encryptedCredentials` object if the token carries one. The bundle is read before the token is deleted so it can be returned.
+
+- **`app/api/auth/cross-device/qr/route.ts`** — Forwards an optional `pk=` query parameter to the destination URL so the public key travels through the server-generated QR code.
+
+- **`app/api/auth/cross-device/push/route.ts`** and **`start/route.ts`** — Added `encryptedCredentials: null` to token creation calls to satisfy the updated `CrossDeviceToken` type.
+
+---
 
 ## Why
 
-The previous QR login flow (pull) required the new device (phone) to show the QR code and the logged-in device (laptop) to scan it via an approve page. This is counterintuitive — most users expect the logged-in device to show the code.
+### "Approve this login" inline
 
-The new push flow is more natural: you're already logged in on your laptop, you open the hamburger menu, click "Sign in on another device", and show the QR to your phone. Scanning it logs the phone in and copies your API key and Claude credentials encryption keys.
+Previously, approving a pull-flow login required the approver to scan a QR code with their phone camera, navigate to `/login/approve`, and click a button there. Adding an "Approve a sign-in" tab to the existing hamburger dialog means desktop users can complete the full round-trip without touching a camera — they copy-paste the URL from the QR and approve with one click.
 
-The pull flow (login page → QR tab) is preserved for cases where only the new device is present.
+### Credential sync for the pull flow
 
-## Security model for AES key transfer
+The push flow (hamburger → "Sign in on another device") already copied credentials via the QR fragment. The pull flow (login page → QR tab) only issued a session — the new device had no API key or credential keys.
 
-The AES-256-GCM keys are the local half of Primordia's split-encryption scheme — the encrypted ciphertexts live on the server, while only the browser holds the keys. Transferring them must not require the server to learn them.
+The ECDH approach keeps the same security properties as the push flow while routing through the server (since the pull flow QR is server-generated and can't carry secrets in a fragment):
 
-The push flow uses the **URL fragment** (`#`) as a zero-server-involvement transfer channel:
+1. **Requester generates an ephemeral ECDH P-256 keypair** on mount. The private key lives only in React state (`useRef`) and never leaves the browser.
+2. **The public key is embedded in the QR URL** as `pk=<87-char base64url>`. It travels to the approver device via the QR code image.
+3. **The approver encrypts its credentials** (two AES-256-GCM JWK strings) using a derived AES key (ECDH shared secret between approver's ephemeral keypair and the requester's public key). The server stores only the opaque ciphertext — it cannot decrypt it.
+4. **The requester decrypts** using its in-memory private key when the poll returns the bundle.
 
-1. **Device A (client-side only)**: the dialog reads AES JWK strings from localStorage, encodes them as base64url, and appends them to the receive URL as fragment parameters (`#k1=...&k2=...`). The QR code is generated entirely in the browser using `qrcode`. The server receives only a `POST /push` request with no key material.
+A server compromise, DB dump, or network intercept cannot recover the AES keys: the server only ever sees the ciphertext and neither ECDH private key. The only attack surface is physical (someone observing the QR code while the `pk` key is embedded), and the keys are ephemeral — a new keypair is generated on every page load.
 
-2. **QR code as physical channel**: the fragment-bearing URL is encoded into the QR code image displayed on Device A's screen. Device B scans the QR with its camera; the OS/browser opens the URL locally. The fragment portion (`#...`) is **never sent to the server** — HTTP requests strip it before sending.
+### Security model for AES key transfer (push flow — unchanged)
 
-3. **Device B (client-side only)**: the receive page reads `window.location.hash` on mount, decodes the base64url values, stores the JWK strings in localStorage, and immediately clears the hash from the URL bar via `history.replaceState` to prevent the keys from persisting in browser history.
-
-4. **Session**: Device B gets a session by polling the pre-approved token. That exchange contains only `{ status, username }` — no key material.
-
-This design means a server compromise, DB dump, or network intercept cannot recover the AES keys transferred via the push flow. The only attack surface is physical (someone photographing Device A's screen while the QR code is visible).
-
-The DB columns `api_key_jwk` and `credentials_key_jwk` remain in the SQLite schema (from the migration that added them) but are never written to or read from.
+The push flow embeds AES keys directly in the URL fragment. Fragments are never sent to the server by browsers. The QR code is generated client-side so the server never sees the fragment URL. Keys travel only through the physical QR code.

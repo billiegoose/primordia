@@ -40,6 +40,7 @@ export async function POST() {
       status: "approved",
       userId: user.id,
       expiresAt: Date.now() + CROSS_DEVICE_TOKEN_TTL_MS,
+      encryptedCredentials: null,
     });
 
     // Clean up old tokens opportunistically.

@@ -37,6 +37,8 @@ export interface Session {
  *
  * Pull flow: the "requester" device (e.g. phone) creates one and shows a QR
  * code; the "approver" device (already signed in) scans and approves it.
+ * The QR URL embeds the requester's ephemeral ECDH public key (`pk=`) so the
+ * approver can encrypt its credentials for the requester when approving.
  *
  * Push flow: the logged-in device creates a pre-approved token (status already
  * "approved"). AES key transfer happens via the QR code URL fragment — the keys
@@ -49,6 +51,12 @@ export interface CrossDeviceToken {
   /** Set when the approver approves — the userId of the approving user. */
   userId: string | null;
   expiresAt: number;
+  /**
+   * JSON-encoded EncryptedCredBundle (from lib/cross-device-creds.ts), or null.
+   * Set by the approver when it encrypts its own AES credentials for the requester.
+   * Only present in the pull flow when the requester embedded a `pk=` param in the QR URL.
+   */
+  encryptedCredentials: string | null;
 }
 
 /**
@@ -150,7 +158,8 @@ export interface DbAdapter {
   // Cross-device QR tokens
   createCrossDeviceToken(token: CrossDeviceToken): Promise<void>;
   getCrossDeviceToken(id: string): Promise<CrossDeviceToken | null>;
-  approveCrossDeviceToken(id: string, userId: string): Promise<void>;
+  /** Approve the token. Pass encryptedCredentials (JSON string) if the approver is syncing keys. */
+  approveCrossDeviceToken(id: string, userId: string, encryptedCredentials?: string | null): Promise<void>;
   deleteCrossDeviceToken(id: string): Promise<void>;
   deleteExpiredCrossDeviceTokens(): Promise<void>;
 
