@@ -168,7 +168,7 @@ export function HamburgerMenu({ sessionUser, onLogout, items, containerRef }: Ha
                 data-id="nav-menu/credentials"
                 type="button"
                 onClick={() => { setMenuOpen(false); setCredentialsDialogOpen(true); }}
-                className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-300 hover:text-sky-400 hover:bg-gray-800 transition-colors"
+                className="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-300 hover:text-sky-400 hover:bg-gray-800 transition-colors"
               >
                 <FileKey size={16} strokeWidth={2} aria-hidden="true" />
                 Claude Credentials
