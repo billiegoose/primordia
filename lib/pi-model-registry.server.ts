@@ -60,6 +60,15 @@ type RawModel = {
 };
 
 /**
+ * Model IDs present in the pi SDK registry but not yet available via the
+ * provider's API. Hard-coded here because we can't detect unavailability
+ * until a user hits a 400 at runtime.  Update when models become available.
+ */
+const UNAVAILABLE_MODELS = new Set<string>([
+  'gpt-5.4-mini', // registered in pi SDK but returns 400 from OpenAI API
+]);
+
+/**
  * Reduce a flat list of models down to the most recent, non-redundant entries.
  *
  * Four rules applied in order:
@@ -85,8 +94,12 @@ type RawModel = {
  *            o3-mini / o4-mini → keep o4-mini
  */
 function filterToLatestVersions(models: RawModel[]): RawModel[] {
+  // R0 — Drop models that are registered in the SDK but known to be
+  //       unavailable via the provider's API.
+  let out = models.filter((m) => !UNAVAILABLE_MODELS.has(m.id));
+
   // R1
-  let out = models.filter(
+  out = out.filter(
     (m) => !m.name.includes('(latest)') && !/\(\d{4}/.test(m.name),
   );
 
