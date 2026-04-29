@@ -805,6 +805,12 @@ export default function EvolveSessionView({
   const [stuckBlockingSessionId, setStuckBlockingSessionId] = useState<string | null>(null);
   const [isResettingStuck, setIsResettingStuck] = useState(false);
   const [forceResetError, setForceResetError] = useState<string | null>(null);
+  /** Timestamp of the last NDJSON event received from the SSE stream (ms since epoch). */
+  const lastNdjsonEventTimeRef = useRef<number>(Date.now());
+  /** Whether the "Stuck?" button should be visible (30 s since last NDJSON event). */
+  const [showStuckButton, setShowStuckButton] = useState(false);
+  /** Whether the stuck-reset confirmation dialog is open. */
+  const [stuckConfirmOpen, setStuckConfirmOpen] = useState(false);
   /** Which of the three action panels is currently expanded, or null if all collapsed. */
   const [activeAction, setActiveAction] = useState<"accept" | "reject" | "followup" | null>(null);
   /** Element selected via the WebPreviewPanel inspector tool, to be attached as context to a follow-up. */
@@ -863,6 +869,27 @@ export default function EvolveSessionView({
 
   // Keep refs in sync so the visibilitychange handler always has the latest values.
   useEffect(() => { statusRef.current = status; }, [status]);
+
+  // Show the "Stuck?" button if no new NDJSON events have arrived for 30 seconds
+  // while the session is in a long-running pipeline state.
+  useEffect(() => {
+    const STUCK_THRESHOLD_MS = 30_000;
+    const isLongRunning = status === "accepting" || status === "fixing-types";
+    if (!isLongRunning) {
+      setShowStuckButton(false);
+      return;
+    }
+    // Reset timer whenever we enter a long-running state.
+    lastNdjsonEventTimeRef.current = Date.now();
+    setShowStuckButton(false);
+
+    const interval = setInterval(() => {
+      if (Date.now() - lastNdjsonEventTimeRef.current >= STUCK_THRESHOLD_MS) {
+        setShowStuckButton(true);
+      }
+    }, 2_000);
+    return () => clearInterval(interval);
+  }, [status]);
 
   // When the session becomes ready (e.g. after Claude finishes), refresh the
   // diff summary so the "Files changed" section reflects the latest commits.
@@ -932,6 +959,9 @@ export default function EvolveSessionView({
             if (parsed.events && parsed.events.length > 0) {
               setEvents((prev) => [...prev, ...parsed.events!]);
               if (parsed.lineCount != null) lineCountRef.current = parsed.lineCount;
+              // Reset the stuck-button timer whenever new events arrive.
+              lastNdjsonEventTimeRef.current = Date.now();
+              setShowStuckButton(false);
             } else if (parsed.lineCount != null) {
               lineCountRef.current = parsed.lineCount;
             }
@@ -1515,14 +1545,14 @@ export default function EvolveSessionView({
                 <Loader2 size={16} className="animate-spin flex-shrink-0" />
                 Accepting changes…
               </div>
-              {canEvolve && (
+              {canEvolve && showStuckButton && (
                 <button
-                  onClick={() => void handleForceReset(sessionId)}
+                  onClick={() => setStuckConfirmOpen(true)}
                   disabled={isResettingStuck}
-                  title="Force-reset if the accept pipeline is stuck (e.g. the server was restarted mid-deploy)"
-                  className="text-xs px-2 py-1 rounded border border-red-700 text-red-400 hover:bg-red-900/30 hover:text-red-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="No activity for 30 s — click to force-reset if the accept pipeline is stuck"
+                  className="text-xs px-2 py-1 rounded border border-yellow-700 text-yellow-400 hover:bg-yellow-900/30 hover:text-yellow-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {isResettingStuck ? "Resetting…" : "Force Reset"}
+                  Stuck?
                 </button>
               )}
             </div>
@@ -1532,14 +1562,14 @@ export default function EvolveSessionView({
                 <Loader2 size={16} className="animate-spin flex-shrink-0" />
                 Fixing type errors… will auto-accept when complete.
               </div>
-              {canEvolve && (
+              {canEvolve && showStuckButton && (
                 <button
-                  onClick={() => void handleForceReset(sessionId)}
+                  onClick={() => setStuckConfirmOpen(true)}
                   disabled={isResettingStuck}
-                  title="Force-reset if the type-fix pipeline is stuck (e.g. the server was restarted mid-fix)"
-                  className="text-xs px-2 py-1 rounded border border-red-700 text-red-400 hover:bg-red-900/30 hover:text-red-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="No activity for 30 s — click to force-reset if the type-fix pipeline is stuck"
+                  className="text-xs px-2 py-1 rounded border border-yellow-700 text-yellow-400 hover:bg-yellow-900/30 hover:text-yellow-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {isResettingStuck ? "Resetting…" : "Force Reset"}
+                  Stuck?
                 </button>
               )}
             </div>
@@ -1809,6 +1839,48 @@ export default function EvolveSessionView({
         />
       </aside>
       </>
+    )}
+
+    {/* ── Stuck? confirmation dialog ── */}
+    {stuckConfirmOpen && (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+        onClick={() => setStuckConfirmOpen(false)}
+      >
+        <div
+          className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl p-6 max-w-sm w-full mx-4"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <h2 className="text-white font-semibold text-base mb-2">Force Reset?</h2>
+          <p className="text-gray-400 text-sm mb-5">
+            No progress has been logged for over 30 seconds. This resets the session to{" "}
+            <span className="text-amber-300">ready</span> so you can retry or make a follow-up
+            request. Use this only if the pipeline appears genuinely stuck (e.g. the server was
+            restarted mid-deploy).
+          </p>
+          {forceResetError && (
+            <p className="text-red-400 text-xs mb-3">{forceResetError}</p>
+          )}
+          <div className="flex gap-3 justify-end">
+            <button
+              onClick={() => setStuckConfirmOpen(false)}
+              className="px-4 py-2 rounded-lg text-sm text-gray-300 hover:text-white hover:bg-gray-800 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                setStuckConfirmOpen(false);
+                void handleForceReset(sessionId);
+              }}
+              disabled={isResettingStuck}
+              className="px-4 py-2 rounded-lg text-sm bg-red-800 hover:bg-red-700 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {isResettingStuck ? "Resetting…" : "Force Reset"}
+            </button>
+          </div>
+        </div>
+      </div>
     )}
     </div>
   );
