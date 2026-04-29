@@ -26,7 +26,7 @@ const HARNESS_PROVIDERS: Record<string, string[]> = {
  */
 function formatPricing(
   cost: { input: number; output: number } | undefined,
-): string | null {
+): { full: string; input: string } | null {
   if (!cost) return null;
   const { input, output } = cost;
   if (input === 0 && output === 0) return null;
@@ -42,7 +42,7 @@ function formatPricing(
     return `$${parseFloat(n.toPrecision(2))}`;
   }
 
-  return `${fmt(input)}→${fmt(output)}/M`;
+  return { full: `${fmt(input)}→${fmt(output)}/M`, input: `${fmt(input)}/M` };
 }
 
 // User-facing provider labels used in the model description field.
@@ -156,15 +156,16 @@ export function getModelOptionsByHarness(): Record<string, ModelOption[]> {
     result[harnessId] = filtered.map((m) => {
       const providerLabel = PROVIDER_LABELS[m.provider] ?? m.provider;
       const reasoningLabel = m.reasoning ? ' · reasoning' : '';
-      const pricingLabel = formatPricing(m.cost);
-      const description = pricingLabel
-        ? `${providerLabel}${reasoningLabel} · ${pricingLabel}`
+      const pricing = formatPricing(m.cost);
+      const description = pricing
+        ? `${providerLabel}${reasoningLabel} · ${pricing.full}`
         : `${providerLabel}${reasoningLabel}`;
       return {
         id: m.id,
         label: m.name,
         description,
-        pricingLabel: pricingLabel ?? undefined,
+        pricingLabel: pricing?.full,
+        inputPriceLabel: pricing?.input,
       };
     });
   }

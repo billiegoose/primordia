@@ -580,7 +580,7 @@ export function EvolveRequestForm({
                   >
                     {(modelOptionsByHarness[selectedHarness] ?? []).map((m) => (
                       <option key={m.id} value={m.id} title={m.description}>
-                        {m.pricingLabel ? `${m.label}  ·  ${m.pricingLabel}` : m.label}
+                        {m.inputPriceLabel ? `${m.label} (${m.inputPriceLabel})` : m.label}
                       </option>
                     ))}
                   </select>

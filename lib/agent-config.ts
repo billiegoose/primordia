@@ -16,8 +16,10 @@ export interface ModelOption {
   id: string;
   label: string;
   description: string;
-  /** Concise price string, e.g. "$3 in / $15 out /M tok" */
+  /** Full concise price string, e.g. "$3→$15/M" — shown as a hint after selection */
   pricingLabel?: string;
+  /** Input-only price label, e.g. "$3/M" — shown inline in the dropdown */
+  inputPriceLabel?: string;
 }
 
 export const HARNESS_OPTIONS: HarnessOption[] = [

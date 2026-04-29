@@ -4,7 +4,7 @@
 
 The model selector in the evolve request form (Advanced section) now displays concise pricing information alongside each model name, making it easy to compare cost before picking a model.
 
-- Each `<option>` in the Model dropdown shows the model name followed by an input→output price tag, e.g. `Claude Sonnet 4.6  ·  $3→$15/M`.
+- Each `<option>` in the Model dropdown shows the model name followed by the input token price in parentheses, e.g. `Claude Sonnet 4.6 ($3/M)`.
 - A small hint line below the dropdown shows the full description for the selected model (provider, reasoning flag, and price), e.g. `Anthropic · $3→$15/M`.
 - Pricing is formatted compactly: sub-dollar amounts use cents notation (`80¢`), dollar amounts strip unnecessary decimals (`$3`, `$2.5`).
 
