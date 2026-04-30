@@ -11,7 +11,7 @@
 
 ## What Is Primordia?
 
-Primordia is a self-modifying web application. Users interact with an AI chat interface. To propose a change to the app, they open the hamburger (☰) menu in the header and choose "Propose a change" to navigate to the `/evolve` page — a dedicated "submit a request" form. Requests are automatically built as local git worktree previews, powered by the Claude Agent SDK. Users then accept or reject each preview.
+Primordia is a self-modifying web application. Users land on a marketing page, then propose changes to the app by opening the hamburger (☰) menu and choosing "Propose a change" — or navigating directly to the `/evolve` page. Requests are automatically built as local git worktree previews, powered by the Claude Agent SDK. Users then accept or reject each preview.
 
 The core idea: **the app becomes whatever its users need it to be**, with no coding or git knowledge required from users.
 
@@ -25,7 +25,7 @@ The core idea: **the app becomes whatever its users need it to be**, with no cod
 | Frontend framework | Next.js 16 (App Router) | AI models write Next.js well |
 | Styling | Tailwind CSS | AI models write Tailwind well; no CSS files to manage |
 | Language | TypeScript | Catches mistakes; Claude Code understands it well |
-| AI API | Anthropic SDK (`@anthropic-ai/sdk`) | Streaming chat via `claude-sonnet-4-6`; routes through exe.dev LLM gateway by default; users may override with their own Anthropic API key (stored in localStorage, encrypted in transit via RSA-OAEP) |
+| AI API | Anthropic SDK (`@anthropic-ai/sdk`) | Routes through exe.dev LLM gateway by default; users may override with their own Anthropic API key or Claude Code credentials.json (stored in localStorage/DB, encrypted in transit via RSA-OAEP) |
 | Hosting | exe.dev | Production builds via `bun run build && bun run start`; single systemd service (`primordia-proxy`) manages both proxy and production app; blue/green slot swap on accept |
 | AI code gen | `@anthropic-ai/claude-agent-sdk` | `query()` runs Claude Code in git worktrees for evolve requests |
 | Database | bun:sqlite | Local SQLite for passkey auth **and evolve session persistence**; same adapter on exe.dev and local dev |
@@ -53,7 +53,7 @@ primordia/
 │   └── *.md                       ← Filename = short description; body = full what+why detail
 │
 ├── scripts/
-│   ├── reverse-proxy.ts          ← HTTP reverse proxy for zero-downtime blue/green AND preview servers; listens on REVERSE_PROXY_PORT; reads production branch from git config (primordia.productionBranch), then looks up branch.{name}.port; discovers main repo from any worktree in PRIMORDIA_WORKTREES_DIR; on startup spawns the production Next.js server if not already running and tracks the process; captures prod server stdout/stderr in a 50 KB ring buffer; exposes POST /_proxy/prod/spawn (SSE, body: { branch }) — looks up port and worktree path from git config/worktree list, then spawns, health-checks, updates git config, and SIGTERMs old server; exposes GET /_proxy/prod/logs (SSE) — streams prod server log buffer + live output; watches .git/config for instant cutover; routes /preview/{branchName} paths to session preview servers (branches with slashes not supported); installed to ~/primordia-proxy.ts by install-service.sh
+│   ├── reverse-proxy.ts          ← HTTP reverse proxy for zero-downtime blue/green AND preview servers; listens on REVERSE_PROXY_PORT; reads production branch from git config (primordia.productionBranch); discovers worktrees via $PRIMORDIA_DIR; captures prod server stdout/stderr in a 50 KB ring buffer; exposes POST /_proxy/prod/spawn (SSE) and GET /_proxy/prod/logs (SSE); watches .git/config for instant cutover; routes /preview/{branchName} to session preview servers (no slashes in branch names); installed to ~/primordia-proxy.ts by scripts/install.sh
 │   ├── assign-branch-ports.sh    ← Idempotent migration script: assigns ephemeral ports to all local branches in git config (branch.{name}.port); main gets 3001, others get 3002+
 │   ├── rollback.ts               ← Standalone CLI rollback script: updates primordia.productionBranch to the previous slot (second entry in primordia.productionHistory) and restarts primordia-proxy; use when the server itself is broken and /api/admin/rollback is unreachable
 │   ├── install.sh                ← Primordia setup script; supports two invocation methods; idempotent
@@ -65,7 +65,7 @@ primordia/
 │   (no generated files)
 │
 ├── lib/
-│   ├── system-prompt.ts           ← Builds chat system prompt at runtime: reads CLAUDE.md + last 30 changelog filenames on each request
+│   ├── system-prompt.ts           ← Builds the evolve agent system prompt at runtime: reads CLAUDE.md + last 30 changelog filenames on each request
 │   ├── auth.ts                    ← Session helpers: createSession, getSessionUser, isAdmin (admin role check), hasEvolvePermission (admin or can_evolve role)
 │   ├── base-path.ts               ← basePath constant + withBasePath() helper; used by all client-side fetch() calls to prefix API routes when NEXT_BASE_PATH is set
 │   ├── hooks.ts                   ← Shared React hooks: useSessionUser (fetches session on mount, provides logout)
@@ -122,7 +122,7 @@ primordia/
 │
 └── app/                           ← Next.js App Router
     ├── layout.tsx                 ← Root layout (font, metadata, body styling)
-    ├── page.tsx                   ← Landing page — marketing/feature overview; links to /chat and /evolve
+    ├── page.tsx                   ← Landing page — marketing/feature overview; links to /evolve and /login
     ├── globals.css                ← Tailwind base imports only
     ├── icon.png                   ← App favicon
     ├── ChangelogNewsticker.tsx    ← Server component: renders last 12 changelog entries as an animated horizontal newsticker
@@ -138,8 +138,6 @@ primordia/
     ├── changelog/
     │   ├── page.tsx               ← Server component: reads changelog/ filenames at runtime; lazy-loads body via /api/changelog
     │   └── ChangelogEntryDetails.tsx ← Client component: single changelog <details> widget; lazy-loads body from /api/changelog on first open
-    ├── chat/
-    │   └── page.tsx               ← Server component: chat interface + ChatInterface client; redirects to /login if unauthenticated
     ├── admin/
     │   ├── page.tsx               ← Admin panel: grant/revoke evolve access per user; tab subnav
     │   ├── AdminPermissionsClient.tsx ← Client component: grant/revoke 'can_evolve' role per user
@@ -190,7 +188,6 @@ primordia/
     │       └── route.ts           ← Serves the JSON Schema for Primordia instance manifests
     └── api/
         ├── changelog/route.ts         ← GET ?filename=...: returns raw markdown body of one changelog file (lazy-load)
-        ├── chat/route.ts              ← Streams Claude responses via SSE
         ├── git/[...path]/route.ts     ← GET/POST git http-backend proxy (read-only clone/fetch); push blocked with 403
         ├── markdown-stream/route.ts   ← Streams markdown sample character-by-character via SSE (for testing MarkdownContent)
         ├── openapi/route.ts           ← Serves OpenAPI spec, generating on first request if not on disk
@@ -246,15 +243,6 @@ primordia/
 
 ### Data Flow
 
-#### Normal Chat
-```
-User types message
-  → POST /api/chat
-  → Anthropic API (claude-sonnet-4-6, streaming)
-  → SSE stream back to browser
-  → Message appended to chat
-```
-
 #### Evolve Request
 ```
 User types change request on /evolve page
@@ -265,9 +253,8 @@ User types change request on /evolve page
       → returns { sessionId }
   → browser redirects to /evolve/session/{sessionId}
   → server component reads initial state from SQLite, renders EvolveSessionView
-  → git worktree add ../{branchName} -b {branchName}
-  → git worktree add $PRIMORDIA_DIR/{branchName} -b {branchName}
-       (flat layout: $PRIMORDIA_DIR/main = main repo; $PRIMORDIA_DIR/{branchName} = worktrees; branches with slashes not supported)
+  → git worktree add $PRIMORDIA_DIR/worktrees/{branchName} -b {branchName}
+       ($PRIMORDIA_DIR is set by the installer — the repo root for fresh installs, two levels above the worktree for worktree-based installs; branches with slashes not supported)
   → bun install in worktree
   → copy .primordia-auth.db + symlink .env.local into worktree
   → @anthropic-ai/claude-agent-sdk query() in worktree
@@ -280,7 +267,7 @@ User types change request on /evolve page
       → GET streams delta progressText + state every 500 ms from SQLite until terminal
   → Preview link shown when status becomes "ready"
   → User clicks Accept → POST /api/evolve/manage { action: "accept" }
-      → pre-accept gates: ancestor check, clean worktree, bun run typecheck, bun run build (all in session worktree)
+      → pre-accept gates: (1) ancestor check — auto-merges parent if ahead; (2) clean worktree — auto-commits unstaged changes; (3) concurrent deploy guard — returns 409 if another session is already `accepting`; then runs install.sh which includes typecheck + build
       → blue/green deploy (production): bun install in worktree → session branch becomes new prod as-is (no merge commit; Gate 1 guarantees it already contains parentBranch)
           → parentBranch ref NOT advanced — old slot stays at pre-accept commit so rollback can match it by branch name
           → sibling sessions whose git config parent = parentBranch are reparented to session branch (so "Apply Updates" picks up new prod)
@@ -288,8 +275,7 @@ User types change request on /evolve page
           → copy prod DB from old slot into new slot (preserves auth data)
           → fix .env.local symlink in new slot to point to main repo (prevents dangling link)
           → POST /_proxy/prod/spawn to the reverse proxy (SSE stream): proxy spawns new prod server, health-checks it, sets primordia.productionBranch + productionHistory in git config, and switches traffic; proxy does NOT kill the old prod server
-          → run scripts/update-service.sh in the new worktree: daemon-reload if service unit changed; systemctl restart primordia-proxy if reverse-proxy.ts changed
-          → old prod server self-terminates (process.exit) after update-service.sh completes; proxy owns the new server process
+          → old prod server self-terminates (process.exit) after the proxy switches traffic; proxy owns the new server process
           → old slots accumulate indefinitely as registered git worktrees (enables deep rollback via /admin/rollback)
       → legacy deploy (local dev, NODE_ENV !== 'production'): git merge in production dir → bun install → worktree remove
   → User clicks Reject → POST /api/evolve/manage { action: "reject" }
@@ -371,31 +357,18 @@ Primordia uses a simple role-based access control system stored in SQLite.
 
 ---
 
-#### Deploy to exe.dev (one-command remote dev server)
-```
-bun run deploy-to-exe.dev <server-name>
-  → scp .env.local → <server-name>.exe.xyz
-  → ssh: install git + bun if missing
-  → ssh: git clone / git pull origin main
-  → ssh: bun install
-  → ssh: bun run build
-  → ssh: systemd service starts `bun run start`
-  → wait for "Ready" signal, tail logs
-  → app is reachable at http://<server-name>.exe.xyz:3000
-```
-
 ---
 
 ## Environment Variables
 
 These must be set in:
 - **Local development**: `.env.local` (copy from `.env.example`)
-- **exe.dev**: `.env.local` must be created manually on the VM after running `scripts/install-for-exe-dev.sh`
+- **exe.dev**: `.env.local` is created by `scripts/install.sh` during provisioning
 
 | Variable | Required | Description |
 |---|---|---|
 | `REVERSE_PROXY_PORT` | Yes | Port the reverse proxy listens on (e.g. `3000`). Blue/green accepts and rollbacks use zero-downtime cutover via the proxy. |
-| `PRIMORDIA_WORKTREES_DIR` | No | Path to the worktrees directory (default `/home/exedev/primordia-worktrees`). Set automatically by the systemd service files. |
+| `PRIMORDIA_DIR` | No | Root directory of the Primordia installation. Set by the installer in the systemd service — not intended for manual configuration. Fresh installs: repo root. Worktree installs: two levels above the worktree (`$PRIMORDIA_DIR/worktrees/{branch}`). |
 | `NEXT_BASE_PATH` | No | URL sub-path prefix (e.g. `/primordia`) for hosting the app at a non-root path. Leave unset to serve from `/` (default). Sets both Next.js `basePath` config and `NEXT_PUBLIC_BASE_PATH` for client-side `fetch()` calls. Also set automatically on preview dev servers to `/preview/{sessionId}` when `REVERSE_PROXY_PORT` is active. |
 
 ---
@@ -428,17 +401,7 @@ The log is append-only and never truncated for the lifetime of the session.
 
 ## Git Config as Key-Value Store
 
-Primordia uses the local `.git/config` file as a lightweight key-value store for **non-sensitive runtime state**. This avoids extra files and keeps all mutable configuration in one well-understood place that git already manages.
-
-### When to use it
-
-Use git config for data that:
-- Is non-sensitive (no secrets, tokens, or credentials)
-- Needs to survive server restarts but doesn't need a full database
-- Is per-repo rather than per-user
-- May be read by the reverse proxy (`scripts/reverse-proxy.ts`) without starting the Next.js app
-
-Do **not** use git config for secrets (use environment variables / `.env.local`) or user-specific data (use SQLite via `lib/db/`).
+Primordia uses `.git/config` as a lightweight key-value store for **non-sensitive runtime state** (no secrets — use `.env.local`; no user data — use SQLite). The reverse proxy reads it directly without starting Next.js.
 
 ### Established namespaces
 
@@ -451,55 +414,13 @@ Do **not** use git config for secrets (use environment variables / `.env.local`)
 | `branch.{name}.*` | `branch.feature-x.parent` | Parent branch recorded at worktree creation for upstream-sync |
 | `remote.{name}.*` | `remote.primordia-official.updateSource` | Update source metadata extending the standard git remote section (see `lib/update-sources.ts`) |
 
-### Extending existing git namespaces
-
-Prefer **extending an existing namespace** over inventing a new one when the data naturally belongs to an existing git object. Primordia does this for two namespaces:
-
-- **`branch.{name}.*`** — extended with `branch.{name}.port` (ephemeral preview port) and `branch.{name}.parent` (parent branch for upstream-sync). Git already owns `branch.{name}.merge` and `branch.{name}.rebase`; we just add more fields to the same section.
-
-- **`remote.{name}.*`** — extended with `remote.{name}.updateSource`, `remote.{name}.displayName`, `remote.{name}.builtin`, and `remote.{name}.enabled` to mark and annotate update sources. Git already owns `remote.{name}.url` and `remote.{name}.fetch`; `git remote add` sets those, and Primordia adds the extra fields alongside.
-
-This means an update source entry looks like:
-
-```
-[remote "primordia-official"]
-    url          = https://primordia.exe.xyz/api/git
-    fetch        = +refs/heads/*:refs/remotes/primordia-official/*
-    updateSource = true
-    displayName  = Primordia Official
-    builtin      = true
-    enabled      = true
-```
-
-### Subsection pattern (multi-record collections)
-
-For collections of named records (whether extending an existing namespace or creating a new one), use git config **subsections** — exactly how git stores remotes and branches:
-
-Enumerate all records with `--get-regexp`:
-```bash
-git config --get-regexp 'remote\.[^.]+\.updatesource'
-# → remote.primordia-official.updatesource true
-```
-
-Read one field:
-```bash
-git config --get 'remote.primordia-official.displayName'
-```
-
-Remove a whole record:
-```bash
-git remote remove primordia-official   # standard git — removes entire [remote "..."] section
-# or for Primordia-only sections:
-git config --remove-section 'primordia-custom-section.my-record'
-```
-
 ### Output format of `--get-regexp`
 
-Each line is `<key><space><value>` with no `=`. Git **lowercases the section name and field name** but **preserves the subsection name's case**. Always split on the first space to separate key from value. Use `[^.]+` (not `.*`) when matching subsection names in regexes to avoid greedy matches across dots.
+Each line is `<key><space><value>` with no `=`. Git **lowercases the section and field names** but **preserves the subsection name's case**. Always split on the first space. Use `[^.]+` (not `.*`) in regexes to avoid greedy matches across dots.
 
 ### Code reference
 
-See `lib/update-sources.ts` for a complete worked example of the subsection pattern. See `lib/evolve-sessions.ts` (`getOrAssignBranchPort`) for a simple single-key read/write example.
+See `lib/update-sources.ts` for the subsection pattern. See `lib/evolve-sessions.ts` (`getOrAssignBranchPort`) for a simple single-key read/write example.
 
 ---
 
@@ -524,43 +445,34 @@ When implementing changes, follow these principles:
 
 | Feature | Status | Notes |
 |---|---|---|
-| Chat interface (streaming) | ✅ Live | Streams from `claude-sonnet-4-6` via SSE |
-| Evolve mode | ✅ Live | "Propose a change" in the hamburger opens a draggable/dockable floating dialog; `/evolve` page still exists as standalone |
+| Evolve mode | ✅ Live | "Propose a change" in the hamburger opens a draggable/dockable floating dialog; `/evolve` page also exists as standalone |
 | Local evolve pipeline | ✅ Live | git worktree → Claude Agent SDK → local preview → accept/reject |
 | Evolve follow-up requests | ✅ Live | Chain multiple Claude passes on the same branch; form appears when session is ready |
 | File attachments in evolve | ✅ Live | Attach images/files to initial and follow-up requests; files are copied into `worktree/attachments/` so Claude can read and use them |
-| Upstream changes indicator | ✅ Live | Session page shows how many commits the parent branch is ahead of the session branch, with Merge and Rebase buttons |
+| Multiple agent harnesses | ✅ Live | Evolve form lets users choose harness (claude-code or pi) and model; preferences persisted per-user in DB |
+| Upstream changes indicator | ✅ Live | Session page shows how many commits the parent branch is ahead of the session branch, with an "Apply Updates" button (merge only) |
 | Git diff summary | ✅ Live | Session page shows a collapsible "Files changed" section (file names + +/- LOC) once the session is ready/accepted/rejected |
 | Session from existing branch | ✅ Live | Branches page shows "+ session" next to branches with no active session; evolvers can attach the full AI preview pipeline to any pre-existing local branch |
-| Upstream changes indicator | ✅ Live | Session page shows how many commits the parent branch is ahead of the session branch, with an "Apply Updates" button (merge only) |
-| exe.dev deploy | ✅ Live | One-command SSH deploy; identical to local dev flow |
+| Upstream updates (/admin/updates) | ✅ Live | Admin-only; pull upstream Primordia changes from configured update sources; auto-scheduled fetches |
+| exe.dev deploy | ✅ Live | One-command SSH deploy via `bun run deploy-to-exe.dev <server-name>` |
 | Dark theme | ✅ Live | Default dark UI with Tailwind |
 | Passkey authentication | ✅ Live | WebAuthn passkeys via /login; sessions stored in SQLite |
 | Cross-device QR sign-in | ✅ Live | Laptop shows QR code; authenticated phone scans it and approves; laptop gets a session |
+| Credentials management | ✅ Live | Users can paste Claude Code credentials.json via the hamburger menu; stored AES-256-GCM encrypted in DB |
 | RBAC (roles) | ✅ Live | Simple role system: `admin` (auto-granted to first user) and `can_evolve`; /admin page lets admin grant/revoke roles; protected pages show informative 403 instead of redirecting |
-| Server logs (/admin/logs) | ✅ Live | Admin-only; live tail of production server stdout/stderr via SSE; in production routes through `/_proxy/prod/logs` on the reverse proxy; falls back to `journalctl -u primordia` in local dev; accessible from the admin subnav |
-| Proxy logs (/admin/proxy-logs) | ✅ Live | Admin-only; live tail of `journalctl -u primordia-proxy -f -n 100` via SSE; accessible from the admin subnav |
+| Server logs (/admin/logs) | ✅ Live | Admin-only; live tail of production server stdout/stderr via SSE; routes through `/_proxy/prod/logs` in production |
+| Proxy logs (/admin/proxy-logs) | ✅ Live | Admin-only; live tail of `journalctl -u primordia-proxy -f -n 100` via SSE |
 | Deep rollback (/admin/rollback) | ✅ Live | Admin-only; lists all previous production slots from primordia.productionHistory in git config; "Roll back" button for each target; zero-downtime cutover via reverse proxy |
-| Server health (/admin/server-health) | ✅ Live | Admin-only; shows disk and memory usage with visual bars; shows oldest non-prod worktree with a "Delete oldest" button to free disk space |
-| Git mirror (/admin/git-mirror) | ✅ Live | Admin-only; shows current `mirror` remote status and SSH instructions for adding it; every production deploy auto-pushes to `mirror` if it exists |
+| Server health (/admin/server-health) | ✅ Live | Admin-only; disk and memory usage with visual bars; oldest non-prod worktree cleanup |
+| Git mirror (/admin/git-mirror) | ✅ Live | Admin-only; every production deploy auto-pushes to `mirror` remote if it exists |
 | Instance identity & social graph | ✅ Live | Each instance has a fixed UUID v7, editable name+description; serves `/.well-known/primordia.json` with self+peers+edges; `/api/instance/register` lets child instances POST to register; admin panel at `/admin/instance` |
 | Read-only git HTTP | ✅ Live | Clone/fetch via `git clone http[s]://<host>/api/git`; proxied through `git http-backend`; push permanently blocked (403) |
-
----
-
-## Stretch Goals (Not Implemented)
-
-These were noted at project inception but are explicitly out of scope for the MVP:
-
-- **Fork flow**: one-click fork to user's own instance
-- **Voting**: upvote proposed evolve requests before they get built
-- **Rollback UI / Deep rollback**: Implemented — `/admin/rollback` lists all previous slots from `primordia.productionHistory` in git config with one-click rollback buttons
-- **Multi-tenant**: each user gets their own Primordia instance
+| OpenAPI spec | ✅ Live | Served at `/api/openapi`; generated on first request from `openapi-gen.config.json` |
 
 ## Changelog
 
 > **Changelog entries are stored exclusively in `changelog/`** — never in this file.
 > Each file is named `YYYY-MM-DD-HH-MM-SS Description.md`; the filename is the short description and the body has the full what+why detail.
 > **One PR = one changelog entry.** Do not create multiple changelog files for a single pull request — consolidate all changes into one entry.
-> The chat system prompt is built at runtime by `lib/system-prompt.ts`, which reads `CLAUDE.md` and the last 30 `changelog/` filenames on each request — no prebuild or codegen step needed. The `/changelog` page also reads `changelog/` directly at runtime. Having each entry as a separate timestamped file prevents merge conflicts.
+> The evolve agent system prompt is built at runtime by `lib/system-prompt.ts`, which reads `CLAUDE.md` and the last 30 `changelog/` filenames on each request — no prebuild or codegen step needed. The `/changelog` page also reads `changelog/` directly at runtime. Having each entry as a separate timestamped file prevents merge conflicts.
 > Do **not** add changelog bullets here.
