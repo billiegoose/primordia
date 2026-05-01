@@ -1,23 +1,45 @@
 "use client";
 
-// components/HamburgerMenu.tsx
-// Reusable hamburger menu button + dropdown. Used by EvolveForm,
-// EvolveSessionView, and PageNavBar. Manages open/close state and click-outside
-// behaviour internally; callers pass the session user and page-specific items.
-//
-// buildStandardMenuItems() returns the shared navigation items (Propose a change,
-// Branches, Admin) used by every primary app page,
-// so callers don't have to duplicate the icon JSX. Pass `currentPath` to
-// suppress the link to whichever page the user is already on.
-
 import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { clsx } from "clsx";
+import { twMerge } from "tailwind-merge";
 import type { SessionUser } from "../lib/hooks";
 import { Edit, Shield, X, Menu, LogOut, LogIn, Key, GitBranch, FileKey, QrCode } from "lucide-react";
 import { ApiKeyDialog } from "./ApiKeyDialog";
 import { CredentialsDialog } from "./CredentialsDialog";
 import { QrSignInOtherDeviceDialog } from "./QrSignInOtherDeviceDialog";
+
+const cn = (...inputs: Parameters<typeof clsx>) => twMerge(clsx(inputs));
+const ROW = "flex items-center gap-3 px-4 py-3 text-sm text-gray-300 hover:bg-gray-800 transition-colors";
+
+function MenuBtn({ dataId, className, onClick, children }: {
+  dataId?: string;
+  className?: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button type="button" data-id={dataId} onClick={onClick} className={cn(ROW, "w-full text-left", className)}>
+      {children}
+    </button>
+  );
+}
+
+function MenuLink({ dataId, className, href, onClick, children }: {
+  dataId?: string;
+  className?: string;
+  href: string;
+  onClick?: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <Link data-id={dataId} href={href} onClick={onClick} className={cn(ROW, className)}>
+      {children}
+    </Link>
+  );
+}
 
 export type { SessionUser };
 
@@ -25,8 +47,7 @@ export type { SessionUser };
 export interface MenuItem {
   icon: React.ReactNode;
   label: string;
-  /** Full Tailwind hover-colour class, e.g. "hover:text-amber-400". */
-  hoverColor: string;
+  className?: string;
   href?: string;
   onClick?: () => void;
   /** Stable data-id for testing/telemetry, e.g. "nav-menu/propose-change". */
@@ -60,14 +81,14 @@ export function buildStandardMenuItems({
   const items: MenuItem[] = [
     {
       label: "Propose a change",
-      hoverColor: "hover:text-amber-400",
+      className: "hover:text-amber-400",
       ...(onEvolveClick ? { onClick: onEvolveClick } : { href: "/evolve" }),
       dataId: "nav-menu/propose-change",
       icon: <Edit size={16} strokeWidth={2} aria-hidden="true" />,
     },
     {
       label: "Branches",
-      hoverColor: "hover:text-green-400",
+      className: "hover:text-green-400",
       href: "/branches",
       dataId: "nav-menu/branches",
       icon: <GitBranch size={16} strokeWidth={2} aria-hidden="true" />,
@@ -76,7 +97,7 @@ export function buildStandardMenuItems({
   if (isAdmin) {
     items.push({
       label: "Admin",
-      hoverColor: "hover:text-purple-400",
+      className: "hover:text-purple-400",
       href: "/admin",
       dataId: "nav-menu/admin",
       icon: <Shield size={16} strokeWidth={2} aria-hidden="true" />,
@@ -132,85 +153,48 @@ export function HamburgerMenu({ sessionUser, onLogout, items, containerRef }: Ha
                 <p className="text-xs text-gray-500">Signed in as</p>
                 <p className="text-sm text-gray-200 font-medium truncate">@{sessionUser.username}</p>
               </div>
-              <button
-                data-id="nav-menu/sign-in-other-device"
-                type="button"
-                onClick={() => { setMenuOpen(false); setQrSignInDialogOpen(true); }}
-                className="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-300 hover:text-blue-400 hover:bg-gray-800 transition-colors"
-              >
+              <MenuBtn dataId="nav-menu/sign-in-other-device" className="hover:text-blue-400" onClick={() => { setMenuOpen(false); setQrSignInDialogOpen(true); }}>
                 <QrCode size={16} strokeWidth={2} aria-hidden="true" />
                 Sign in on another device
-              </button>
-              <button
-                data-id="nav-menu/sign-out"
-                type="button"
-                onClick={() => { setMenuOpen(false); onLogout(); }}
-                className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-300 hover:text-red-400 hover:bg-gray-800 transition-colors"
-              >
+              </MenuBtn>
+              <MenuBtn dataId="nav-menu/sign-out" className="hover:text-red-400" onClick={() => { setMenuOpen(false); onLogout(); }}>
                 <LogOut size={16} strokeWidth={2} aria-hidden="true" />
                 Sign out
-              </button>
+              </MenuBtn>
             </>
           ) : (
-            <Link
-              data-id="nav-menu/sign-in"
-              href={`/login?next=${encodeURIComponent(pathname)}`}
-              onClick={() => setMenuOpen(false)}
-              className="flex items-center gap-3 px-4 py-3 text-sm text-gray-300 hover:text-blue-400 hover:bg-gray-800 transition-colors"
-            >
+            <MenuLink dataId="nav-menu/sign-in" className="hover:text-blue-400" href={`/login?next=${encodeURIComponent(pathname)}`} onClick={() => setMenuOpen(false)}>
               <LogIn size={16} strokeWidth={2} aria-hidden="true" />
               Log in
-            </Link>
+            </MenuLink>
           )}
 
           {/* API Key and credentials settings — available to any logged-in user */}
           {sessionUser && (
             <>
-              <button
-                data-id="nav-menu/api-key"
-                type="button"
-                onClick={() => { setMenuOpen(false); setApiKeyDialogOpen(true); }}
-                className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-300 hover:text-amber-400 hover:bg-gray-800 transition-colors"
-              >
+              <MenuBtn dataId="nav-menu/api-key" className="hover:text-amber-400" onClick={() => { setMenuOpen(false); setApiKeyDialogOpen(true); }}>
                 <Key size={16} strokeWidth={2} aria-hidden="true" />
                 API Key
-              </button>
-              <button
-                data-id="nav-menu/credentials"
-                type="button"
-                onClick={() => { setMenuOpen(false); setCredentialsDialogOpen(true); }}
-                className="w-full flex items-center gap-3 px-4 py-3 text-sm text-left text-gray-300 hover:text-sky-400 hover:bg-gray-800 transition-colors"
-              >
+              </MenuBtn>
+              <MenuBtn dataId="nav-menu/credentials" className="hover:text-sky-400" onClick={() => { setMenuOpen(false); setCredentialsDialogOpen(true); }}>
                 <FileKey size={16} strokeWidth={2} aria-hidden="true" />
                 Claude Credentials
-              </button>
+              </MenuBtn>
             </>
           )}
 
           {/* Page-specific items */}
           {items.map((item, i) =>
             item.href ? (
-              <Link
-                key={i}
-                href={item.href}
-                data-id={item.dataId}
-                onClick={() => { setMenuOpen(false); item.onClick?.(); }}
-                className={`flex items-center gap-3 px-4 py-3 text-sm text-gray-300 ${item.hoverColor} hover:bg-gray-800 transition-colors`}
-              >
+              <MenuLink key={i} href={item.href} dataId={item.dataId} className={item.className} onClick={() => { setMenuOpen(false); item.onClick?.(); }}>
                 {item.icon}
                 {item.label}
-              </Link>
+              </MenuLink>
             ) : (
-              <button
-                key={i}
-                type="button"
-                data-id={item.dataId}
-                onClick={() => { setMenuOpen(false); item.onClick?.(); }}
-                className={`w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-300 ${item.hoverColor} hover:bg-gray-800 transition-colors`}
-              >
+              <MenuBtn key={i} dataId={item.dataId} className={item.className} onClick={() => { setMenuOpen(false); item.onClick?.(); }}>
                 {item.icon}
                 {item.label}
-              </button>
+              </MenuBtn>
             )
           )}
         </div>
