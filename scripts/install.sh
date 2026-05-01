@@ -368,7 +368,7 @@ if [[ "$HOSTNAME_FQDN" == *.local || "$HOSTNAME_FQDN" == *.lan || "$HOSTNAME_FQD
   APP_URL="http://localhost:${REVERSE_PROXY_PORT}"
   PROBABLY_A_SERVER=false
 elif [[ "$HOSTNAME_FQDN" == *.exe.xyz ]]; then
-  info "Detected exe.xyz host"
+  success "Detected exe.xyz host"
   APP_URL="https://${HOSTNAME_FQDN}"
   PROBABLY_A_SERVER=true
   REVERSE_PROXY_PORT=8000
@@ -386,7 +386,7 @@ _CURRENT_STEP="install systemd service"
 SERVICE_CHANGED=false
 
 if [[ "${PROBABLY_A_SERVER}" == "true" ]] && command -v systemctl &>/dev/null; then
-  success "Using systemd v$(systemctl --version | awk 'NR==1 {print $2}')"
+  success "Detected systemd v$(systemctl --version | awk 'NR==1 {print $2}')"
   _step "Installing systemd service..."
   SYSTEMD_SERVICE_DIR="/etc/systemd/system"
   PROXY_SERVICE_DST="${SYSTEMD_SERVICE_DIR}/primordia.service"
@@ -519,7 +519,7 @@ advance_main_and_push() {
   if git -C "${BARE_REPO}" config --get remote.mirror.url &>/dev/null; then
     _mirror_err="$(mktemp)"
     if git -C "${BARE_REPO}" push mirror 2>"$_mirror_err"; then
-      success "Pushed to mirror remote"
+      success "Mirror remote updated"
     else
       warn "Could not push to mirror remote (non-fatal): $(cat "$_mirror_err" | tail -3)"
     fi
