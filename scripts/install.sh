@@ -267,7 +267,7 @@ fi
 SHIM_CONTENT='#!/usr/bin/env bash
 exec bun-real --bun ~/.bun/bin/sfw bun-real "$@"
 '
-if [[ "$(cat /bin/bun 2>/dev/null)" != "$SHIM_CONTENT" ]]; then
+if [[ ! -f /bin/bun ]] || ! diff -q <(echo "$SHIM_CONTENT") /bin/bun >/dev/null 2>&1; then
   echo "$SHIM_CONTENT" | sudo tee /bin/bun >/dev/null
   sudo chmod +x /bin/bun
   success "Installed /bin/bun→sfw shim"
