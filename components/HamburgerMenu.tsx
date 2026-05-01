@@ -176,10 +176,14 @@ export function HamburgerMenu({ sessionUser, onLogout, items, containerRef }: Ha
                 <Key size={16} strokeWidth={2} aria-hidden="true" />
                 API Key
               </MenuBtn>
-              <MenuBtn dataId="nav-menu/credentials" className="hover:text-sky-400" onClick={() => { setMenuOpen(false); setCredentialsDialogOpen(true); }}>
+              {/*
+              Disabling for now since claude-worker.ts uses the Agent SDK which does not support claude.ai subscriptions.
+              We can refactor it to use claude code directly in the near future. But I'm really enjoying `pi`.
+              */}
+              {/* <MenuBtn dataId="nav-menu/credentials" className="hover:text-sky-400" onClick={() => { setMenuOpen(false); setCredentialsDialogOpen(true); }}>
                 <FileKey size={16} strokeWidth={2} aria-hidden="true" />
                 Claude Credentials
-              </MenuBtn>
+              </MenuBtn> */}
             </>
           )}
 
@@ -206,9 +210,9 @@ export function HamburgerMenu({ sessionUser, onLogout, items, containerRef }: Ha
       )}
 
       {/* Claude Credentials dialog */}
-      {credentialsDialogOpen && (
+      {/* {credentialsDialogOpen && (
         <CredentialsDialog onClose={() => setCredentialsDialogOpen(false)} />
-      )}
+      )} */}
 
       {/* Sign in on another device dialog */}
       {qrSignInDialogOpen && (
