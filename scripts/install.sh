@@ -528,7 +528,6 @@ advance_main_and_push() {
 }
 
 SERVICE_READY=false
-echo ""
 
 if [[ "${PROXY_RUNNING}" == "true" && "${PROXY_CHANGED}" == "false" && "${SERVICE_CHANGED}" == "false" ]]; then
   # ── Zero-downtime path ────────────────────────────────────────────────────
