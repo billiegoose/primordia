@@ -271,7 +271,7 @@ fi
 # Write the bun shim (idempotent)
 SHIM_PATH="$HOME/.primordia/bin/bun"
 SHIM_CONTENT='#!/usr/bin/env bash
-exec sfw bun-real "$@"
+exec bun-real --bun ~/.bun/bin/sfw bun-real "$@"
 '
 if [[ ! -f "$SHIM_PATH" ]] || [[ "$(cat "$SHIM_PATH")" != "$SHIM_CONTENT" ]]; then
   printf '%s' "$SHIM_CONTENT" > "$SHIM_PATH"
