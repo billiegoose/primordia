@@ -621,11 +621,11 @@ if [[ -z "$OLD_PROD_BRANCH" ]] && [[ "$HOSTNAME_FQDN" == *.exe.xyz ]]; then
   # exe.xyz hosts are private by default — the external URL may not be accessible yet.
   # Print the internal localhost address first so the installer can verify it works
   # before configuring public access.
-  echo -e "Open (internal):  ${BOLD}http://localhost:${REVERSE_PROXY_PORT}${RESET}"
-  echo -e "Open (external):  ${BOLD}${APP_URL}${RESET}"
+  success "Serving ${BOLD}http://localhost:${REVERSE_PROXY_PORT}${RESET} (internal)"
+  success "Serving ${BOLD}${APP_URL}${RESET} (external)"
   echo -e "  ${DIM}(external URL requires public access to be enabled on the exe.dev dashboard)${RESET}"
 else
-  echo -e "Open:     ${BOLD}${APP_URL}${RESET}"
+  success "Serving ${BOLD}${APP_URL}${RESET}"
 fi
 echo ""
 if [[ -z "$OLD_PROD_BRANCH" ]]; then
