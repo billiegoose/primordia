@@ -630,6 +630,10 @@ if [[ "${SERVICE_READY}" == "false" ]]; then
     # Group-writable so the installing user (in the primordia group) can write
     # files during deploys without needing sudo.
     sudo chmod -R g+rwX "${PRIMORDIA_DIR}"
+    # Allow the installing user to run git in these repos even though they are
+    # now owned by the primordia user (git safe.directory check).
+    git config --global --add safe.directory "${BARE_REPO}"
+    git config --global --add safe.directory "${INSTALL_DIR}"
     # The primordia user must be able to traverse every parent directory of
     # PRIMORDIA_DIR to reach its WorkingDirectory. If PRIMORDIA_DIR is under
     # the installing user's home (e.g. /home/exedev/primordia), that home dir
