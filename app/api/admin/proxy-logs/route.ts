@@ -1,10 +1,10 @@
 // app/api/admin/proxy-logs/route.ts
-// Streams the primordia-proxy systemd service journal as SSE.
+// Streams the primordia systemd service journal as SSE.
 // Admin only. GET /api/admin/proxy-logs
 //
 // SSE events: { text: string } | { done: true; exitCode: number }
 //
-// Runs: journalctl -u primordia-proxy -f -n 100
+// Runs: journalctl -u primordia -f -n 100
 // -n 100  → emit last 100 lines before following
 // -f      → keep following (long-lived stream)
 //
@@ -23,7 +23,7 @@ const SSE_HEADERS = {
 
 /**
  * Stream proxy service logs
- * @description SSE stream of the `primordia-proxy` systemd journal (`journalctl -f -n 100`). Admin only. Returns an informational message on non-Linux platforms.
+ * @description SSE stream of the `primordia` systemd journal (`journalctl -u primordia -f -n 100`). Admin only. Returns an informational message on non-Linux platforms.
  * @tag Admin
  */
 export async function GET(req: NextRequest) {
@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
     start(controller) {
       const url = new URL(req.url);
       const n = url.searchParams.get("n") ?? "100";
-      const proc = spawn("journalctl", ["-u", "primordia-proxy", "-f", "-n", n], {
+      const proc = spawn("journalctl", ["-u", "primordia", "-f", "-n", n], {
         stdio: ["ignore", "pipe", "pipe"],
       });
 

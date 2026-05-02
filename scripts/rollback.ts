@@ -131,11 +131,11 @@ if (!hasSystemctl) {
 } else {
   console.log('Restarting proxy service...');
   try {
-    execSync('sudo systemctl restart primordia-proxy', { stdio: 'inherit' });
+    execSync('sudo systemctl restart primordia', { stdio: 'inherit' });
     console.log('  Service restarted.');
   } catch (err) {
     console.error(`  Failed to restart service: ${err}`);
-    console.error('  Run manually: sudo systemctl restart primordia-proxy');
+    console.error('  Run manually: sudo systemctl restart primordia');
     process.exit(1);
   }
 }
