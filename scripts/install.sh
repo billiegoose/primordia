@@ -475,22 +475,6 @@ UNIT
   fi
 fi
 
-# ── Set file ownership ────────────────────────────────────────────────────────
-# primordia user owns all files so the service can read/write them.
-
-_CURRENT_STEP="set file ownership"
-
-if [[ "${PROBABLY_A_SERVER}" == "true" ]] && command -v systemctl &>/dev/null; then
-  _step "Setting file ownership..."
-  sudo chown -R primordia:primordia "${PRIMORDIA_DIR}"
-  # Group-writable so the installing user (in the primordia group) can write
-  # files during deploys without needing sudo.
-  sudo chmod -R g+rwX "${PRIMORDIA_DIR}"
-  # Bare repo needs group-writable refs/objects for git operations.
-  sudo chmod -R g+rwX "${BARE_REPO}"
-  _done "File ownership set"
-fi
-
 # ── Zero-downtime cutover (or first-time start) ───────────────────────────────
 # If the proxy is already running and neither it nor the service unit changed,
 # we can do a zero-downtime slot swap via POST /_proxy/prod/spawn — the same
@@ -499,7 +483,7 @@ fi
 # If either changed, or the proxy isn't running yet, we fall back to the
 # traditional restart/start path (brief downtime, unavoidable).
 
-_CURRENT_STEP="deploy new slot"
+_CURRENT_STEP="check proxy status"
 
 PROXY_RUNNING=false
 if [[ "${PROBABLY_A_SERVER}" == "true" ]] && command -v systemctl &>/dev/null; then
@@ -507,6 +491,8 @@ if [[ "${PROBABLY_A_SERVER}" == "true" ]] && command -v systemctl &>/dev/null; t
     PROXY_RUNNING=true
   fi
 fi
+
+_CURRENT_STEP="reparent sibling sessions"
 
 # Reparent sibling sessions whose parent was the old production branch so that
 # their "Apply Updates" picks up the new production code going forward.
@@ -522,6 +508,8 @@ if [[ -n "$OLD_PROD_BRANCH" && "$OLD_PROD_BRANCH" != "$BRANCH" ]]; then
     fi
   done < <(git -C "${BARE_REPO}" config --get-regexp 'branch\..*\.parent' 2>/dev/null || true)
 fi
+
+_CURRENT_STEP="copy production DB"
 
 # Copy DB from old production slot before activating, so the new slot
 # inherits all users/sessions/passkeys.  Mirrors what blueGreenAccept() does.
@@ -581,6 +569,7 @@ advance_main_and_push() {
   fi
 }
 
+_CURRENT_STEP="deploy new slot"
 SERVICE_READY=false
 
 if [[ "${PROXY_RUNNING}" == "true" && "${PROXY_CHANGED}" == "false" && "${SERVICE_CHANGED}" == "false" ]]; then
@@ -631,8 +620,20 @@ if [[ "${SERVICE_READY}" == "false" ]]; then
   # ── Restart/start path ────────────────────────────────────────────────────
   # Used when: first install, proxy/service changed, or zero-downtime failed.
   # Mark the production branch directly — the proxy will pick it up on start.
+  _CURRENT_STEP="set production branch"
   git -C "${BARE_REPO}" config primordia.productionBranch "$BRANCH"
 
+  _CURRENT_STEP="set file ownership"
+  if [[ "${PROBABLY_A_SERVER}" == "true" ]] && command -v systemctl &>/dev/null; then
+    _step "Setting file ownership..."
+    sudo chown -R primordia:primordia "${PRIMORDIA_DIR}"
+    # Group-writable so the installing user (in the primordia group) can write
+    # files during deploys without needing sudo.
+    sudo chmod -R g+rwX "${PRIMORDIA_DIR}"
+    _done "File ownership set"
+  fi
+
+  _CURRENT_STEP="start primordia service"
   if [[ "${PROBABLY_A_SERVER}" == "true" ]] && command -v systemctl &>/dev/null; then
     if [[ "${PROXY_RUNNING}" == "true" ]]; then
       sudo systemctl restart --quiet primordia
@@ -643,6 +644,7 @@ if [[ "${SERVICE_READY}" == "false" ]]; then
     fi
   fi
 
+  _CURRENT_STEP="wait for primordia to be ready"
   _step "Waiting for Primordia to be ready..."
   for i in $(seq 1 30); do
     sleep 2
