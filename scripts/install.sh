@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # scripts/install.sh
-# Primordia setup script. It supports two methods of running. Invoking it 
+# Primordia setup script. It supports two methods of running. Invoking it
 # directly, e.g.
 #
 #   bash scripts/install.sh
@@ -14,6 +14,13 @@
 #
 # The installer doubles as an updater script, and is used to update existing
 # Primordia instances.
+#
+# On servers with systemd, the script runs in two phases:
+#   Phase 1 (as the installing user): git, bun, build, user/group setup,
+#            file ownership, systemd unit install.
+#   Phase 2 (re-exec as 'primordia'): git config, service start, health check.
+# The re-exec ensures the primordia user owns all git operations on the repo
+# it owns, avoiding safe.directory and permission errors.
 
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
@@ -100,6 +107,240 @@ journalctl -u primordia -n 30 --no-pager 2>/dev/null >&2 || true
 echo "" >&2
 echo -e "${DIM}  Service status:${RESET}" >&2
 systemctl status primordia --no-pager 2>/dev/null >&2 || true' ERR
+
+# ── Phase 2: re-exec'd as primordia ──────────────────────────────────────────
+# When the script re-execs itself as the primordia user (see "re-exec as
+# primordia" section below), _PRIMORDIA_PHASE2 is set. Jump straight to the
+# deploy logic, skipping all the setup that already ran in phase 1.
+
+if [[ "${_PRIMORDIA_PHASE2:-}" == "1" ]]; then
+  # All variables needed by phase 2 are forwarded via the environment.
+  # Re-export colours since sudo -E doesn't guarantee they survive.
+  PRIMORDIA_DIR="${PRIMORDIA_DIR}"
+  WORKTREES_DIR="${WORKTREES_DIR}"
+  BARE_REPO="${BARE_REPO}"
+  BRANCH="${BRANCH}"
+  INSTALL_DIR="${INSTALL_DIR}"
+  REVERSE_PROXY_PORT="${REVERSE_PROXY_PORT}"
+  PROBABLY_A_SERVER="${PROBABLY_A_SERVER}"
+  PROXY_CHANGED="${PROXY_CHANGED}"
+  SERVICE_CHANGED="${SERVICE_CHANGED}"
+  HOSTNAME_FQDN="${HOSTNAME_FQDN}"
+  APP_URL="${APP_URL}"
+  OLD_PROD_BRANCH="${OLD_PROD_BRANCH:-}"
+  DB_NAME=".primordia-auth.db"
+
+  # Jump to the deploy section (defined as a function to allow the jump).
+  _run_phase2() {
+
+# ── Check proxy status ────────────────────────────────────────────────────────
+
+_CURRENT_STEP="check proxy status"
+
+PROXY_RUNNING=false
+if [[ "${PROBABLY_A_SERVER}" == "true" ]] && command -v systemctl &>/dev/null; then
+  if systemctl is-active --quiet primordia 2>/dev/null; then
+    PROXY_RUNNING=true
+  fi
+fi
+
+# ── Reparent sibling sessions ─────────────────────────────────────────────────
+
+_CURRENT_STEP="reparent sibling sessions"
+
+# Reparent sibling sessions whose parent was the old production branch so that
+# their "Apply Updates" picks up the new production code going forward.
+# Mirrors reparentSiblings() in app/api/evolve/manage/route.ts.
+if [[ -n "$OLD_PROD_BRANCH" && "$OLD_PROD_BRANCH" != "$BRANCH" ]]; then
+  while read -r key val; do
+    # key looks like: branch.<name>.parent  (space-separated, git config --get-regexp output)
+    sibling="${key#branch.}"; sibling="${sibling%.parent}"
+    if [[ "$val" == "$OLD_PROD_BRANCH" && "$sibling" != "$BRANCH" ]]; then
+      git -C "${BARE_REPO}" config "branch.${sibling}.parent" "$BRANCH" 2>/dev/null || true
+    fi
+  done < <(git -C "${BARE_REPO}" config --get-regexp 'branch\..*\.parent' 2>/dev/null || true)
+fi
+
+# ── Copy production DB ────────────────────────────────────────────────────────
+
+_CURRENT_STEP="copy production DB"
+
+# Copy DB from old production slot before activating, so the new slot
+# inherits all users/sessions/passkeys.  Mirrors what blueGreenAccept() does.
+if [[ -n "$OLD_PROD_BRANCH" && "$OLD_PROD_BRANCH" != "$BRANCH" ]]; then
+  OLD_SLOT="$(git -C "${BARE_REPO}" worktree list --porcelain \
+    | awk '/^worktree /{p=$2} /^branch refs\/heads\/'"${OLD_PROD_BRANCH}"'$/{print p; exit}' || true)"
+  if [[ -n "$OLD_SLOT" && -f "${OLD_SLOT}/${DB_NAME}" ]]; then
+    _step "Copying production DB..."
+    NEW_DB="${INSTALL_DIR}/${DB_NAME}"
+    rm -f "${NEW_DB}" "${NEW_DB}-wal" "${NEW_DB}-shm"
+    sqlite3 "${OLD_SLOT}/${DB_NAME}" "VACUUM INTO '${NEW_DB}'"
+    _done "DB copied"
+  fi
+fi
+
+# ── Advance main and push to mirror ──────────────────────────────────────────
+# Mirrors the logic in moveMainAndPush() in app/api/evolve/manage/route.ts:
+#   - If main is checked out in a worktree, use `git reset --hard` there so
+#     the working tree stays consistent with the updated ref.
+#   - If main is not checked out anywhere, use `git update-ref` directly
+#     (safe when no worktree has it checked out).
+advance_main_and_push() {
+  local branch_sha
+  branch_sha="$(git -C "${BARE_REPO}" rev-parse "$BRANCH")"
+
+  local main_worktree=""
+  while IFS= read -r line; do
+    if [[ "$line" == worktree\ * ]]; then
+      _wt_path="${line#worktree }"
+      _wt_branch=""
+    elif [[ "$line" == branch\ * ]]; then
+      _wt_branch="${line#branch refs/heads/}"
+    elif [[ -z "$line" && "$_wt_branch" == "main" ]]; then
+      main_worktree="$_wt_path"
+      break
+    fi
+  done < <(git -C "${BARE_REPO}" worktree list --porcelain)
+
+  if [[ -n "$main_worktree" ]]; then
+    git -C "$main_worktree" reset --hard "$branch_sha"
+  else
+    git -C "${BARE_REPO}" update-ref refs/heads/main "$branch_sha"
+  fi
+
+  if git -C "${BARE_REPO}" config --get remote.mirror.url &>/dev/null; then
+    _mirror_err="$(mktemp)"
+    if git -C "${BARE_REPO}" push mirror 2>"$_mirror_err"; then
+      success "Mirror remote updated"
+    else
+      warn "Could not push to mirror remote (non-fatal): $(cat "$_mirror_err" | tail -3)"
+    fi
+    rm -f "$_mirror_err"
+  fi
+}
+
+# ── Deploy new slot ───────────────────────────────────────────────────────────
+
+_CURRENT_STEP="deploy new slot"
+SERVICE_READY=false
+
+if [[ "${PROXY_RUNNING}" == "true" && "${PROXY_CHANGED}" == "false" && "${SERVICE_CHANGED}" == "false" ]]; then
+  # ── Zero-downtime path ────────────────────────────────────────────────────
+  # The proxy is running and neither it nor the service unit changed.
+  # Tell the proxy to spawn the new production server, health-check it, and
+  # cut over atomically — no restart required.
+  _step "Deploying to new slot (zero-downtime)..."
+  # Stream SSE events from the proxy: print log lines immediately, capture
+  # the final done line to check success/failure.
+  _SPAWN_FIFO="$(mktemp -u)"
+  mkfifo "$_SPAWN_FIFO"
+  curl -sf --max-time 60 \
+    -X POST "http://localhost:${REVERSE_PROXY_PORT}/_proxy/prod/spawn" \
+    -H 'Content-Type: application/json' \
+    -d "{\"branch\":\"${BRANCH}\"}" \
+    --no-buffer 2>/dev/null \
+    | grep '^data: ' | sed 's/^data: //' > "$_SPAWN_FIFO" &
+  _SPAWN_CURL_PID=$!
+  SPAWN_RESULT=""
+  while IFS= read -r _sse_line; do
+    SPAWN_RESULT="$_sse_line"
+    # Print log-type messages immediately.
+    # sed converts JSON-encoded \u001b (ESC) to the actual ESC byte so that
+    # ANSI colour codes emitted by the proxy render correctly in the terminal.
+    _sse_text="$(echo "$_sse_line" | grep -o '"text":"[^"]*"' | sed 's/"text":"//;s/"$//;s/\\u001b/\x1b/g' || true)"
+    if [[ -n "$_sse_text" ]]; then
+      printf '%b' "$_sse_text"
+    fi
+  done < "$_SPAWN_FIFO"
+  wait "$_SPAWN_CURL_PID" 2>/dev/null || true
+  rm -f "$_SPAWN_FIFO"
+  # The last SSE data line is: {"type":"done","ok":true} or {"type":"done","ok":false,"error":"..."}
+  if echo "${SPAWN_RESULT}" | grep -q '"ok":true'; then
+    SERVICE_READY=true
+    _spin_kill
+    advance_main_and_push
+    echo -e "${GREEN}✓${RESET} Congratulations! Primordia is running!"
+  else
+    _spin_kill
+    SPAWN_ERROR="$(echo "${SPAWN_RESULT}" | grep -o '"error":"[^"]*"' | head -1 || true)"
+    warn "Zero-downtime deploy failed (${SPAWN_ERROR:-no response from proxy}). Falling back to service restart."
+    # Fall through to the restart path below
+  fi
+fi
+
+if [[ "${SERVICE_READY}" == "false" ]]; then
+  # ── Restart/start path ────────────────────────────────────────────────────
+  # Used when: first install, proxy/service changed, or zero-downtime failed.
+  # Mark the production branch directly — the proxy will pick it up on start.
+  _CURRENT_STEP="set production branch"
+  git -C "${BARE_REPO}" config primordia.productionBranch "$BRANCH"
+
+  _CURRENT_STEP="start primordia service"
+  if [[ "${PROBABLY_A_SERVER}" == "true" ]] && command -v systemctl &>/dev/null; then
+    if [[ "${PROXY_RUNNING}" == "true" ]]; then
+      sudo systemctl restart --quiet primordia
+      success "Restarted primordia systemd service"
+    else
+      sudo systemctl start --quiet primordia
+      success "Started primordia systemd service"
+    fi
+  fi
+
+  _CURRENT_STEP="wait for primordia to be ready"
+  _step "Waiting for Primordia to be ready..."
+  for i in $(seq 1 30); do
+    sleep 2
+    if curl -sf --max-time 3 "http://localhost:${REVERSE_PROXY_PORT}/" -o /dev/null 2>/dev/null; then
+      SERVICE_READY=true
+      break
+    fi
+  done
+
+  if [[ "$SERVICE_READY" == "true" ]]; then
+    _spin_kill
+    advance_main_and_push
+    echo -e "${GREEN}✓${RESET} Congratulations! Primordia is running!"
+  else
+    _spin_kill
+    warn "Service did not respond within 60 s — it may still be starting."
+    echo ""
+    echo -e "${DIM}  --- Last 40 lines of service log ---${RESET}"
+    journalctl -u primordia -n 40 --no-pager 2>/dev/null || true
+    echo -e "${DIM}  --- Service status ---${RESET}"
+    systemctl status primordia --no-pager 2>/dev/null || true
+    echo -e "${DIM}  -------------------------------------${RESET}"
+  fi
+fi
+
+# ── Done ──────────────────────────────────────────────────────────────────────
+
+if [[ -z "$OLD_PROD_BRANCH" ]] && [[ "$HOSTNAME_FQDN" == *.exe.xyz ]]; then
+  # exe.xyz hosts are private by default — the external URL may not be accessible yet.
+  # Print the internal localhost address first so the installer can verify it works
+  # before configuring public access.
+  success "Serving ${BOLD}http://localhost:${REVERSE_PROXY_PORT}${RESET} (internal)"
+  success "Serving ${BOLD}${APP_URL}${RESET} (external)"
+  echo -e "  ${DIM}(external URL requires public access to be enabled on the exe.dev dashboard)${RESET}"
+else
+  success "Serving ${BOLD}${APP_URL}${RESET}"
+fi
+echo ""
+if [[ -z "$OLD_PROD_BRANCH" ]]; then
+  if [[ "$HOSTNAME_FQDN" == *.exe.xyz ]]; then
+    echo "Sign in with your exe.dev account on the login page."
+    echo "The first user to sign in is automatically granted the admin role."
+    echo "You will be prompted for additional setup information when required."
+  else
+    echo "Register a passkey on the login page."
+    echo "The first user to register is automatically granted the admin role."
+  fi
+  echo ""
+fi
+
+  } # end _run_phase2
+  _run_phase2
+  exit 0
+fi
 
 # ── Banner ────────────────────────────────────────────────────────────────────
 # Show only on initial install (git unavailable = fresh machine, or the current
@@ -475,33 +716,71 @@ UNIT
   fi
 fi
 
-# ── Zero-downtime cutover (or first-time start) ───────────────────────────────
-# If the proxy is already running and neither it nor the service unit changed,
-# we can do a zero-downtime slot swap via POST /_proxy/prod/spawn — the same
-# path the "Accept Changes" flow uses.  This keeps existing connections alive.
-#
-# If either changed, or the proxy isn't running yet, we fall back to the
-# traditional restart/start path (brief downtime, unavoidable).
+# ── Set file ownership ────────────────────────────────────────────────────────
+# Transfer ownership to primordia now that all phase-1 git/build ops are done.
+# Phase 2 (re-exec as primordia) will run all remaining git operations as the
+# owner, avoiding safe.directory and permission errors.
 
-_CURRENT_STEP="check proxy status"
+_CURRENT_STEP="set file ownership"
 
-PROXY_RUNNING=false
 if [[ "${PROBABLY_A_SERVER}" == "true" ]] && command -v systemctl &>/dev/null; then
-  if systemctl is-active --quiet primordia 2>/dev/null; then
-    PROXY_RUNNING=true
-  fi
+  _step "Setting file ownership..."
+  sudo chown -R primordia:primordia "${PRIMORDIA_DIR}"
+  # Group-writable so the installing user (in the primordia group) can write
+  # files during deploys without needing sudo.
+  sudo chmod -R g+rwX "${PRIMORDIA_DIR}"
+  # The primordia user must be able to traverse every parent directory of
+  # PRIMORDIA_DIR to reach its WorkingDirectory. If PRIMORDIA_DIR is under
+  # the installing user's home (e.g. /home/exedev/primordia), that home dir
+  # typically has 700 permissions which blocks traversal. Grant o+x on each
+  # parent up to (but not including) the filesystem root — execute-only, so
+  # directory contents remain private.
+  _parent="$(dirname "${PRIMORDIA_DIR}")"
+  while [[ "$_parent" != "/" ]]; do
+    sudo chmod o+x "$_parent"
+    _parent="$(dirname "$_parent")"
+  done
+  _done "File ownership set"
 fi
 
-_CURRENT_STEP="reparent sibling sessions"
+# ── Re-exec as primordia ──────────────────────────────────────────────────────
+# All file ownership now belongs to primordia. Re-exec this script as that user
+# so phase 2 (git config, service start, health check) runs as the file owner
+# — no safe.directory workarounds needed.
 
-# Reparent sibling sessions whose parent was the old production branch so that
-# their "Apply Updates" picks up the new production code going forward.
-# Mirrors reparentSiblings() in app/api/evolve/manage/route.ts.
-DB_NAME=".primordia-auth.db"
+if [[ "${PROBABLY_A_SERVER}" == "true" ]] && command -v systemctl &>/dev/null; then
+  OLD_PROD_BRANCH="$(git -C "${BARE_REPO}" config --get primordia.productionBranch 2>/dev/null || true)"
+  exec sudo -u primordia \
+    _PRIMORDIA_PHASE2=1 \
+    REPORT_STYLE="${REPORT_STYLE:-}" \
+    PRIMORDIA_DIR="${PRIMORDIA_DIR}" \
+    WORKTREES_DIR="${WORKTREES_DIR}" \
+    BARE_REPO="${BARE_REPO}" \
+    BRANCH="${BRANCH}" \
+    INSTALL_DIR="${INSTALL_DIR}" \
+    REVERSE_PROXY_PORT="${REVERSE_PROXY_PORT}" \
+    PROBABLY_A_SERVER="${PROBABLY_A_SERVER}" \
+    PROXY_CHANGED="${PROXY_CHANGED}" \
+    SERVICE_CHANGED="${SERVICE_CHANGED}" \
+    HOSTNAME_FQDN="${HOSTNAME_FQDN}" \
+    APP_URL="${APP_URL}" \
+    OLD_PROD_BRANCH="${OLD_PROD_BRANCH}" \
+    bash "${BASH_SOURCE[0]}" "$@"
+fi
+
+# ── Non-server path (local dev, no systemd) ───────────────────────────────────
+# On local dev machines there is no primordia system user and no re-exec.
+# Run phase 2 inline.
+
 OLD_PROD_BRANCH="$(git -C "${BARE_REPO}" config --get primordia.productionBranch 2>/dev/null || true)"
+DB_NAME=".primordia-auth.db"
+
+_CURRENT_STEP="check proxy status"
+PROXY_RUNNING=false
+
+_CURRENT_STEP="reparent sibling sessions"
 if [[ -n "$OLD_PROD_BRANCH" && "$OLD_PROD_BRANCH" != "$BRANCH" ]]; then
   while read -r key val; do
-    # key looks like: branch.<name>.parent  (space-separated, git config --get-regexp output)
     sibling="${key#branch.}"; sibling="${sibling%.parent}"
     if [[ "$val" == "$OLD_PROD_BRANCH" && "$sibling" != "$BRANCH" ]]; then
       git -C "${BARE_REPO}" config "branch.${sibling}.parent" "$BRANCH" 2>/dev/null || true
@@ -509,36 +788,12 @@ if [[ -n "$OLD_PROD_BRANCH" && "$OLD_PROD_BRANCH" != "$BRANCH" ]]; then
   done < <(git -C "${BARE_REPO}" config --get-regexp 'branch\..*\.parent' 2>/dev/null || true)
 fi
 
-_CURRENT_STEP="copy production DB"
+_CURRENT_STEP="set production branch"
+git -C "${BARE_REPO}" config primordia.productionBranch "$BRANCH"
 
-# Copy DB from old production slot before activating, so the new slot
-# inherits all users/sessions/passkeys.  Mirrors what blueGreenAccept() does.
-if [[ -n "$OLD_PROD_BRANCH" && "$OLD_PROD_BRANCH" != "$BRANCH" ]]; then
-  OLD_SLOT="$(git -C "${BARE_REPO}" worktree list --porcelain \
-    | awk '/^worktree /{p=$2} /^branch refs\/heads\/'"${OLD_PROD_BRANCH}"'$/{print p; exit}' || true)"
-  if [[ -n "$OLD_SLOT" && -f "${OLD_SLOT}/${DB_NAME}" ]]; then
-    _step "Copying production DB..."
-    NEW_DB="${INSTALL_DIR}/${DB_NAME}"
-    rm -f "${NEW_DB}" "${NEW_DB}-wal" "${NEW_DB}-shm"
-    sqlite3 "${OLD_SLOT}/${DB_NAME}" "VACUUM INTO '${NEW_DB}'"
-    _done "DB copied"
-  fi
-fi
-
-# Advance the main branch pointer to the now-live commit, then push to the
-# mirror remote if one is configured. Non-fatal: a push failure never blocks
-# the install — it just prints a warning.
-#
-# Mirrors the logic in moveMainAndPush() in app/api/evolve/manage/route.ts:
-#   - If main is checked out in a worktree, use `git reset --hard` there so
-#     the working tree stays consistent with the updated ref.
-#   - If main is not checked out anywhere, use `git update-ref` directly
-#     (safe when no worktree has it checked out).
 advance_main_and_push() {
   local branch_sha
   branch_sha="$(git -C "${BARE_REPO}" rev-parse "$BRANCH")"
-
-  # Find the worktree (if any) that has main checked out.
   local main_worktree=""
   while IFS= read -r line; do
     if [[ "$line" == worktree\ * ]]; then
@@ -551,13 +806,11 @@ advance_main_and_push() {
       break
     fi
   done < <(git -C "${BARE_REPO}" worktree list --porcelain)
-
   if [[ -n "$main_worktree" ]]; then
     git -C "$main_worktree" reset --hard "$branch_sha"
   else
     git -C "${BARE_REPO}" update-ref refs/heads/main "$branch_sha"
   fi
-
   if git -C "${BARE_REPO}" config --get remote.mirror.url &>/dev/null; then
     _mirror_err="$(mktemp)"
     if git -C "${BARE_REPO}" push mirror 2>"$_mirror_err"; then
@@ -569,143 +822,11 @@ advance_main_and_push() {
   fi
 }
 
-_CURRENT_STEP="deploy new slot"
-SERVICE_READY=false
-
-if [[ "${PROXY_RUNNING}" == "true" && "${PROXY_CHANGED}" == "false" && "${SERVICE_CHANGED}" == "false" ]]; then
-  # ── Zero-downtime path ────────────────────────────────────────────────────
-  # The proxy is running and neither it nor the service unit changed.
-  # Tell the proxy to spawn the new production server, health-check it, and
-  # cut over atomically — no restart required.
-  _step "Deploying to new slot (zero-downtime)..."
-  # Stream SSE events from the proxy: print log lines immediately, capture
-  # the final done line to check success/failure.
-  _SPAWN_FIFO="$(mktemp -u)"
-  mkfifo "$_SPAWN_FIFO"
-  curl -sf --max-time 60 \
-    -X POST "http://localhost:${REVERSE_PROXY_PORT}/_proxy/prod/spawn" \
-    -H 'Content-Type: application/json' \
-    -d "{\"branch\":\"${BRANCH}\"}" \
-    --no-buffer 2>/dev/null \
-    | grep '^data: ' | sed 's/^data: //' > "$_SPAWN_FIFO" &
-  _SPAWN_CURL_PID=$!
-  SPAWN_RESULT=""
-  while IFS= read -r _sse_line; do
-    SPAWN_RESULT="$_sse_line"
-    # Print log-type messages immediately.
-    # sed converts JSON-encoded \u001b (ESC) to the actual ESC byte so that
-    # ANSI colour codes emitted by the proxy render correctly in the terminal.
-    _sse_text="$(echo "$_sse_line" | grep -o '"text":"[^"]*"' | sed 's/"text":"//;s/"$//;s/\\u001b/\x1b/g' || true)"
-    if [[ -n "$_sse_text" ]]; then
-      printf '%b' "$_sse_text"
-    fi
-  done < "$_SPAWN_FIFO"
-  wait "$_SPAWN_CURL_PID" 2>/dev/null || true
-  rm -f "$_SPAWN_FIFO"
-  # The last SSE data line is: {"type":"done","ok":true} or {"type":"done","ok":false,"error":"..."}
-  if echo "${SPAWN_RESULT}" | grep -q '"ok":true'; then
-    SERVICE_READY=true
-    _spin_kill
-    advance_main_and_push
-    echo -e "${GREEN}✓${RESET} Congratulations! Primordia is running!"
-  else
-    _spin_kill
-    SPAWN_ERROR="$(echo "${SPAWN_RESULT}" | grep -o '"error":"[^"]*"' | head -1 || true)"
-    warn "Zero-downtime deploy failed (${SPAWN_ERROR:-no response from proxy}). Falling back to service restart."
-    # Fall through to the restart path below
-  fi
-fi
-
-if [[ "${SERVICE_READY}" == "false" ]]; then
-  # ── Restart/start path ────────────────────────────────────────────────────
-  # Used when: first install, proxy/service changed, or zero-downtime failed.
-  # Mark the production branch directly — the proxy will pick it up on start.
-  _CURRENT_STEP="set production branch"
-  git -C "${BARE_REPO}" config primordia.productionBranch "$BRANCH"
-
-  _CURRENT_STEP="set file ownership"
-  if [[ "${PROBABLY_A_SERVER}" == "true" ]] && command -v systemctl &>/dev/null; then
-    _step "Setting file ownership..."
-    sudo chown -R primordia:primordia "${PRIMORDIA_DIR}"
-    # Group-writable so the installing user (in the primordia group) can write
-    # files during deploys without needing sudo.
-    sudo chmod -R g+rwX "${PRIMORDIA_DIR}"
-    # Allow the installing user to run git in these repos even though they are
-    # now owned by the primordia user (git safe.directory check).
-    git config --global --add safe.directory "${BARE_REPO}"
-    git config --global --add safe.directory "${INSTALL_DIR}"
-    # The primordia user must be able to traverse every parent directory of
-    # PRIMORDIA_DIR to reach its WorkingDirectory. If PRIMORDIA_DIR is under
-    # the installing user's home (e.g. /home/exedev/primordia), that home dir
-    # typically has 700 permissions which blocks traversal. Grant o+x on each
-    # parent up to (but not including) the filesystem root — execute-only, so
-    # directory contents remain private.
-    _parent="$(dirname "${PRIMORDIA_DIR}")"
-    while [[ "$_parent" != "/" ]]; do
-      sudo chmod o+x "$_parent"
-      _parent="$(dirname "$_parent")"
-    done
-    _done "File ownership set"
-  fi
-
-  _CURRENT_STEP="start primordia service"
-  if [[ "${PROBABLY_A_SERVER}" == "true" ]] && command -v systemctl &>/dev/null; then
-    if [[ "${PROXY_RUNNING}" == "true" ]]; then
-      sudo systemctl restart --quiet primordia
-      success "Restarted primordia systemd service"
-    else
-      sudo systemctl start --quiet primordia
-      success "Started primordia systemd service"
-    fi
-  fi
-
-  _CURRENT_STEP="wait for primordia to be ready"
-  _step "Waiting for Primordia to be ready..."
-  for i in $(seq 1 30); do
-    sleep 2
-    if curl -sf --max-time 3 "http://localhost:${REVERSE_PROXY_PORT}/" -o /dev/null 2>/dev/null; then
-      SERVICE_READY=true
-      break
-    fi
-  done
-
-  if [[ "$SERVICE_READY" == "true" ]]; then
-    _spin_kill
-    advance_main_and_push
-    echo -e "${GREEN}✓${RESET} Congratulations! Primordia is running!"
-  else
-    _spin_kill
-    warn "Service did not respond within 60 s — it may still be starting."
-    echo ""
-    echo -e "${DIM}  --- Last 40 lines of service log ---${RESET}"
-    journalctl -u primordia -n 40 --no-pager 2>/dev/null || true
-    echo -e "${DIM}  --- Service status ---${RESET}"
-    systemctl status primordia --no-pager 2>/dev/null || true
-    echo -e "${DIM}  -------------------------------------${RESET}"
-  fi
-fi
-
-# ── Done ──────────────────────────────────────────────────────────────────────
-
-if [[ -z "$OLD_PROD_BRANCH" ]] && [[ "$HOSTNAME_FQDN" == *.exe.xyz ]]; then
-  # exe.xyz hosts are private by default — the external URL may not be accessible yet.
-  # Print the internal localhost address first so the installer can verify it works
-  # before configuring public access.
-  success "Serving ${BOLD}http://localhost:${REVERSE_PROXY_PORT}${RESET} (internal)"
-  success "Serving ${BOLD}${APP_URL}${RESET} (external)"
-  echo -e "  ${DIM}(external URL requires public access to be enabled on the exe.dev dashboard)${RESET}"
-else
-  success "Serving ${BOLD}${APP_URL}${RESET}"
-fi
+advance_main_and_push
+success "Serving ${BOLD}${APP_URL}${RESET}"
 echo ""
 if [[ -z "$OLD_PROD_BRANCH" ]]; then
-  if [[ "$HOSTNAME_FQDN" == *.exe.xyz ]]; then
-    echo "Sign in with your exe.dev account on the login page."
-    echo "The first user to sign in is automatically granted the admin role."
-    echo "You will be prompted for additional setup information when required."
-  else
-    echo "Register a passkey on the login page."
-    echo "The first user to register is automatically granted the admin role."
-  fi
+  echo "Register a passkey on the login page."
+  echo "The first user to register is automatically granted the admin role."
   echo ""
 fi
