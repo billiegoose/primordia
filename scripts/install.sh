@@ -381,8 +381,7 @@ fi
 # ── Create primordia system user ──────────────────────────────────────────────
 # The service runs as an unprivileged 'primordia' system user (no home dir, no
 # shell, no sudo) to limit blast radius if the proxy or Next.js process is
-# compromised. The installing user is added to the 'primordia' group so they
-# can read/write the files needed for deployments without sudo.
+# compromised.
 
 _CURRENT_STEP="create primordia system user"
 
@@ -393,23 +392,11 @@ if [[ "${PROBABLY_A_SERVER}" == "true" ]] && command -v systemctl &>/dev/null; t
   else
     success "Using primordia system user"
   fi
-
-  # Add the installing user to the primordia group so they can write files
-  # (needed for git operations, bun install, build, etc. during deployments).
-  if ! id -nG "$USER" | grep -qw primordia; then
-    sudo usermod -aG primordia "$USER"
-    success "Added ${USER} to primordia group"
-    # Re-exec with the new group membership so the rest of the script can
-    # create group-writable files under PRIMORDIA_DIR without sudo.
-    exec sg primordia "$0" "$@"
-  else
-    success "Using primordia group membership"
-  fi
 fi
 
 # ── Install systemd service ───────────────────────────────────────────────────
-# Runs as the unprivileged 'primordia' system user. The installing user can
-# restart/start/stop it via a narrow sudoers rule — no password required.
+# Runs as the unprivileged 'primordia' system user. A narrow sudoers rule lets
+# the primordia user restart itself (needed when install.sh updates the unit).
 
 _CURRENT_STEP="install systemd service"
 SERVICE_CHANGED=false
@@ -460,10 +447,10 @@ UNIT
     _done "Using primordia systemd service"
   fi
 
-  # Narrow sudoers rule: allow the installing user to start/stop/restart the
-  # primordia service without a password — no general sudo access.
+  # Narrow sudoers rule: allow the primordia service user to restart itself
+  # (needed when install.sh updates the service unit and must reload/restart).
   SUDOERS_FILE="/etc/sudoers.d/primordia"
-  SUDOERS_LINE="${USER} ALL=(root) NOPASSWD: /bin/systemctl start primordia, /bin/systemctl stop primordia, /bin/systemctl restart primordia"
+  SUDOERS_LINE="primordia ALL=(root) NOPASSWD: /bin/systemctl start primordia, /bin/systemctl stop primordia, /bin/systemctl restart primordia, /bin/systemctl daemon-reload"
   if [[ ! -f "${SUDOERS_FILE}" ]] || ! grep -qF "${SUDOERS_LINE}" "${SUDOERS_FILE}"; then
     echo "${SUDOERS_LINE}" | sudo tee "${SUDOERS_FILE}" >/dev/null
     sudo chmod 0440 "${SUDOERS_FILE}"
@@ -480,8 +467,7 @@ UNIT
 fi
 
 # ── Set file ownership ────────────────────────────────────────────────────────
-# primordia user owns all files; primordia group members (including the
-# installing user) get group read/write so deployments work without sudo.
+# primordia user owns all files so the service can read/write them.
 
 _CURRENT_STEP="set file ownership"
 
