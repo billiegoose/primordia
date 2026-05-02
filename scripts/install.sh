@@ -630,6 +630,17 @@ if [[ "${SERVICE_READY}" == "false" ]]; then
     # Group-writable so the installing user (in the primordia group) can write
     # files during deploys without needing sudo.
     sudo chmod -R g+rwX "${PRIMORDIA_DIR}"
+    # The primordia user must be able to traverse every parent directory of
+    # PRIMORDIA_DIR to reach its WorkingDirectory. If PRIMORDIA_DIR is under
+    # the installing user's home (e.g. /home/exedev/primordia), that home dir
+    # typically has 700 permissions which blocks traversal. Grant o+x on each
+    # parent up to (but not including) the filesystem root — execute-only, so
+    # directory contents remain private.
+    _parent="$(dirname "${PRIMORDIA_DIR}")"
+    while [[ "$_parent" != "/" ]]; do
+      sudo chmod o+x "$_parent"
+      _parent="$(dirname "$_parent")"
+    done
     _done "File ownership set"
   fi
 
