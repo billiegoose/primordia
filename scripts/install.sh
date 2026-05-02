@@ -392,6 +392,15 @@ if [[ "${PROBABLY_A_SERVER}" == "true" ]] && command -v systemctl &>/dev/null; t
   else
     success "Using primordia system user"
   fi
+
+  # Add the installing user to the primordia group so they can read/write
+  # files owned by primordia (needed for git ops, bun install, builds, etc.).
+  if ! id -nG "$USER" | grep -qw primordia; then
+    sudo usermod -aG primordia "$USER"
+    success "Added ${USER} to primordia group"
+  else
+    success "Using primordia group membership"
+  fi
 fi
 
 # ── Install systemd service ───────────────────────────────────────────────────
