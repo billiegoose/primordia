@@ -596,27 +596,25 @@ export function EvolveRequestForm({
                   ) : null;
                 })()}
               </div>
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-gray-400 w-14 flex-shrink-0">Caveman</span>
-                <label className="flex items-center gap-2 cursor-pointer select-none">
-                  <input
-                    data-id="evolve/caveman-mode"
-                    type="checkbox"
-                    checked={cavemanMode}
-                    onChange={(e) => setCavemanMode(e.target.checked)}
-                    disabled={isLoading}
-                    className="accent-amber-500 disabled:opacity-50"
-                  />
-                  <span className="text-xs text-gray-400">
-                    Caveman mode — cuts ~75% output tokens
-                  </span>
-                </label>
-                {cavemanMode && (
+              <div className="border-t border-gray-800 pt-2">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-500 mb-2">Skills</p>
+                <div className="flex items-center gap-2">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      data-id="evolve/caveman-mode"
+                      type="checkbox"
+                      checked={cavemanMode}
+                      onChange={(e) => setCavemanMode(e.target.checked)}
+                      disabled={isLoading}
+                      className="accent-amber-500 disabled:opacity-50"
+                    />
+                    <span className="text-xs text-gray-400">Caveman - reduce output tokens</span>
+                  </label>
                   <select
                     data-id="evolve/caveman-intensity"
                     value={cavemanIntensity}
                     onChange={(e) => setCavemanIntensity(e.target.value as CavemanIntensity)}
-                    disabled={isLoading}
+                    disabled={isLoading || !cavemanMode}
                     className="text-xs bg-gray-800 text-gray-200 border border-gray-700 rounded px-2 py-1 focus:outline-none focus:border-gray-500 disabled:opacity-50"
                   >
                     {CAVEMAN_INTENSITIES.map((level) => (
@@ -625,7 +623,7 @@ export function EvolveRequestForm({
                       </option>
                     ))}
                   </select>
-                )}
+                </div>
               </div>
             </div>
           )}
