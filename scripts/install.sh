@@ -265,7 +265,8 @@ fi
 
 # Write the /bin/bun shim (idempotent)
 SHIM_CONTENT='#!/usr/bin/env bash
-exec bun-real --bun ~/.bun/bin/sfw bun-real "$@"
+bun-real --bun ~/.bun/bin/sfw bun-real "$@" 2>&1 | grep -v "Warning: Socket Firewall did not detect any package fetch attempts" | grep -v "=== Socket Firewall ==="
+exit "${PIPESTATUS[0]}"
 '
 if [[ ! -f /bin/bun ]] || ! diff -q <(echo "$SHIM_CONTENT") /bin/bun >/dev/null 2>&1; then
   echo "$SHIM_CONTENT" | sudo tee /bin/bun >/dev/null
