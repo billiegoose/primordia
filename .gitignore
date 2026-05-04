@@ -41,8 +41,8 @@ next-env.d.ts
 # Uploaded attachments copied into worktrees (transient, not part of the project)
 /attachments/
 
-# Claude Code worker PID file (written by scripts/claude-worker.ts on startup)
-.primordia-worker.pid
+# PID files (worker, warmup build, etc.)
+*.pid
 
 # Generated OpenAPI spec — run `bun run generate-api-docs` to rebuild
 /public/openapi.json
