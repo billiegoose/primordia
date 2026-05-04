@@ -132,8 +132,14 @@ primordia/
     ├── InstallBlock.tsx           ← Interactive install UI block with SSH command and live VM name input
     ├── LandingNav.tsx             ← Floating hamburger menu in top-right of landing page with lazy-loaded evolve dialog
     ├── LandingSections.tsx        ← Server components for each landing page section (hero, features, how-it-works, etc.)
-    ├── ansi-test/
-    │   └── page.tsx               ← Interactive test page for AnsiRenderer with pre-baked samples and live streaming
+    ├── test-pages/
+    │   ├── page.tsx               ← Index of all developer/component test pages
+    │   ├── ansi-test/
+    │   │   └── page.tsx           ← Interactive test page for AnsiRenderer with pre-baked samples and live streaming
+    │   ├── markdown-test/
+    │   │   └── page.tsx           ← Interactive test page for MarkdownContent with speed and chunk-size controls
+    │   └── sound-test/
+    │       └── page.tsx           ← Web Audio API soundboard with oscilloscope and browser diagnostics
     ├── branches/
     │   ├── page.tsx               ← Server component: git branch tree; publicly viewable; admin-only actions conditionally hidden
     │   └── CreateSessionFromBranchButton.tsx ← Client component: "+ session" button; inline form to start a session on an existing branch
@@ -180,8 +186,6 @@ primordia/
     │   │   └── page.tsx           ← Approval page: authenticated device approves a QR cross-device sign-in
     │   └── cross-device-receive/
     │       └── page.tsx           ← Receive page: new device scanning QR completes cross-device push sign-in flow
-    ├── markdown-test/
-    │   └── page.tsx               ← Interactive test page for MarkdownContent with speed and chunk-size controls
     ├── register-passkey/
     │   ├── page.tsx               ← Server component: shown after exe.dev login when user has no passkeys yet
     │   └── RegisterPasskeyClient.tsx ← Client component: prompts logged-in users to register a passkey
