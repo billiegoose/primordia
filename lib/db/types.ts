@@ -123,6 +123,15 @@ export interface GraphEdge {
   createdAt: number;
 }
 
+/** A structured user event record for analytics and audit. */
+export interface UserEvent {
+  id?: number;
+  ts?: string;
+  userId: string | null;
+  event: string;
+  props: Record<string, unknown> | null;
+}
+
 export interface UserPreferences {
   userId: string;
   key: string;
@@ -173,6 +182,11 @@ export interface DbAdapter {
   // User preferences (key-value store per user)
   getUserPreferences(userId: string, keys: string[]): Promise<Record<string, string>>;
   setUserPreferences(userId: string, prefs: Record<string, string>): Promise<void>;
+
+  // User events
+  appendEvent(event: UserEvent): Promise<number>;
+  queryEvents(opts: { limit?: number; offset?: number; event?: string; userId?: string }): Promise<{ id: number; ts: string; userId: string | null; event: string; props: Record<string, unknown> | null }[]>;
+  countEvents(opts: { event?: string; userId?: string }): Promise<number>;
 
   // Instance identity & social graph
   getInstanceConfig(): Promise<InstanceConfig>;

@@ -80,6 +80,16 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
       description TEXT,
       registered_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS events (
+      id        INTEGER PRIMARY KEY,
+      ts        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      user_id   TEXT,
+      event     TEXT NOT NULL,
+      props     TEXT
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS idx_events_ts    ON events(ts);
+    CREATE INDEX IF NOT EXISTS idx_events_event ON events(event);
+    CREATE INDEX IF NOT EXISTS idx_events_user  ON events(user_id);
     CREATE TABLE IF NOT EXISTS graph_edges (
       id TEXT PRIMARY KEY,
       from_uuid TEXT NOT NULL,
@@ -532,6 +542,45 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
         date: r.date,
         createdAt: r.created_at,
       }));
+    },
+
+    // ── User events ────────────────────────────────────────────────────────────
+
+    async appendEvent(event) {
+      const result = db.prepare(
+        `INSERT INTO events (user_id, event, props) VALUES (?, ?, ?)`
+      ).run(event.userId ?? null, event.event, event.props != null ? JSON.stringify(event.props) : null);
+      return result.lastInsertRowid as number;
+    },
+
+    async queryEvents({ limit = 100, offset = 0, event: eventFilter, userId } = {}) {
+      let sql = `SELECT id, ts, user_id, event, props FROM events`;
+      const params: unknown[] = [];
+      const wheres: string[] = [];
+      if (eventFilter) { wheres.push(`event = ?`); params.push(eventFilter); }
+      if (userId)      { wheres.push(`user_id = ?`); params.push(userId); }
+      if (wheres.length) sql += ` WHERE ` + wheres.join(` AND `);
+      sql += ` ORDER BY id DESC LIMIT ? OFFSET ?`;
+      params.push(limit, offset);
+      const rows = db.prepare(sql).all(...params) as Array<{ id: number; ts: string; user_id: string | null; event: string; props: string | null }>;
+      return rows.map((r) => ({
+        id: r.id,
+        ts: r.ts,
+        userId: r.user_id,
+        event: r.event,
+        props: r.props != null ? JSON.parse(r.props) : null,
+      }));
+    },
+
+    async countEvents({ event: eventFilter, userId } = {}) {
+      let sql = `SELECT COUNT(*) as n FROM events`;
+      const params: unknown[] = [];
+      const wheres: string[] = [];
+      if (eventFilter) { wheres.push(`event = ?`); params.push(eventFilter); }
+      if (userId)      { wheres.push(`user_id = ?`); params.push(userId); }
+      if (wheres.length) sql += ` WHERE ` + wheres.join(` AND `);
+      const row = db.prepare(sql).get(...params) as { n: number };
+      return row.n;
     },
 
     async upsertGraphEdge(edge: GraphEdge) {

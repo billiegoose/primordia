@@ -88,6 +88,7 @@ primordia/
 │   ├── update-source-scheduler.ts ← Background scheduler that automatically fetches update sources per frequency settings
 │   ├── update-sources.ts          ← Manages git-based update sources via git config remote.{id}.* namespace
 │   ├── user-prefs.ts              ← Server-side helpers for reading per-user preferences (harness, model, caveman) from database
+│   ├── events-client.ts           ← Client/server/worker helper: trackEvent() (fire-and-forget) + appendEvent() (async); both POST to /api/events
 │   ├── uuid7.ts                   ← UUID v7 helper (delegates to the `uuid` npm package)
 │   ├── validate-canonical-url.ts  ← Validation for Canonical URL field (HTTPS, non-localhost)
 │   ├── auth-providers/            ← Auth provider system (no registry — auto-discovered by login page)
@@ -165,9 +166,12 @@ primordia/
     │   ├── server-health/
     │   │   ├── page.tsx           ← Server health: disk/memory usage and oldest non-prod worktree cleanup; admin only
     │   │   └── AdminServerHealthClient.tsx ← Client component: disk/memory bars and worktree delete button
-    │   └── updates/
-    │       ├── page.tsx           ← Fetch Updates admin page for pulling upstream Primordia changes; admin only
-    │       └── UpdatesClient.tsx  ← Client component: multiple update sources with fetch/merge controls
+    │   ├── updates/
+    │   │   ├── page.tsx           ← Fetch Updates admin page for pulling upstream Primordia changes; admin only
+    │   │   └── UpdatesClient.tsx  ← Client component: multiple update sources with fetch/merge controls
+    │   └── events/
+    │       ├── page.tsx           ← Event log viewer; admin only; lists all rows from the events table
+    │       └── EventsClient.tsx   ← Client component: paginated, filterable event log table
     ├── evolve/
     │   ├── page.tsx               ← Dedicated "propose a change" page; renders <EvolveRequestForm>; requires evolve permission
     │   └── session/
@@ -241,10 +245,11 @@ primordia/
         │   ├── git-mirror/route.ts    ← GET/POST/DELETE manage "mirror" git remote for push mirroring; admin only
         │   ├── proxy-settings/route.ts ← GET/PATCH reverse proxy configuration from git config; admin only
         │   └── updates/route.ts       ← POST manage upstream update sources and create merge sessions; admin only
-        └── instance/
-            ├── config/route.ts        ← GET/PATCH instance metadata (uuid7, name, description, URLs)
-            ├── primordia-json/route.ts ← GET instance identity + social graph at /.well-known/primordia.json
-            └── register/route.ts      ← POST allows child Primordia instances to register as graph nodes
+        ├── instance/
+        │   ├── config/route.ts        ← GET/PATCH instance metadata (uuid7, name, description, URLs)
+        │   ├── primordia-json/route.ts ← GET instance identity + social graph at /.well-known/primordia.json
+        │   └── register/route.ts      ← POST allows child Primordia instances to register as graph nodes
+        └── events/route.ts            ← POST append event (open, no auth required); GET query events (admin only)
 ```
 
 ### Data Flow
@@ -472,6 +477,7 @@ When implementing changes, follow these principles:
 | Server health (/admin/server-health) | ✅ Live | Admin-only; disk and memory usage with visual bars; oldest non-prod worktree cleanup |
 | Git mirror (/admin/git-mirror) | ✅ Live | Admin-only; every production deploy auto-pushes to `mirror` remote if it exists |
 | Instance identity & social graph | ✅ Live | Each instance has a fixed UUID v7, editable name+description; serves `/.well-known/primordia.json` with self+peers+edges; `/api/instance/register` lets child instances POST to register; admin panel at `/admin/instance` |
+| User event tracking | ✅ Live | `events` table in SQLite; `POST /api/events` (open, no auth); `GET /api/events` (admin); browser helper in `lib/events-client.ts`; admin viewer at `/admin/events` |
 | Read-only git HTTP | ✅ Live | Clone/fetch via `git clone http[s]://<host>/api/git`; proxied through `git http-backend`; push permanently blocked (403) |
 | OpenAPI spec | ✅ Live | Served at `/api/openapi`; generated on first request from `openapi-gen.config.json` |
 

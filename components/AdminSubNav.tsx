@@ -16,7 +16,8 @@ type TabId =
   | "server-health"
   | "git-mirror"
   | "updates"
-  | "instance";
+  | "instance"
+  | "events";
 
 interface AdminSubNavProps {
   currentTab: TabId;
@@ -31,6 +32,7 @@ const tabs: { id: TabId; label: string; href: string }[] = [
   { id: "git-mirror", label: "Git Mirror", href: "/admin/git-mirror" },
   { id: "updates", label: "Fetch Updates", href: "/admin/updates" },
   { id: "instance", label: "Instance", href: "/admin/instance" },
+  { id: "events",   label: "Events",   href: "/admin/events" },
 ];
 
 export default function AdminSubNav({ currentTab }: AdminSubNavProps) {
