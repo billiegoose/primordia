@@ -47,9 +47,16 @@
   colour-coded log panel (stdout / stderr / system) so hangs are immediately
   visible.
 - **stdin EOF bug** — `child.stdin.end()` was called immediately after writing
-  the code, sending EOF to claude which caused it to abort before writing
-  `.credentials.json`.  Fixed by leaving stdin open after writing the code;
-  claude exits on its own when done.
+  the code, sending EOF to claude; this was reverted (open stdin also didn't
+  work because the real problem is below).
+- **PTY fix** — `claude auth login` reads the authorization code directly from
+  `/dev/tty`, not from stdin, so piped stdin writes were silently ignored.
+  Fixed by introducing `scripts/claude-auth-pty.py` (a `pexpect` wrapper that
+  allocates a real PTY for claude).  The wrapper speaks a simple line protocol
+  on its own stdio: writes `URL:<url>` when the URL appears, reads one line
+  (the code) from its stdin, forwards it to claude via the PTY, then writes
+  `DONE` when claude exits.  `lib/claude-temp-auth.ts` now spawns
+  `python3 scripts/claude-auth-pty.py` instead of claude directly.
 
 ## Why
 

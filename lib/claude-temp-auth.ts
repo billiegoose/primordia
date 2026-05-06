@@ -28,6 +28,9 @@ import * as os from 'os';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
 
+// Path to the pexpect PTY wrapper script (relative to project root).
+const PTY_SCRIPT = path.join(process.cwd(), 'scripts', 'claude-auth-pty.py');
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface ClaudeAuthSession {
@@ -124,7 +127,11 @@ export function startClaudeAuth(): Promise<ClaudeAuthSession> {
     const sessionId = randomUUID();
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-auth-'));
 
-    const child = spawn('claude', ['auth', 'login', '--claudeai'], {
+    // Spawn the pexpect PTY wrapper. It allocates a real PTY for claude so
+    // that claude sees a terminal and reads the auth code via the PTY rather
+    // than /dev/tty.  The wrapper speaks a simple line protocol on its own
+    // stdio: "URL:<url>" then waits for us to write the code, then "DONE".
+    const child = spawn('python3', [PTY_SCRIPT], {
       env: { ...process.env, CLAUDE_CONFIG_DIR: tempDir },
       stdio: ['pipe', 'pipe', 'pipe'],
     }) as ChildProcessWithoutNullStreams;
@@ -146,16 +153,16 @@ export function startClaudeAuth(): Promise<ClaudeAuthSession> {
       child,
       pid: child.pid,
       submitCode: (code: string) => {
-        emit(session, 'system', `→ sending code to stdin (${code.length} chars)`);
+        emit(session, 'system', `→ sending code to python wrapper stdin (${code.length} chars)`);
         try {
-          // Write the code + newline, but do NOT close stdin.
-          // Claude keeps running after receiving the code (spinner, API calls, etc.)
-          // and will exit on its own when done. Closing stdin early causes it to
-          // see EOF and abort before writing .credentials.json.
+          // The pexpect wrapper reads one line from its stdin, then forwards
+          // it to claude via the PTY.  We can close stdin after writing because
+          // the wrapper only reads one line and then waits for pexpect.EOF.
           child.stdin.write(code + '\n');
-          emit(session, 'system', '→ code written to stdin (stdin left open)');
+          child.stdin.end();
+          emit(session, 'system', '→ code written and stdin closed');
         } catch (err) {
-          const msg = `Failed to write code to claude stdin: ${err}`;
+          const msg = `Failed to write code to python wrapper stdin: ${err}`;
           emit(session, 'system', `✗ ${msg}`);
           rejectCredentials(new Error(msg));
         }
@@ -167,7 +174,7 @@ export function startClaudeAuth(): Promise<ClaudeAuthSession> {
       exitCode: null,
     };
 
-    emit(session, 'system', `spawned claude auth login (pid ${child.pid}), tempDir=${tempDir}`);
+    emit(session, 'system', `spawned python3 claude-auth-pty.py (pid ${child.pid}), tempDir=${tempDir}`);
 
     // Buffer both stdout and stderr into the log so subscribers see everything.
     bufferStream(child.stdout, 'stdout', session);
@@ -175,13 +182,16 @@ export function startClaudeAuth(): Promise<ClaudeAuthSession> {
 
     let urlFound = false;
 
-    // Intercept stdout lines to detect the OAuth URL.
+    // Intercept stdout lines from the Python wrapper (protocol lines).
+    // "URL:<url>"  → resolve the start promise
+    // "DONE"       → wrapper finished cleanly; close event will read creds
+    // "ERROR:<msg>"→ wrapper encountered a fatal error
     session.logListeners.add((line) => {
       if (line.source !== 'stdout') return;
-      const match = line.text.match(/https?:\/\/\S+/);
-      if (match && !urlFound) {
+
+      if (line.text.startsWith('URL:') && !urlFound) {
         urlFound = true;
-        session.url = match[0];
+        session.url = line.text.slice(4).trim();
         sessions.set(sessionId, session);
 
         // Auto-expire.
@@ -194,7 +204,15 @@ export function startClaudeAuth(): Promise<ClaudeAuthSession> {
         }, SESSION_TTL_MS);
 
         resolveStart({ sessionId, url: session.url, tempDir });
+      } else if (line.text.startsWith('ERROR:')) {
+        const msg = line.text.slice(6);
+        if (!urlFound) {
+          rejectStart(new Error(msg));
+        } else {
+          rejectCredentials(new Error(msg));
+        }
       }
+      // "DONE" is informational; credentials are read in the close handler.
     });
 
     // When the process exits, try to read .credentials.json.
