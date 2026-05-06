@@ -71,6 +71,12 @@
   sent before claude processed the code.  Fixed by polling
   `.credentials.json` (1 s interval, 120 s timeout) instead of any TTY
   pattern-matching — file existence is unambiguous.
+- **Missing "Press Enter to continue"** — after a valid code, claude shows
+  "Login successful. Press Enter to continue…" and waits before writing
+  `.credentials.json`.  The polling loop was draining output without sending
+  that Enter, so credentials were never written.  Fixed by adding a step
+  between code submission and polling: `expect(r"successful|ress Enter")` then
+  `child.send("\r")`.
 
 ## Why
 
