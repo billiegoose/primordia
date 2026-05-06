@@ -103,47 +103,24 @@ function derivePublicPort(incoming: http.IncomingMessage): string {
 }
 
 const LISTEN_PORT = parseInt(process.env.REVERSE_PROXY_PORT ?? '3000', 10);
-const WORKTREES_DIR =
-  process.env.PRIMORDIA_WORKTREES_DIR ?? '/home/exedev/primordia-worktrees';
+
+/**
+ * Compute paths relative to the reverse-proxy.ts file location.
+ * install.sh copies reverse-proxy.ts from scripts/ to {PRIMORDIA_ROOT}/reverse-proxy.ts,
+ * so __filename is {PRIMORDIA_ROOT}/reverse-proxy.ts at runtime.
+ * Worktrees are at {PRIMORDIA_ROOT}/worktrees/.
+ * Main repo is at {PRIMORDIA_ROOT}/source.git.
+ */
+const PRIMORDIA_ROOT = path.dirname(__filename);
+const WORKTREES_DIR = path.join(PRIMORDIA_ROOT, 'worktrees');
+const MAIN_REPO = path.join(PRIMORDIA_ROOT, 'source.git');
 
 /** Disk usage percent above which automatic worktree cleanup is triggered (configurable via git config primordia.diskCleanupThresholdPct). */
 let diskCleanupThresholdPct = 90;
 /** How often the proxy checks disk usage and cleans up if needed (5 minutes). */
 const DISK_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 
-/**
- * Discover the main git repo by inspecting any worktree in WORKTREES_DIR.
- * Falls back to process.cwd() (which is set to the main repo by the systemd
- * WorkingDirectory directive in primordia-proxy.service).
- */
-function discoverMainRepo(): string {
-  try {
-    const entries = fs.readdirSync(WORKTREES_DIR, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const candidate = path.join(WORKTREES_DIR, entry.name);
-      try {
-        const commonDir = execFileSync('git', ['rev-parse', '--git-common-dir'], {
-          cwd: candidate,
-          encoding: 'utf8',
-          stdio: ['pipe', 'pipe', 'pipe'],
-        }).trim();
-        // commonDir is the shared git dir: a bare repo (e.g. source.git) or a
-        // .git directory inside a non-bare repo.  All git commands work with
-        // either path as cwd, so return it directly.
-        return path.resolve(candidate, commonDir);
-      } catch {
-        continue;
-      }
-    }
-  } catch {
-    // WORKTREES_DIR doesn't exist yet
-  }
-  return process.cwd();
-}
 
-/** Stable path to the main git repo — used as cwd for all git commands. */
-const MAIN_REPO = discoverMainRepo();
 
 let upstreamPort = 3001;
 /** The branch name currently set as primordia.productionBranch. */
@@ -317,6 +294,7 @@ function readAllPorts(): void {
     }
   }
   if (prodBranch) {
+    const prevProdBranch = currentProdBranch;
     currentProdBranch = prodBranch;
     let port = branchPort[prodBranch];
     if (!port) {
@@ -336,9 +314,17 @@ function readAllPorts(): void {
         console.warn(`[proxy] could not persist port for '${prodBranch}': ${(err as Error).message}`);
       }
     }
-    if (port !== upstreamPort) {
+    const portChanged = port !== upstreamPort;
+    if (portChanged) {
       console.log(`[proxy] upstream port: ${upstreamPort} → ${port} (PROD branch: ${prodBranch})`);
       upstreamPort = port;
+    }
+    // If the prod branch or port changed and there is no running prod server,
+    // start one now. This handles the local (non-production) accept flow where
+    // no /_proxy/prod/spawn call is made — the proxy just sees the git config
+    // change via fs.watch and must boot the new server automatically.
+    if ((portChanged || prodBranch !== prevProdBranch) && !prodServerEntry) {
+      setTimeout(() => void startProdServerIfNeeded(), 0);
     }
   }
 

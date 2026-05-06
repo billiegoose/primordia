@@ -16,7 +16,7 @@ import { useSessionUser } from "@/lib/hooks";
 import { withBasePath } from "@/lib/base-path";
 import { encryptStoredApiKey } from "@/lib/api-key-client";
 import { useSounds } from "@/lib/sounds";
-import { encryptStoredCredentials } from "@/lib/credentials-client";
+import { encryptStoredCredentials, updateStoredCredentials } from "@/lib/credentials-client";
 import { EvolveRequestForm } from "@/components/EvolveRequestForm";
 import Link from "next/link";
 import type { DiffFileSummary } from "./page";
@@ -1095,6 +1095,7 @@ export default function EvolveSessionView({
               status?: string;
               previewUrl?: string | null;
               done?: boolean;
+              updatedCredentials?: string;
             };
 
             if (parsed.events && parsed.events.length > 0) {
@@ -1114,6 +1115,13 @@ export default function EvolveSessionView({
               setPreviewUrl((prev) => {
                 if (!prev && newUrl) trackEvent("session/preview-loaded/v1", { sessionId, previewUrl: newUrl });
                 return newUrl;
+              });
+            }
+            // If the agent refreshed the OAuth tokens while running, re-encrypt
+            // the updated credentials and save them back to the database.
+            if (parsed.updatedCredentials) {
+              updateStoredCredentials(parsed.updatedCredentials).catch(() => {
+                // Best-effort: failure leaves old credentials in DB unchanged
               });
             }
           } catch {
@@ -1839,10 +1847,15 @@ export default function EvolveSessionView({
                   formData.append('harness', harness);
                   formData.append('model', model);
                   for (const file of files) formData.append('attachments', file);
-                  const encryptedApiKey = await encryptStoredApiKey();
-                  if (encryptedApiKey) formData.append('encryptedApiKey', encryptedApiKey);
-                  const encryptedCredentials = await encryptStoredCredentials();
-                  if (encryptedCredentials) formData.append('encryptedCredentials', JSON.stringify(encryptedCredentials));
+                  // Only one auth token is ever sent. Credentials are only
+                  // meaningful for the claude-code harness; all others use the API key.
+                  if (harness === 'claude-code') {
+                    const encryptedCredentials = await encryptStoredCredentials();
+                    if (encryptedCredentials) formData.append('encryptedCredentials', JSON.stringify(encryptedCredentials));
+                  } else {
+                    const encryptedApiKey = await encryptStoredApiKey();
+                    if (encryptedApiKey) formData.append('encryptedApiKey', encryptedApiKey);
+                  }
                   const res = await fetch(withBasePath('/api/evolve/followup'), {
                     method: 'POST',
                     body: formData,

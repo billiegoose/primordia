@@ -268,10 +268,15 @@ export function EvolveRequestForm({
         for (const file of allFiles) {
           formData.append("attachments", file);
         }
-        const encryptedApiKey = await encryptStoredApiKey();
-        if (encryptedApiKey) formData.append("encryptedApiKey", encryptedApiKey);
-        const encryptedCredentials = await encryptStoredCredentials();
-        if (encryptedCredentials) formData.append("encryptedCredentials", JSON.stringify(encryptedCredentials));
+        // Only one auth token is ever sent. Credentials are only meaningful
+        // for the claude-code harness; all other harnesses use the API key.
+        if (selectedHarness === 'claude-code') {
+          const encryptedCredentials = await encryptStoredCredentials();
+          if (encryptedCredentials) formData.append("encryptedCredentials", JSON.stringify(encryptedCredentials));
+        } else {
+          const encryptedApiKey = await encryptStoredApiKey();
+          if (encryptedApiKey) formData.append("encryptedApiKey", encryptedApiKey);
+        }
 
         const res = await fetch(withBasePath("/api/evolve"), { method: "POST", body: formData });
         const data = (await res.json()) as { sessionId?: string; error?: string };
