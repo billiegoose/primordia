@@ -46,6 +46,10 @@
   The test page subscribes as soon as a session starts and shows a live
   colour-coded log panel (stdout / stderr / system) so hangs are immediately
   visible.
+- **stdin EOF bug** — `child.stdin.end()` was called immediately after writing
+  the code, sending EOF to claude which caused it to abort before writing
+  `.credentials.json`.  Fixed by leaving stdin open after writing the code;
+  claude exits on its own when done.
 
 ## Why
 
