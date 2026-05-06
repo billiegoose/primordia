@@ -107,7 +107,8 @@ export function AdminUpdatesBell({ sessionUser }: AdminUpdatesBellProps) {
   const hasAnything = data && (data.hasUpdates || data.sessions.length > 0);
   if (!hasAnything && !menuOpen) return null;
 
-  const bellActive = data?.hasUpdates || (data?.sessions.length ?? 0) > 0;
+  const RUNNING_STATUSES = new Set(["starting", "running-claude", "fixing-types", "accepting"]);
+  const hasRunningSessions = data?.sessions.some((s) => RUNNING_STATUSES.has(s.status)) ?? false;
 
   function toggle() {
     const next = !menuOpen;
@@ -123,9 +124,9 @@ export function AdminUpdatesBell({ sessionUser }: AdminUpdatesBellProps) {
         aria-label={menuOpen ? "Close notifications" : "Open notifications"}
         aria-expanded={menuOpen}
         className={`p-2 rounded-lg transition-colors hover:bg-gray-800 ${
-          bellActive
+          hasRunningSessions
             ? "text-amber-400 hover:text-amber-300 animate-pulse"
-            : "text-gray-400 hover:text-white"
+            : "text-white hover:text-gray-300"
         }`}
       >
         <Bell size={20} strokeWidth={2} aria-hidden="true" />
@@ -143,7 +144,7 @@ export function AdminUpdatesBell({ sessionUser }: AdminUpdatesBellProps) {
               {/* Updates row — admin only */}
               {isAdmin && data?.hasUpdates && (
                 <Link
-                  href={withBasePath("/admin/updates")}
+                  href="/admin/updates"
                   onClick={() => setMenuOpen(false)}
                   className="flex items-center gap-3 px-4 py-3 text-sm text-amber-400 hover:text-amber-300 hover:bg-gray-800 transition-colors border-b border-gray-800"
                 >
@@ -157,7 +158,7 @@ export function AdminUpdatesBell({ sessionUser }: AdminUpdatesBellProps) {
                 data.sessions.map((s) => (
                   <Link
                     key={s.id}
-                    href={withBasePath(`/evolve/session/${s.id}`)}
+                    href={`/evolve/session/${s.id}`}
                     onClick={() => setMenuOpen(false)}
                     className="flex items-center gap-3 px-4 py-3 text-sm text-gray-300 hover:text-white hover:bg-gray-800 transition-colors border-b border-gray-800 last:border-b-0"
                   >

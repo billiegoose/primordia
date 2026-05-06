@@ -12,7 +12,7 @@ The notification bell (shown to admins and evolvers in the top-right nav) has be
 - Bell fetches sessions + updates on mount (to decide whether to render at all) and re-fetches on every open.
 - Skeleton rows are shown while data loads.
 - Click-outside closes the menu (same pattern as hamburger menu).
-- Bell pulses amber when there are updates or active sessions; muted otherwise.
+- Bell pulses amber only when sessions are actively in-flight (starting/running/fixing-types/accepting); white and non-animated when only ready sessions or updates are present.
 
 **Visibility:** Previously admin-only. Now shown to any user with `can_evolve` or `admin` role.
 
