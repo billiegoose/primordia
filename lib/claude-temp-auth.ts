@@ -174,7 +174,8 @@ export function startClaudeAuth(): Promise<ClaudeAuthSession> {
       exitCode: null,
     };
 
-    emit(session, 'system', `spawned python3 claude-auth-pty.py (pid ${child.pid}), tempDir=${tempDir}`);
+    emit(session, 'system', `spawned python3 claude-auth-pty.py (pid ${child.pid}), CLAUDE_CONFIG_DIR=${tempDir}`);
+    emit(session, 'system', 'flow: theme ❯ → Enter, login ❯ → Enter, URL capture, code forward, /exit');
 
     // Buffer both stdout and stderr into the log so subscribers see everything.
     bufferStream(child.stdout, 'stdout', session);

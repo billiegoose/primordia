@@ -49,14 +49,15 @@
 - **stdin EOF bug** — `child.stdin.end()` was called immediately after writing
   the code, sending EOF to claude; this was reverted (open stdin also didn't
   work because the real problem is below).
-- **PTY fix** — `claude auth login` reads the authorization code directly from
-  `/dev/tty`, not from stdin, so piped stdin writes were silently ignored.
-  Fixed by introducing `scripts/claude-auth-pty.py` (a `pexpect` wrapper that
-  allocates a real PTY for claude).  The wrapper speaks a simple line protocol
-  on its own stdio: writes `URL:<url>` when the URL appears, reads one line
-  (the code) from its stdin, forwards it to claude via the PTY, then writes
-  `DONE` when claude exits.  `lib/claude-temp-auth.ts` now spawns
-  `python3 scripts/claude-auth-pty.py` instead of claude directly.
+- **PTY / full first-run flow** — `claude auth login --claudeai` only works
+  when the browser is already logged in on the same machine; on a remote VM it
+  silently ignores piped stdin because it reads the code via `/dev/tty`.
+  Fixed by switching to the full interactive `claude` first-run wizard via
+  `scripts/claude-auth-pty.py` (pexpect).  Probed the actual terminal output
+  to discover the exact sequence: theme `❯` menu → `\r`, login-method `❯`
+  menu → `\r` (selects Claude subscription), URL capture, code forwarded via
+  PTY `sendline`, wait for REPL `>` → `/exit`.  Also handles post-auth
+  yes/no or menu prompts and checks `.credentials.json` on unexpected EOF.
 
 ## Why
 
