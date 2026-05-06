@@ -10,7 +10,7 @@
 #                                   (Claude subscription)
 #   3. Browser opens / URL shown → capture and emit
 #   4. User pastes code          → forward to claude via PTY
-#   5. Auth succeeds, REPL starts → send /exit
+#   5. Poll for .credentials.json → once it exists, /exit claude
 #
 # Protocol (stdout, one line each):
 #   URL:<url>    — OAuth URL to visit
@@ -22,10 +22,11 @@
 
 import os
 import sys
-import re
+import time
 import pexpect
 
 env = os.environ.copy()
+CRED_PATH = os.path.join(env.get("CLAUDE_CONFIG_DIR", ""), ".credentials.json")
 
 
 def die(msg: str) -> None:
@@ -47,8 +48,9 @@ try:
         timeout=30,
         encoding="utf-8",
         echo=False,
-        # Large terminal so long URLs don't wrap.
-        dimensions=(50, 220),
+        # Use a very wide terminal so the OAuth URL never wraps onto a new line.
+        # The URL is ~500 chars; 10000 cols guarantees it stays on one line.
+        dimensions=(50, 10000),
     )
 
     # Forward everything the child outputs to our stderr (Node.js log).
@@ -63,9 +65,6 @@ try:
     child.send("\r")
 
     # ── Step 2: Login method selector ──────────────────────────────────────
-    # Wait for the second ❯ (login menu).  The first ❯ was the theme picker;
-    # after \r the screen redraws and the next ❯ is the login method menu
-    # which defaults to "Claude subscription".
     log("waiting for login-method menu (❯)…")
     idx = child.expect(["❯", pexpect.EOF, pexpect.TIMEOUT])
     if idx != 0:
@@ -74,15 +73,28 @@ try:
     child.send("\r")
 
     # ── Step 3: Capture the OAuth URL ──────────────────────────────────────
+    # With a 10000-column terminal the URL will never wrap, so we can grab it
+    # in one shot with a pattern that stops at whitespace / escape sequences.
     log("waiting for OAuth URL…")
-    idx = child.expect([r"https://[^\s\r\n\x1b]+", pexpect.EOF, pexpect.TIMEOUT])
+    idx = child.expect([r"https://\S+", pexpect.EOF, pexpect.TIMEOUT])
     if idx != 0:
         die(f"did not see OAuth URL (idx={idx})")
 
     url = child.match.group(0).strip().rstrip(".,;)")
-    log(f"URL found: {url}")
-    # Emit URL to Node.js over stdout.
+    log(f"URL found ({len(url)} chars)")
+    # Emit to Node.js stdout.
     print(f"URL:{url}", flush=True)
+
+    # Flush any remaining buffered output before waiting for the code prompt.
+    # This clears "Paste code here if prompted >" from pexpect's internal
+    # buffer so it can't cause a false match later.
+    try:
+        child.expect(r"Paste code", timeout=5)
+        log("code-input prompt seen")
+    except pexpect.TIMEOUT:
+        log("code-input prompt not seen (timeout) — continuing anyway")
+    except pexpect.EOF:
+        die("claude exited while waiting for code-input prompt")
 
     # ── Step 4: Read code from Node.js, forward to claude ──────────────────
     log("waiting for authorization code on stdin…")
@@ -92,57 +104,52 @@ try:
     log(f"got code ({len(code)} chars), sending to claude via PTY")
     child.sendline(code)
 
-    # ── Step 5: Wait for auth to complete ──────────────────────────────────
-    # After a valid code, claude stores credentials and starts the REPL.
-    # We wait for the REPL prompt (>) then exit gracefully.
-    # Some claude versions show extra setup prompts after auth — handle them
-    # by pressing Enter until we reach the REPL or EOF.
-    log("waiting for REPL prompt or exit…")
-    for _ in range(20):
-        idx = child.expect(
-            [
-                r">\s*$",        # REPL prompt at end of line
-                r"\$ $",         # alternative REPL prompt
-                "❯",             # another menu (post-auth setup)
-                r"\[y/n\]",      # yes/no prompt
-                r"\(y/N\)",      # yes/no prompt variant
-                pexpect.EOF,
-                pexpect.TIMEOUT,
-            ],
-            timeout=30,
-        )
-        if idx in (0, 1):
-            log("REPL prompt detected — sending /exit")
-            child.sendline("/exit")
-            try:
-                child.expect(pexpect.EOF, timeout=10)
-            except Exception:
-                pass
+    # ── Step 5: Poll for .credentials.json ─────────────────────────────────
+    # After receiving a valid code, claude makes an API call to exchange it for
+    # tokens, then writes .credentials.json, and finally shows the REPL prompt.
+    # We poll the file directly — much more reliable than matching TTY output
+    # which can contain false positives (e.g. "Paste code here if prompted >").
+    log("polling for .credentials.json…")
+    POLL_INTERVAL = 1.0   # seconds between checks
+    POLL_TIMEOUT  = 120   # seconds total
+
+    deadline = time.time() + POLL_TIMEOUT
+    cred_found = False
+
+    while time.time() < deadline:
+        # Drain any new child output (keeps the pty buffer from filling up).
+        try:
+            child.expect(pexpect.TIMEOUT, timeout=POLL_INTERVAL)
+        except pexpect.EOF:
+            log("claude exited (EOF) during polling")
             break
-        elif idx == 2:
-            log("post-auth menu prompt — pressing Enter")
-            child.send("\r")
-        elif idx in (3, 4):
-            log("post-auth y/n prompt — pressing Enter")
-            child.sendline("")
-        elif idx == 5:
-            log("process exited (EOF)")
+
+        if os.path.exists(CRED_PATH):
+            log(f".credentials.json found ({os.path.getsize(CRED_PATH)} bytes)")
+            cred_found = True
             break
-        elif idx == 6:
-            # Timeout — check if credentials already exist
-            cred_path = os.path.join(env.get("CLAUDE_CONFIG_DIR", ""), ".credentials.json")
-            if os.path.exists(cred_path):
-                log("timeout but .credentials.json exists — treating as success")
-            else:
-                die("timed out waiting for REPL prompt after sending code")
-            break
+
+    if not cred_found:
+        if os.path.exists(CRED_PATH):
+            cred_found = True
+        else:
+            die(
+                f".credentials.json was not created within {POLL_TIMEOUT} s. "
+                "The authorization code may have been invalid or expired."
+            )
+
+    # ── Step 6: Exit the claude REPL ───────────────────────────────────────
+    log("credentials found — sending /exit to close the REPL")
+    try:
+        child.sendline("/exit")
+        child.expect(pexpect.EOF, timeout=15)
+    except Exception as e:
+        log(f"note: /exit or EOF wait raised {e} (credentials already saved — ignoring)")
 
     print("DONE", flush=True)
 
 except pexpect.EOF:
-    # EOF before we expected it — credentials may still have been written.
-    cred_path = os.path.join(env.get("CLAUDE_CONFIG_DIR", ""), ".credentials.json")
-    if os.path.exists(cred_path):
+    if os.path.exists(CRED_PATH):
         log("EOF received but .credentials.json exists — treating as success")
         print("DONE", flush=True)
     else:
