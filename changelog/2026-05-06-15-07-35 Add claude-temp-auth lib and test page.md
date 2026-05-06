@@ -56,8 +56,17 @@
   `scripts/claude-auth-pty.py` (pexpect).  Probed the actual terminal output
   to discover the exact sequence: theme `❯` menu → `\r`, login-method `❯`
   menu → `\r` (selects Claude subscription), URL capture, code forwarded via
-  PTY `sendline`, wait for REPL `>` → `/exit`.  Also handles post-auth
-  yes/no or menu prompts and checks `.credentials.json` on unexpected EOF.
+  PTY `sendline`, wait for REPL `>` → `/exit`.  Also handles post-auth yes/no or menu prompts and checks `.credentials.json`
+  on unexpected EOF.
+- **URL truncation** — OAuth URL (~500 chars) wrapped across 3 terminal lines
+  at the 220-col terminal width; only the first line was captured.  Fixed by
+  setting PTY dimensions to `(50, 10000)` so the URL always fits on one line.
+- **False REPL match** — `"Paste code here if prompted >"` was already in
+  pexpect’s buffer when we started waiting for the REPL prompt, so `/exit`
+  was sent before claude processed the code.  Fixed by explicitly consuming
+  the `"Paste code"` prompt from the buffer, then polling
+  `.credentials.json` every 1 s (up to 120 s) instead of pattern-matching
+  TTY output — file existence is unambiguous.
 
 ## Why
 
