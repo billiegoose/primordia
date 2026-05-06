@@ -1,23 +1,39 @@
 // components/SettingsSubNav.tsx
-// Settings section navigation.
-// Large screens: vertical sidebar.
+// Account Settings section navigation.
+// Large screens: vertical sidebar with live status indicators.
 // Mobile: <select> dropdown that navigates on change.
 
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { hasStoredApiKey } from "@/lib/api-key-client";
+import { hasStoredCredentials } from "@/lib/credentials-client";
 
 type TabId = "api-key" | "claude-ai";
 
 const tabs: { id: TabId; label: string; href: string }[] = [
-  { id: "api-key", label: "API Key", href: "/settings" },
+  { id: "api-key", label: "API Keys", href: "/settings" },
   { id: "claude-ai", label: "Claude.ai Subscription", href: "/settings/claude-ai" },
 ];
 
 export default function SettingsSubNav({ currentTab }: { currentTab: TabId }) {
   const router = useRouter();
   const currentHref = tabs.find((t) => t.id === currentTab)?.href ?? "/settings";
+  const [apiKeyActive, setApiKeyActive] = useState(false);
+  const [credentialsActive, setCredentialsActive] = useState(false);
+
+  useEffect(() => {
+    setApiKeyActive(hasStoredApiKey());
+    setCredentialsActive(hasStoredCredentials());
+  }, []);
+
+  function isActive(tabId: TabId) {
+    if (tabId === "api-key") return apiKeyActive;
+    if (tabId === "claude-ai") return credentialsActive;
+    return false;
+  }
 
   return (
     <>
@@ -30,7 +46,7 @@ export default function SettingsSubNav({ currentTab }: { currentTab: TabId }) {
         >
           {tabs.map((tab) => (
             <option key={tab.id} value={tab.href}>
-              {tab.label}
+              {tab.label}{isActive(tab.id) ? " ●" : ""}
             </option>
           ))}
         </select>
@@ -39,7 +55,7 @@ export default function SettingsSubNav({ currentTab }: { currentTab: TabId }) {
       {/* Desktop: vertical sidebar */}
       <nav
         className="hidden lg:flex flex-col gap-0.5 w-44 shrink-0 sticky top-6"
-        aria-label="Settings navigation"
+        aria-label="Account Settings navigation"
       >
         {tabs.map((tab) => {
           const active = tab.id === currentTab;
@@ -48,13 +64,16 @@ export default function SettingsSubNav({ currentTab }: { currentTab: TabId }) {
               key={tab.id}
               href={tab.href}
               data-id={`settings-nav/${tab.id}`}
-              className={`px-3 py-2 text-sm font-medium rounded transition-colors ${
+              className={`flex items-center justify-between px-3 py-2 text-sm font-medium rounded transition-colors ${
                 active
                   ? "bg-gray-700 text-white"
                   : "text-gray-400 hover:text-gray-200 hover:bg-gray-800"
               }`}
             >
-              {tab.label}
+              <span>{tab.label}</span>
+              {isActive(tab.id) && (
+                <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" aria-label="Active" />
+              )}
             </Link>
           );
         })}

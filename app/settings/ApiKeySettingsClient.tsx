@@ -1,9 +1,33 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Key, Eye, EyeOff, ExternalLink } from "lucide-react";
+import { Eye, EyeOff, ExternalLink } from "lucide-react";
 import { hasStoredApiKey, setStoredApiKey } from "@/lib/api-key-client";
 import { trackEvent } from "@/lib/events-client";
+
+function ComingSoonCard({ monogram, monogramClass, name, description }: {
+  monogram: string;
+  monogramClass: string;
+  name: string;
+  description: string;
+}) {
+  return (
+    <div className="rounded-xl border border-gray-800 bg-gray-900/40 p-5 opacity-50 select-none">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-3">
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold ${monogramClass}`}>
+            {monogram}
+          </div>
+          <span className="text-sm font-medium text-gray-300">{name}</span>
+        </div>
+        <span className="text-xs px-2 py-0.5 rounded-full bg-gray-800 text-gray-500 border border-gray-700">
+          Coming soon
+        </span>
+      </div>
+      <p className="text-xs text-gray-500 ml-11">{description}</p>
+    </div>
+  );
+}
 
 export default function ApiKeySettingsClient() {
   const [isKeySet, setIsKeySet] = useState(false);
@@ -56,99 +80,118 @@ export default function ApiKeySettingsClient() {
   }
 
   return (
-    <section className="flex flex-col gap-5">
+    <div className="flex flex-col gap-6">
       <div>
-        <h2 className="text-base font-medium text-gray-200 mb-1 flex items-center gap-2">
-          <Key size={16} className="text-amber-400" aria-hidden="true" />
-          API Key
-        </h2>
+        <h2 className="text-base font-medium text-gray-200 mb-1">API Keys</h2>
         <p className="text-sm text-gray-400 leading-relaxed">
-          Optionally override the exe.dev LLM gateway with your own{" "}
-          <a
-            href="https://console.anthropic.com/settings/keys"
-            target="_blank"
-            rel="noopener noreferrer"
-            data-id="api-key/anthropic-console"
-            className="text-amber-400 hover:text-amber-300 underline inline-flex items-center gap-0.5"
-          >
-            Anthropic API key
-            <ExternalLink size={11} strokeWidth={2} className="inline" aria-hidden="true" />
-          </a>
-          . The key is encrypted in your browser — the encryption key never leaves
-          this device, and the plaintext key is never stored or transmitted.
+          Connect your own AI provider keys to use them for evolve requests.
+          Keys are encrypted in your browser and never stored in plaintext.
         </p>
       </div>
 
-      <div className={`px-3 py-2 rounded-lg text-sm border ${
-        isKeySet
-          ? "bg-green-900/30 border-green-700/50 text-green-300"
-          : "bg-gray-800 border-gray-700 text-gray-400"
-      }`}>
-        {isKeySet ? (
-          <span>
-            <span className="font-medium">Active</span>{" "}
-            <span className="text-green-400/70 text-xs">— key encrypted on this device</span>
-          </span>
-        ) : (
-          <span>No API key set — using exe.dev gateway</span>
-        )}
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <label className="text-xs text-gray-400 font-medium">
-          {isKeySet ? "Replace key" : "Enter your API key"}
-        </label>
-        <div className="relative">
-          <input
-            data-id="api-key/key-input"
-            type={showKey ? "text" : "password"}
-            value={inputValue}
-            onChange={(e) => { setInputValue(e.target.value); setError(null); setSaved(false); }}
-            onKeyDown={(e) => { if (e.key === "Enter") void handleSave(); }}
-            placeholder="sk-ant-api03-…"
-            className="w-full bg-gray-800 text-sm text-gray-100 placeholder-gray-500 border border-gray-700 rounded-lg px-3 py-2 pr-9 outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50 font-mono"
-            autoComplete="off"
-            spellCheck={false}
-            disabled={loading}
-          />
-          <button
-            type="button"
-            data-id="api-key/toggle-visibility"
-            onClick={() => setShowKey((v) => !v)}
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
-            aria-label={showKey ? "Hide key" : "Show key"}
-          >
-            {showKey
-              ? <EyeOff size={15} strokeWidth={2} aria-hidden="true" />
-              : <Eye size={15} strokeWidth={2} aria-hidden="true" />
-            }
-          </button>
-        </div>
-        {error && <p className="text-xs text-red-400">{error}</p>}
-      </div>
-
-      <div className="flex items-center justify-between gap-3">
-        <div>
+      {/* Anthropic — fully functional */}
+      <div className="rounded-xl border border-gray-700 bg-gray-900 p-5 flex flex-col gap-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-amber-400/10 flex items-center justify-center text-sm font-bold text-amber-400 shrink-0">
+              A
+            </div>
+            <div>
+              <p className="text-sm font-medium text-gray-200">Anthropic</p>
+              <p className="text-xs text-gray-500 mt-0.5">Claude models — overrides the default exe.dev gateway</p>
+            </div>
+          </div>
           {isKeySet && (
-            <button
-              data-id="api-key/clear-key"
-              onClick={() => void handleClear()}
-              disabled={loading}
-              className="px-3 py-1.5 rounded-lg text-sm text-red-400 hover:text-red-300 hover:bg-red-900/20 border border-red-800/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Clear key
-            </button>
+            <span className="shrink-0 text-xs px-2 py-0.5 rounded-full bg-green-900/40 text-green-400 border border-green-800/50">
+              Active
+            </span>
           )}
         </div>
-        <button
-          data-id="api-key/save-key"
-          onClick={() => void handleSave()}
-          disabled={!inputValue.trim() || saved || loading}
-          className="px-4 py-1.5 rounded-lg text-sm font-medium bg-amber-600 hover:bg-amber-500 disabled:bg-amber-900 text-white transition-colors disabled:cursor-not-allowed"
-        >
-          {loading ? "Saving…" : saved ? "Saved ✓" : "Save key"}
-        </button>
+
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <label className="text-xs text-gray-400 font-medium">
+              {isKeySet ? "Replace key" : "API key"}
+            </label>
+            <a
+              href="https://console.anthropic.com/settings/keys"
+              target="_blank"
+              rel="noopener noreferrer"
+              data-id="api-key/anthropic-console"
+              className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-0.5 transition-colors"
+            >
+              Get a key
+              <ExternalLink size={10} strokeWidth={2} aria-hidden="true" />
+            </a>
+          </div>
+          <div className="relative">
+            <input
+              data-id="api-key/key-input"
+              type={showKey ? "text" : "password"}
+              value={inputValue}
+              onChange={(e) => { setInputValue(e.target.value); setError(null); setSaved(false); }}
+              onKeyDown={(e) => { if (e.key === "Enter") void handleSave(); }}
+              placeholder="sk-ant-api03-…"
+              className="w-full bg-gray-800 text-sm text-gray-100 placeholder-gray-500 border border-gray-700 rounded-lg px-3 py-2 pr-9 outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50 font-mono"
+              autoComplete="off"
+              spellCheck={false}
+              disabled={loading}
+            />
+            <button
+              type="button"
+              data-id="api-key/toggle-visibility"
+              onClick={() => setShowKey((v) => !v)}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
+              aria-label={showKey ? "Hide key" : "Show key"}
+            >
+              {showKey
+                ? <EyeOff size={15} strokeWidth={2} aria-hidden="true" />
+                : <Eye size={15} strokeWidth={2} aria-hidden="true" />
+              }
+            </button>
+          </div>
+          {error && <p className="text-xs text-red-400">{error}</p>}
+        </div>
+
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            {isKeySet && (
+              <button
+                data-id="api-key/clear-key"
+                onClick={() => void handleClear()}
+                disabled={loading}
+                className="px-3 py-1.5 rounded-lg text-sm text-red-400 hover:text-red-300 hover:bg-red-900/20 border border-red-800/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Clear key
+              </button>
+            )}
+          </div>
+          <button
+            data-id="api-key/save-key"
+            onClick={() => void handleSave()}
+            disabled={!inputValue.trim() || saved || loading}
+            className="px-4 py-1.5 rounded-lg text-sm font-medium bg-amber-600 hover:bg-amber-500 disabled:bg-amber-900 text-white transition-colors disabled:cursor-not-allowed"
+          >
+            {loading ? "Saving…" : saved ? "Saved ✓" : "Save key"}
+          </button>
+        </div>
       </div>
-    </section>
+
+      {/* Coming-soon providers */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <ComingSoonCard
+          monogram="O"
+          monogramClass="bg-emerald-400/10 text-emerald-400"
+          name="OpenAI"
+          description="GPT-4o and other OpenAI models."
+        />
+        <ComingSoonCard
+          monogram="G"
+          monogramClass="bg-blue-400/10 text-blue-400"
+          name="Google Gemini"
+          description="Gemini 2.0 Flash, Pro, and Ultra."
+        />
+      </div>
+    </div>
   );
 }

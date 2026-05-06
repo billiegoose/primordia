@@ -1,14 +1,15 @@
-# Move API Key and Claude.ai Subscription to User Settings page
+# Move API Key and Claude.ai Subscription to Account Settings page
 
 ## What changed
 
 - Removed "API Key" and "Claude.ai Subscription" from the hamburger menu dropdown.
-- Added a new **Settings** link in the hamburger menu (indigo accent, gear icon) for all logged-in users.
-- Created `/settings` — API Key tab: lets users set or clear their Anthropic API key, with the same AES-256-GCM browser-side encryption as before.
-- Created `/settings/claude-ai` — Claude.ai Subscription tab: OAuth sign-in flow and manual credentials.json paste, same encryption model as before.
-- Both settings pages follow the same layout as the Admin page: `PageNavBar` header, sidebar subnav (`SettingsSubNav`), and content area.
-- The `SettingsSubNav` sidebar supports desktop (vertical link list) and mobile (select dropdown) like `AdminSubNav`.
+- Added a new **Account Settings** link in the hamburger menu (indigo accent, gear icon) for all logged-in users.
+- Created `/settings` — **API Keys** tab: card-based layout with a functional Anthropic key card and coming-soon cards for OpenAI and Google Gemini.
+- Created `/settings/claude-ai` — **Claude.ai Subscription** tab: card-based OAuth sign-in flow and manual credentials.json paste; uses the ClaudeIcon brand icon instead of a generic key icon.
+- Page is called **Account Settings** (in nav subtitle, page title, and hamburger menu) so users understand these are per-user settings, not app-wide config.
+- `SettingsSubNav` sidebar shows live green status dots next to tabs where a key/credential is already set, so users can see active status without navigating into each tab.
+- Both pages follow the same layout as the Admin page: `PageNavBar` header, sidebar subnav, and content area.
 
 ## Why
 
-The hamburger menu was getting crowded. Placing credentials settings on a dedicated page gives each setting more room for description and UI, keeps the menu focused on navigation, and matches the Admin page's pattern for structured sub-sections.
+The hamburger menu was getting crowded. Moving credentials to a dedicated page gives each setting more room. The wider card-based layout (instead of a narrow dialog) suits a full page better. The "Account Settings" name makes the scope clear — these are user-scoped settings, not instance/app config. The coming-soon provider grid signals that more AI provider integrations are planned.

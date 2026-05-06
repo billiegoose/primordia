@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { KeyRound, ExternalLink, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
+import { ExternalLink, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
+import { ClaudeIcon } from "@/components/brand-icons/ClaudeIcon";
 import { hasStoredCredentials, setStoredCredentials, clearOrphanedCredentialsKey } from "@/lib/credentials-client";
 import { withBasePath } from "@/lib/base-path";
 import { trackEvent } from "@/lib/events-client";
@@ -108,6 +109,7 @@ export default function CredentialsSettingsClient() {
       await setStoredCredentials(null);
       trackEvent("settings/credentials-cleared/v1", {});
       setIsSet(false);
+      setStep({ kind: "idle" });
     } catch {}
   }
 
@@ -143,170 +145,171 @@ export default function CredentialsSettingsClient() {
   }
 
   return (
-    <section className="flex flex-col gap-5">
+    <div className="flex flex-col gap-6">
       <div>
-        <h2 className="text-base font-medium text-gray-200 mb-1 flex items-center gap-2">
-          <KeyRound size={16} className="text-sky-400" aria-hidden="true" />
-          Claude.ai Subscription
-        </h2>
+        <h2 className="text-base font-medium text-gray-200 mb-1">Claude.ai Subscription</h2>
         <p className="text-sm text-gray-400 leading-relaxed">
           Sign in with your Claude.ai account to use your subscription for evolve requests.
           Credentials are encrypted in your browser — the encryption key never leaves this device.
         </p>
       </div>
 
-      <div className={`px-3 py-2 rounded-lg text-sm border ${
-        isSet
-          ? "bg-green-900/30 border-green-700/50 text-green-300"
-          : "bg-gray-800 border-gray-700 text-gray-400"
-      }`}>
-        {isSet ? (
-          <span>
-            <span className="font-medium">Active</span>
-            <span className="text-green-400/70 text-xs"> — credentials encrypted on this device</span>
-          </span>
-        ) : (
-          <span>No credentials set</span>
-        )}
-      </div>
-
-      {step.kind === "idle" && (
-        <div className="flex flex-col gap-2">
-          <button
-            data-id="credentials/start-auth"
-            onClick={() => void startAuth()}
-            className="w-full px-4 py-2.5 rounded-lg text-sm font-medium bg-sky-600 hover:bg-sky-500 text-white transition-colors"
-          >
-            {isSet ? "Sign in again" : "Sign in with Claude.ai"}
-          </button>
+      {/* Main card */}
+      <div className="rounded-xl border border-gray-700 bg-gray-900 p-5 flex flex-col gap-5">
+        {/* Card header with status */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-[#d97706]/10 flex items-center justify-center text-[#d97706] shrink-0">
+              <ClaudeIcon size={18} />
+            </div>
+            <p className="text-sm font-medium text-gray-200">Claude.ai</p>
+          </div>
           {isSet && (
-            <button
-              data-id="credentials/clear"
-              onClick={() => void clearCredentials()}
-              className="w-full px-3 py-1.5 rounded-lg text-sm text-red-400 hover:text-red-300 hover:bg-red-900/20 border border-red-800/50 transition-colors"
-            >
-              Clear credentials
-            </button>
+            <span className="text-xs px-2 py-0.5 rounded-full bg-green-900/40 text-green-400 border border-green-800/50">
+              Active
+            </span>
           )}
         </div>
-      )}
 
-      {(step.kind === "starting" || step.kind === "submitting") && (
-        <div className="flex items-center justify-center gap-2 py-4 text-sm text-gray-400">
-          <Loader2 size={16} className="animate-spin" aria-hidden="true" />
-          <span>{step.kind === "starting" ? "Starting…" : "Signing in…"}</span>
-        </div>
-      )}
-
-      {step.kind === "awaiting-code" && (
-        <div className="flex flex-col gap-3">
-          <a
-            href={step.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            data-id="credentials/auth-url"
-            className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg bg-gray-800 border border-gray-700 text-sm text-sky-400 hover:text-sky-300 hover:border-sky-700 transition-colors"
-          >
-            <span>Open authorization page</span>
-            <ExternalLink size={14} className="shrink-0" aria-hidden="true" />
-          </a>
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs text-gray-400 font-medium" htmlFor="auth-code-input">
-              Authorization code
-            </label>
-            <input
-              id="auth-code-input"
-              type="text"
-              data-id="credentials/auth-code"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && code.trim()) void submitCode(); }}
-              placeholder="Paste code here…"
-              className="w-full bg-gray-800 text-sm text-gray-100 placeholder-gray-600 border border-gray-700 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-sky-500/50 focus:border-sky-500/50 font-mono"
-              autoFocus
-              autoComplete="off"
-              spellCheck={false}
-            />
-          </div>
-          <div className="flex items-center justify-between gap-2">
+        {/* OAuth flow */}
+        {(step.kind === "idle" || step.kind === "done") && (
+          <div className="flex flex-col gap-2">
             <button
-              data-id="credentials/cancel-auth"
-              onClick={cancelAuth}
-              className="px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:text-gray-200 transition-colors"
+              data-id="credentials/start-auth"
+              onClick={() => void startAuth()}
+              className="w-full px-4 py-2.5 rounded-lg text-sm font-medium bg-sky-600 hover:bg-sky-500 text-white transition-colors"
             >
-              Cancel
+              {isSet ? "Sign in again" : "Sign in with Claude.ai"}
             </button>
-            <button
-              data-id="credentials/submit-code"
-              onClick={() => void submitCode()}
-              disabled={!code.trim()}
-              className="px-4 py-1.5 rounded-lg text-sm font-medium bg-sky-600 hover:bg-sky-500 disabled:bg-sky-900 text-white transition-colors disabled:cursor-not-allowed"
-            >
-              Authorize
-            </button>
-          </div>
-        </div>
-      )}
-
-      {step.kind === "done" && (
-        <p className="text-sm text-gray-400">Credentials saved.</p>
-      )}
-
-      {step.kind === "error" && (
-        <div className="flex flex-col gap-3">
-          <p className="text-sm text-red-400">{step.message}</p>
-          <button
-            data-id="credentials/retry"
-            onClick={() => { setStep({ kind: "idle" }); setCode(""); }}
-            className="w-full px-4 py-2 rounded-lg text-sm font-medium bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors"
-          >
-            Try again
-          </button>
-        </div>
-      )}
-
-      <div className="border-t border-gray-800 pt-1 flex flex-col gap-3">
-        <button
-          data-id="credentials/toggle-paste"
-          onClick={() => setShowPaste(!showPaste)}
-          className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-400 transition-colors w-full text-left"
-        >
-          {showPaste ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronRight size={13} aria-hidden="true" />}
-          Paste credentials file manually
-        </button>
-
-        {showPaste && (
-          <div className="flex flex-col gap-3">
-            <p className="text-xs text-gray-500 leading-relaxed">
-              Paste the contents of{" "}
-              <code className="text-sky-400/80 bg-gray-800 px-1 py-0.5 rounded">~/.claude/.credentials.json</code>.{" "}
-              On macOS, credentials are stored in the system keychain and can&apos;t be copied directly — this only works if your machine is running Linux.
-            </p>
-            <textarea
-              data-id="credentials/json-input"
-              value={pasteValue}
-              onChange={(e) => { setPasteValue(e.target.value); setPasteError(null); setPasteSaved(false); }}
-              placeholder={'{\n  "claudeAiOauth": { ... }\n}'}
-              rows={5}
-              className="w-full bg-gray-800 text-sm text-gray-100 placeholder-gray-600 border border-gray-700 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-sky-500/50 focus:border-sky-500/50 font-mono resize-y"
-              autoComplete="off"
-              spellCheck={false}
-              disabled={pasteLoading}
-            />
-            {pasteError && <p className="text-xs text-red-400">{pasteError}</p>}
-            <div className="flex justify-end">
+            {isSet && (
               <button
-                data-id="credentials/save-paste"
-                onClick={() => void handlePasteSave()}
-                disabled={!pasteValue.trim() || pasteSaved || pasteLoading}
+                data-id="credentials/clear"
+                onClick={() => void clearCredentials()}
+                className="w-full px-3 py-1.5 rounded-lg text-sm text-red-400 hover:text-red-300 hover:bg-red-900/20 border border-red-800/50 transition-colors"
+              >
+                Clear credentials
+              </button>
+            )}
+            {step.kind === "done" && (
+              <p className="text-xs text-center text-gray-500">Credentials saved successfully.</p>
+            )}
+          </div>
+        )}
+
+        {(step.kind === "starting" || step.kind === "submitting") && (
+          <div className="flex items-center justify-center gap-2 py-4 text-sm text-gray-400">
+            <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+            <span>{step.kind === "starting" ? "Starting…" : "Signing in…"}</span>
+          </div>
+        )}
+
+        {step.kind === "awaiting-code" && (
+          <div className="flex flex-col gap-3">
+            <a
+              href={step.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              data-id="credentials/auth-url"
+              className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg bg-gray-800 border border-gray-700 text-sm text-sky-400 hover:text-sky-300 hover:border-sky-700 transition-colors"
+            >
+              <span>Open authorization page</span>
+              <ExternalLink size={14} className="shrink-0" aria-hidden="true" />
+            </a>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-gray-400 font-medium" htmlFor="auth-code-input">
+                Authorization code
+              </label>
+              <input
+                id="auth-code-input"
+                type="text"
+                data-id="credentials/auth-code"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && code.trim()) void submitCode(); }}
+                placeholder="Paste code here…"
+                className="w-full bg-gray-800 text-sm text-gray-100 placeholder-gray-600 border border-gray-700 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-sky-500/50 focus:border-sky-500/50 font-mono"
+                autoFocus
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <button
+                data-id="credentials/cancel-auth"
+                onClick={cancelAuth}
+                className="px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:text-gray-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                data-id="credentials/submit-code"
+                onClick={() => void submitCode()}
+                disabled={!code.trim()}
                 className="px-4 py-1.5 rounded-lg text-sm font-medium bg-sky-600 hover:bg-sky-500 disabled:bg-sky-900 text-white transition-colors disabled:cursor-not-allowed"
               >
-                {pasteLoading ? "Saving…" : pasteSaved ? "Saved ✓" : "Save"}
+                Authorize
               </button>
             </div>
           </div>
         )}
+
+        {step.kind === "error" && (
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-red-400">{step.message}</p>
+            <button
+              data-id="credentials/retry"
+              onClick={() => { setStep({ kind: "idle" }); setCode(""); }}
+              className="w-full px-4 py-2 rounded-lg text-sm font-medium bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors"
+            >
+              Try again
+            </button>
+          </div>
+        )}
+
+        {/* Manual paste fallback */}
+        <div className="border-t border-gray-800 pt-3 flex flex-col gap-3">
+          <button
+            data-id="credentials/toggle-paste"
+            onClick={() => setShowPaste(!showPaste)}
+            className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-400 transition-colors w-full text-left"
+          >
+            {showPaste ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronRight size={13} aria-hidden="true" />}
+            Paste credentials file manually
+          </button>
+
+          {showPaste && (
+            <div className="flex flex-col gap-3">
+              <p className="text-xs text-gray-500 leading-relaxed">
+                Paste the contents of{" "}
+                <code className="text-sky-400/80 bg-gray-800 px-1 py-0.5 rounded">~/.claude/.credentials.json</code>.{" "}
+                On macOS, credentials are stored in the system keychain and can&apos;t be copied directly — this only works if your machine is running Linux.
+              </p>
+              <textarea
+                data-id="credentials/json-input"
+                value={pasteValue}
+                onChange={(e) => { setPasteValue(e.target.value); setPasteError(null); setPasteSaved(false); }}
+                placeholder={'{\n  "claudeAiOauth": { ... }\n}'}
+                rows={5}
+                className="w-full bg-gray-800 text-sm text-gray-100 placeholder-gray-600 border border-gray-700 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-sky-500/50 focus:border-sky-500/50 font-mono resize-y"
+                autoComplete="off"
+                spellCheck={false}
+                disabled={pasteLoading}
+              />
+              {pasteError && <p className="text-xs text-red-400">{pasteError}</p>}
+              <div className="flex justify-end">
+                <button
+                  data-id="credentials/save-paste"
+                  onClick={() => void handlePasteSave()}
+                  disabled={!pasteValue.trim() || pasteSaved || pasteLoading}
+                  className="px-4 py-1.5 rounded-lg text-sm font-medium bg-sky-600 hover:bg-sky-500 disabled:bg-sky-900 text-white transition-colors disabled:cursor-not-allowed"
+                >
+                  {pasteLoading ? "Saving…" : pasteSaved ? "Saved ✓" : "Save"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
-    </section>
+    </div>
   );
 }

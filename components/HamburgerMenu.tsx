@@ -96,7 +96,7 @@ export function buildStandardMenuItems({
     },
   ];
   items.push({
-    label: "Settings",
+    label: "Account Settings",
     className: "hover:text-indigo-400",
     href: "/settings",
     dataId: "nav-menu/settings",
