@@ -32,6 +32,14 @@
 
 - **`app/test-pages/page.tsx`** — added the new test page to the index.
 
+## Bug fixes
+
+- **Blocked child process** — `stderr` was piped but never consumed; once the
+  OS write buffer filled, `claude` blocked indefinitely and credentials were
+  never written.  Fixed by calling `child.stderr.resume()` to drain stderr.
+- **Lucide spinner** — replaced `⟳` text spinners in the test page with
+  `<Loader2 className="animate-spin">` from `lucide-react`.
+
 ## Why
 
 Users need a way to obtain a `.credentials.json` for their Claude subscription

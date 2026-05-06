@@ -15,7 +15,7 @@
 //      dialog (☰ → Credentials).
 
 import { useState, useCallback } from "react";
-import { Copy, Check, ExternalLink, RefreshCw, X } from "lucide-react";
+import { Copy, Check, ExternalLink, Loader2, RefreshCw, X } from "lucide-react";
 import { withBasePath } from "@/lib/base-path";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -264,7 +264,7 @@ export default function ClaudeAuthTestPage() {
               </div>
             ) : (
               <div className="rounded-xl border border-gray-700 bg-gray-900 px-5 py-4 flex items-center gap-3 text-sm text-gray-400">
-                <span className="animate-spin text-violet-400">⟳</span>
+                <Loader2 size={15} className="animate-spin text-violet-400" />
                 Starting claude… waiting for OAuth URL
               </div>
             )}
@@ -290,7 +290,7 @@ export default function ClaudeAuthTestPage() {
                     className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors flex items-center gap-2"
                   >
                     {step === "submitting" && (
-                      <span className="animate-spin text-violet-200">⟳</span>
+                      <Loader2 size={14} className="animate-spin text-violet-200" />
                     )}
                     {step === "submitting" ? "Submitting…" : "Submit code"}
                   </button>

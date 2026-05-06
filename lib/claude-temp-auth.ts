@@ -80,9 +80,13 @@ export function startClaudeAuth(): Promise<ClaudeAuthSession> {
     const child = spawn('claude', ['auth', 'login', '--claudeai'], {
       env: { ...process.env, CLAUDE_CONFIG_DIR: tempDir },
       // pipe stdin so we can send the code later; pipe stdout to capture URL;
-      // pipe stderr too (we'll ignore it — the TTY output isn't needed server-side)
+      // stderr must be consumed (not just piped) — if we pipe but never read,
+      // the write buffer fills up and the child process blocks indefinitely.
       stdio: ['pipe', 'pipe', 'pipe'],
     }) as ChildProcessWithoutNullStreams;
+
+    // Drain stderr so it never blocks the child.
+    child.stderr.resume();
 
     let urlFound = false;
     let stdoutBuf = '';
