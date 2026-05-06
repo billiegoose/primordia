@@ -5,7 +5,8 @@
 // Streams live Claude Code progress via SSE from /api/evolve/stream.
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { GitBranch, Loader2, FileText, Copy, Check, RotateCw, Key, FileKey } from "lucide-react";
+import { GitBranch, Loader2, FileText, Copy, Check, RotateCw, Key } from "lucide-react";
+import { ClaudeIcon } from "@/components/brand-icons/ClaudeIcon";
 import { AnsiRenderer } from "@/components/AnsiRenderer";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { NavHeader } from "@/components/NavHeader";
@@ -313,8 +314,8 @@ function AgentAuthBadge({ auth }: { auth?: AgentAuthInfo }) {
   }
   if (auth.source === 'claude-credentials') {
     return (
-      <span title="Used Claude Credentials" className="inline-flex items-center text-sky-400/70 hover:text-sky-400 transition-colors cursor-default">
-        <FileKey size={11} strokeWidth={2.5} aria-label="Used Claude Credentials" />
+      <span title="Used claude.ai login" className="inline-flex items-center text-sky-400/70 hover:text-sky-400 transition-colors cursor-default">
+        <ClaudeIcon size={16} />
       </span>
     );
   }
