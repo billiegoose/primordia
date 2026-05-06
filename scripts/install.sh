@@ -462,6 +462,11 @@ if [[ "${PROBABLY_A_SERVER}" == "true" ]] && command -v systemctl &>/dev/null; t
   if systemctl is-active --quiet primordia 2>/dev/null; then
     PROXY_RUNNING=true
   fi
+else
+  # Non-server install: detect proxy by checking if it responds on the port.
+  if curl -sf --max-time 2 "http://localhost:${REVERSE_PROXY_PORT}/" -o /dev/null 2>/dev/null; then
+    PROXY_RUNNING=true
+  fi
 fi
 
 # Reparent sibling sessions whose parent was the old production branch so that
@@ -539,7 +544,13 @@ advance_main_and_push() {
 
 SERVICE_READY=false
 
-if [[ "${PROXY_RUNNING}" == "true" && "${PROXY_CHANGED}" == "false" && "${SERVICE_CHANGED}" == "false" ]]; then
+# Zero-downtime eligibility:
+# - Server install: proxy running + neither proxy script nor service unit changed
+# - Non-server (local dev): proxy running (can't auto-restart proxy, so always attempt
+#   zero-downtime; if PROXY_CHANGED, warn user to restart proxy manually afterward)
+if [[ "${PROXY_RUNNING}" == "true" ]] && \
+   { [[ "${PROBABLY_A_SERVER}" == "false" ]] || \
+     [[ "${PROXY_CHANGED}" == "false" && "${SERVICE_CHANGED}" == "false" ]]; }; then
   # ── Zero-downtime path ────────────────────────────────────────────────────
   # The proxy is running and neither it nor the service unit changed.
   # Tell the proxy to spawn the new production server, health-check it, and
@@ -574,6 +585,9 @@ if [[ "${PROXY_RUNNING}" == "true" && "${PROXY_CHANGED}" == "false" && "${SERVIC
     SERVICE_READY=true
     _spin_kill
     advance_main_and_push
+    if [[ "${PROBABLY_A_SERVER}" == "false" && "${PROXY_CHANGED}" == "true" ]]; then
+      warn "reverse-proxy.ts changed — restart the proxy manually to pick up the new version."
+    fi
     echo -e "${GREEN}✓${RESET} Congratulations! Primordia is running!"
   else
     _spin_kill
@@ -597,30 +611,39 @@ if [[ "${SERVICE_READY}" == "false" ]]; then
       sudo systemctl start --quiet primordia
       success "Started primordia systemd service"
     fi
-  fi
 
-  _step "Waiting for Primordia to be ready..."
-  for i in $(seq 1 30); do
-    sleep 2
-    if curl -sf --max-time 3 "http://localhost:${REVERSE_PROXY_PORT}/" -o /dev/null 2>/dev/null; then
-      SERVICE_READY=true
-      break
+    # Only poll for readiness when we actually started/restarted a managed service.
+    _step "Waiting for Primordia to be ready..."
+    for i in $(seq 1 30); do
+      sleep 2
+      if curl -sf --max-time 3 "http://localhost:${REVERSE_PROXY_PORT}/" -o /dev/null 2>/dev/null; then
+        SERVICE_READY=true
+        break
+      fi
+    done
+
+    if [[ "$SERVICE_READY" == "true" ]]; then
+      _spin_kill
+      advance_main_and_push
+      echo -e "${GREEN}✓${RESET} Congratulations! Primordia is running!"
+    else
+      _spin_kill
+      warn "Service did not respond within 60 s — it may still be starting."
+      echo ""
+      echo -e "${DIM}  --- Last 40 lines of service log ---${RESET}"
+      journalctl -u primordia -n 40 --no-pager 2>/dev/null || true
+      echo -e "${DIM}  --- Service status ---${RESET}"
+      systemctl status primordia --no-pager 2>/dev/null || true
+      echo -e "${DIM}  -------------------------------------${RESET}"
     fi
-  done
-
-  if [[ "$SERVICE_READY" == "true" ]]; then
-    _spin_kill
-    advance_main_and_push
-    echo -e "${GREEN}✓${RESET} Congratulations! Primordia is running!"
   else
-    _spin_kill
-    warn "Service did not respond within 60 s — it may still be starting."
-    echo ""
-    echo -e "${DIM}  --- Last 40 lines of service log ---${RESET}"
-    journalctl -u primordia -n 40 --no-pager 2>/dev/null || true
-    echo -e "${DIM}  --- Service status ---${RESET}"
-    systemctl status primordia --no-pager 2>/dev/null || true
-    echo -e "${DIM}  -------------------------------------${RESET}"
+    # Non-server install: proxy not running (or zero-downtime already handled it).
+    # Build and git config are updated; nothing to start here.
+    advance_main_and_push
+    echo -e "${GREEN}✓${RESET} Congratulations! Primordia is ready."
+    if [[ "${PROXY_RUNNING}" == "false" ]]; then
+      info "Proxy not detected — start it with: bun ${PRIMORDIA_DIR}/reverse-proxy.ts"
+    fi
   fi
 fi
 
