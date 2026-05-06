@@ -152,21 +152,28 @@ try:
     # After a valid code claude verifies it with the server, shows a success
     # screen, and waits for Enter before writing credentials and entering the
     # REPL.  We must press Enter here or credentials are never written.
+    #
+    # Claude renders the success screen as a box bordered with asterisks
+    # (e.g. "****...****") using cursor-up ANSI codes, so the literal words
+    # "successful" / "Press Enter" may not appear in the raw PTY stream.
+    # Match the asterisk border line as an additional signal; also send Enter
+    # on timeout so credentials are still written if the pattern changed again.
     log("waiting for login-success screen…")
     idx = child.expect(
-        [r"successful", r"ress Enter", pexpect.EOF, pexpect.TIMEOUT],
+        [r"successful", r"ress Enter", r"\*{20,}", pexpect.EOF, pexpect.TIMEOUT],
         timeout=60,
     )
-    if idx in (0, 1):
-        log("login-success / 'Press Enter to continue' seen — sending Enter")
+    if idx in (0, 1, 2):
+        log("login-success / 'Press Enter to continue' / asterisk border seen — sending Enter")
         child.send("\r")
-    elif idx == 2:
-        log("claude exited (EOF) after code — will check for credentials")
     elif idx == 3:
-        # Didn't see the expected prompt — credentials might already be there
-        # (different claude version) or the code was wrong; we'll find out
-        # in the polling step.
-        log("timeout waiting for success screen — continuing to poll anyway")
+        log("claude exited (EOF) after code — will check for credentials")
+    elif idx == 4:
+        # Timed out without seeing the expected prompt — send Enter anyway in
+        # case Claude is silently waiting for it (credentials won't be written
+        # until Enter is pressed on the success screen).
+        log("timeout waiting for success screen — sending Enter anyway and polling")
+        child.send("\r")
 
     # ── Step 5b: Poll for .credentials.json ────────────────────────────────
     # After pressing Enter on the success screen, claude writes

@@ -77,6 +77,14 @@
   that Enter, so credentials were never written.  Fixed by adding a step
   between code submission and polling: `expect(r"successful|ress Enter")` then
   `child.send("\r")`.
+- **Asterisk-border success screen** — newer Claude versions render the success
+  screen as a box bordered with `****...****` lines using ANSI cursor-up codes
+  (`[1A`) so the literal words "successful" / "Press Enter" never appear as raw
+  text in the PTY stream.  The `expect()` timed out, and the timeout branch was
+  continuing to poll **without sending Enter**, so Claude silently waited for
+  input and credentials were never written (total hang: up to 120 s).  Fixed by
+  (a) adding `r"\*{20,}"` as an additional match pattern and (b) sending `\r` in
+  the timeout fallback branch as well.
 
 ## Why
 
