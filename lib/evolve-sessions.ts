@@ -194,10 +194,12 @@ interface WorkerConfig {
  * Rules:
  *  - Claude Credentials (credentials.json) are only supported by the
  *    'claude-code' harness. Pi and other harnesses use the Anthropic API
- *    directly and cannot read a credentials.json file, so credentials are
- *    silently ignored for those harnesses.
- *  - If BOTH credentials and an API key are supplied and the harness supports
- *    credentials, credentials win and the API key is discarded.
+ *    directly and cannot read a credentials.json file.
+ *  - Credentials ALWAYS take precedence over an API key:
+ *    - For 'claude-code': credentials are used directly.
+ *    - For other harnesses: credentials are not usable, but the API key is
+ *      still suppressed — the gateway is used instead. This ensures that
+ *      setting credentials never silently falls back to charging the API key.
  */
 function resolveAgentAuth(
   credentials: string | undefined,
@@ -210,6 +212,15 @@ function resolveAgentAuth(
       auth: { source: 'claude-credentials' },
       resolvedCredentials: credentials,
       resolvedApiKey: undefined, // API key superseded
+    };
+  }
+  if (credentials && !credentialsSupported) {
+    // Credentials are set but this harness can't use them.
+    // Still suppress the API key — credentials take precedence; use the gateway.
+    return {
+      auth: { source: 'llm-gateway' },
+      resolvedCredentials: undefined,
+      resolvedApiKey: undefined,
     };
   }
   if (apiKey) {

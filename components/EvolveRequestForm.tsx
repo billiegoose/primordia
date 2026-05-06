@@ -268,10 +268,15 @@ export function EvolveRequestForm({
         for (const file of allFiles) {
           formData.append("attachments", file);
         }
-        const encryptedApiKey = await encryptStoredApiKey();
-        if (encryptedApiKey) formData.append("encryptedApiKey", encryptedApiKey);
+        // Credentials take precedence over the API key. Only send the API
+        // key if credentials are unavailable on this device.
         const encryptedCredentials = await encryptStoredCredentials();
-        if (encryptedCredentials) formData.append("encryptedCredentials", JSON.stringify(encryptedCredentials));
+        if (encryptedCredentials) {
+          formData.append("encryptedCredentials", JSON.stringify(encryptedCredentials));
+        } else {
+          const encryptedApiKey = await encryptStoredApiKey();
+          if (encryptedApiKey) formData.append("encryptedApiKey", encryptedApiKey);
+        }
 
         const res = await fetch(withBasePath("/api/evolve"), { method: "POST", body: formData });
         const data = (await res.json()) as { sessionId?: string; error?: string };
