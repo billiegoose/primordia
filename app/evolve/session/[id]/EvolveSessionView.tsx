@@ -1839,10 +1839,11 @@ export default function EvolveSessionView({
                   formData.append('harness', harness);
                   formData.append('model', model);
                   for (const file of files) formData.append('attachments', file);
-                  // Credentials take precedence over the API key.
-                  const encryptedCredentials = await encryptStoredCredentials();
-                  if (encryptedCredentials) {
-                    formData.append('encryptedCredentials', JSON.stringify(encryptedCredentials));
+                  // Only one auth token is ever sent. Credentials are only
+                  // meaningful for the claude-code harness; all others use the API key.
+                  if (harness === 'claude-code') {
+                    const encryptedCredentials = await encryptStoredCredentials();
+                    if (encryptedCredentials) formData.append('encryptedCredentials', JSON.stringify(encryptedCredentials));
                   } else {
                     const encryptedApiKey = await encryptStoredApiKey();
                     if (encryptedApiKey) formData.append('encryptedApiKey', encryptedApiKey);

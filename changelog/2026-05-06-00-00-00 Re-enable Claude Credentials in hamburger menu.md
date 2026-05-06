@@ -1,4 +1,4 @@
-# Re-enable Claude Credentials in hamburger menu + fix precedence
+# Re-enable Claude Credentials in hamburger menu + fix auth token routing
 
 ## What changed
 
@@ -11,13 +11,17 @@ This change re-enables the menu item and its corresponding `<CredentialsDialog>`
 - Added proper `trackEvent()` call to the button's onClick (consistent with the API Key button)
 - Uncommented the `<CredentialsDialog>` render block below the menu
 
-### Fix credentials-vs-API-key precedence
-When both Claude credentials and an Anthropic API key were stored, the API key was silently winning in two cases:
+### Fix: only ever send one auth token per request
 
-1. **Server-side (`lib/evolve-sessions.ts` — `resolveAgentAuth`)**: For harnesses other than `claude-code` (e.g. the default `pi`), credentials are not directly usable but the function was still falling through to the `if (apiKey)` branch. Fixed: when credentials are present, they suppress the API key regardless of harness. For non-`claude-code` harnesses the gateway is used instead (credentials take precedence; the API key is never charged as a silent fallback).
+Previously both `encryptedApiKey` and `encryptedCredentials` could be sent together on the same evolve request. The client now only ever sends one:
 
-2. **Client-side (`EvolveRequestForm.tsx`, `EvolveSessionView.tsx`)**: Both `encryptedApiKey` and `encryptedCredentials` were always sent together. Fixed: credentials are tried first; the API key is only sent if credentials are unavailable on this device.
+- `encryptedCredentials` — when the selected harness is `claude-code` (the only harness that supports credentials.json)
+- `encryptedApiKey` — for all other harnesses (e.g. `pi`)
+
+This applies to both initial requests (`EvolveRequestForm.tsx`) and follow-up requests (`EvolveSessionView.tsx`).
+
+The server-side `resolveAgentAuth()` still handles both defensively (credentials win for `claude-code`, API key wins for everything else), but it should now only ever receive one at a time.
 
 ## Why
 
-Setting Claude credentials should mean "use my Claude subscription, not my API key." The old logic let the API key silently win whenever the selected harness didn't natively support credentials.json, which was confusing and contrary to user intent.
+Claude credentials (credentials.json / OAuth) are only meaningful for the `claude-code` harness — `pi` and other harnesses talk to the Anthropic API directly and can't use them. Sending both at once was unnecessary and confusing. The form now routes the right token to the right harness.
