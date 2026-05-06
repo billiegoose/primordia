@@ -411,7 +411,6 @@ Type=simple
 User=${USER}
 WorkingDirectory=${PRIMORDIA_DIR}
 Environment=REVERSE_PROXY_PORT=${REVERSE_PROXY_PORT}
-Environment=PRIMORDIA_WORKTREES_DIR=${WORKTREES_DIR}
 Environment=HOME=${HOME}
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
 ExecStart=${SHIM_DIR}/bun-real ${PRIMORDIA_DIR}/reverse-proxy.ts

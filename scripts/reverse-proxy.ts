@@ -106,12 +106,12 @@ const LISTEN_PORT = parseInt(process.env.REVERSE_PROXY_PORT ?? '3000', 10);
 
 /**
  * Compute paths relative to the reverse-proxy.ts file location.
- * reverse-proxy.ts is at {PRIMORDIA_ROOT}/scripts/reverse-proxy.ts.
+ * install.sh copies reverse-proxy.ts from scripts/ to {PRIMORDIA_ROOT}/reverse-proxy.ts,
+ * so __filename is {PRIMORDIA_ROOT}/reverse-proxy.ts at runtime.
  * Worktrees are at {PRIMORDIA_ROOT}/worktrees/.
  * Main repo is at {PRIMORDIA_ROOT}/source.git.
  */
-const SCRIPT_DIR = path.dirname(__filename);
-const PRIMORDIA_ROOT = path.dirname(SCRIPT_DIR);
+const PRIMORDIA_ROOT = path.dirname(__filename);
 const WORKTREES_DIR = path.join(PRIMORDIA_ROOT, 'worktrees');
 const MAIN_REPO = path.join(PRIMORDIA_ROOT, 'source.git');
 
