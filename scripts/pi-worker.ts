@@ -43,8 +43,11 @@ const ANTHROPIC_GATEWAY_BASE_URL = 'http://169.254.169.254/gateway/llm/anthropic
 const OPENAI_GATEWAY_BASE_URL = 'http://169.254.169.254/gateway/llm/openai';
 
 /** Infer the pi provider name from a model ID. Defaults to 'anthropic'. */
-function inferProvider(modelId: string): 'anthropic' | 'openai' {
-  if (modelId.startsWith('gpt-') || /^o\d/.test(modelId)) return 'openai';
+function inferProvider(modelId: string): 'anthropic' | 'openai' | 'openrouter' {
+  // Direct OpenAI model IDs (no slash, well-known prefixes)
+  if (modelId.startsWith('gpt-') || /^o\d/.test(modelId) || modelId.startsWith('codex-')) return 'openai';
+  // OpenRouter model IDs always contain a slash (e.g. 'google/gemini-2.5-flash')
+  if (modelId.includes('/')) return 'openrouter';
   return 'anthropic';
 }
 

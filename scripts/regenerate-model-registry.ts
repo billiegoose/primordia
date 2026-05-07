@@ -15,12 +15,13 @@ import type { ModelOption } from '../lib/agent-config';
 // ── Providers per harness (mirrors HARNESS_PROVIDERS in pi-model-registry.server.ts) ──
 const HARNESS_PROVIDERS: Record<string, string[]> = {
   'claude-code': ['anthropic'],
-  'pi': ['anthropic', 'openai'],
+  'pi': ['anthropic', 'openai', 'openrouter'],
 };
 
 const PROVIDER_LABELS: Record<string, string> = {
   anthropic: 'Anthropic',
   openai: 'OpenAI',
+  openrouter: 'OpenRouter',
 };
 
 type RawModel = {
@@ -63,6 +64,10 @@ function filterToLatestVersions(models: RawModel[]): RawModel[] {
   out = out.filter(m => !/\b(Chat|research|Turbo|Spark|Max)\b/i.test(m.name));
   // R3 — drop oversized tier qualifiers
   out = out.filter(m => !/(\bnano\b|\bpro\b|-pro)$/i.test(m.name));
+  // R5 — drop model IDs with variant suffix tags (:free, :extended, :thinking)
+  out = out.filter(m => !m.id.includes(':'));
+  // R6 — drop meta-router / auto-router model IDs
+  out = out.filter(m => m.id !== 'auto' && !m.id.startsWith('openrouter/'));
   // R4 — keep highest version per (provider, family)
   const groups = new Map<string, { model: RawModel; version: number }>();
   for (const model of out) {
@@ -77,6 +82,7 @@ function filterToLatestVersions(models: RawModel[]): RawModel[] {
 const auth = AuthStorage.create();
 auth.setRuntimeApiKey('anthropic', 'gateway');
 auth.setRuntimeApiKey('openai', 'gateway');
+auth.setRuntimeApiKey('openrouter', 'placeholder');
 const registry = ModelRegistry.create(auth);
 const allModels = (registry as unknown as { getAll(): RawModel[] }).getAll();
 
