@@ -12,7 +12,7 @@ Replaced the plain `<select>` for model selection in the Advanced panel of `Evol
 - **Model rows** — each row shows: provider icon (when searching or single-provider), model name, description (which includes pricing), and a checkmark on the selected model. Price is not duplicated — it appears once in the description line, and also in the trigger button.
 - **Provider icons** — inline SVG for Anthropic; favicon PNGs (Google favicon service, stored in `public/brand-icons/` and `components/brand-icons/`) for OpenAI (correct knot logo), Google/Gemini (4-pointed star), DeepSeek, Mistral, Meta, Qwen, NVIDIA, MoonshotAI, ByteDance Seed, Inception, Kwaipilot, xAI, Z.ai, and Baidu (paw+du); text-initial badge fallback for unknowns.
 - **Free models category** — a "Free" group appears first in the provider sidebar, containing all `:free` suffix OpenRouter models. The `regenerate-model-registry` script was updated to pass through `:free` models (previously dropped). Free models show the individual provider's real icon in the row (not the green FREE badge). `inputPriceLabel` for zero-cost models is now set to `"free"` rather than omitted.
-- **Baidu CoBuddy** — manually added to the curated list as `baidu/cobuddy:free` (not yet in pi's model registry but available on OpenRouter).
+- **Baidu CoBuddy** — available as `baidu/cobuddy:free` after updating `@mariozechner/pi-coding-agent` to 0.73.1; no longer needs to be manually injected.
 - **Models sorted by price** — within each group, models are sorted ascending by input price.
 - **Model count** — 44 total (10 native, 25 paid OpenRouter, 9 free OpenRouter including CoBuddy).
 - **Sidebar responsive** — provider sidebar shows icon-only on small screens (`w-10`) and icon+label on `sm+` (`w-[120px]`), with a `title` tooltip on each tab.
@@ -36,4 +36,7 @@ Follow-up fixes:
 - `components/EvolveRequestForm.tsx` — import + use `ModelPicker` in place of the model `<select>`
 - `lib/models.generated.json` — curated list: 44 models (10 native, 25 paid OR, 9 free OR), sorted by price
 - `scripts/regenerate-model-registry.ts` — allow `:free` models through; emit `"free"` pricing label for zero-cost
+- `scripts/pi-worker.ts` — fix API compatibility with pi 0.73.1: `appendSystemPrompt` is now `string[]`; `tools` is now `string[]` (tool names)
+- `package.json` — `@mariozechner/pi-coding-agent` updated 0.66.1 → 0.73.1
 - `public/brand-icons/` + `components/brand-icons/` — added openai-icon.png, google-gemini-icon.png, baidu-icon.png
+- `components/ModelPicker.tsx` — use `withBasePath()` on all favicon `<img>` srcs to fix broken images in preview environments

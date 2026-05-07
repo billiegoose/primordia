@@ -14,6 +14,7 @@ import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, Search, Check, X } from "lucide-react";
 import type { ModelOption } from "../lib/agent-config";
+import { withBasePath } from "../lib/base-path";
 
 // ─── Provider detection ────────────────────────────────────────────────────────
 
@@ -52,7 +53,7 @@ const PROVIDER_META: Record<string, { label: string; shortLabel: string }> = {
   inception:       { label: "Inception",       shortLabel: "Inception" },
 };
 
-/** Maps provider id → public path for a favicon PNG. */
+/** Maps provider id → public path for a favicon PNG (base-path-prefixed at use time). */
 const PROVIDER_FAVICON: Record<string, string> = {
   "openai-native":  "/brand-icons/openai-icon.png",
   openai:           "/brand-icons/openai-icon.png",
@@ -119,7 +120,7 @@ function ProviderIcon({
         aria-hidden="true"
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={faviconSrc} alt="" width={size * 0.72} height={size * 0.72} className="object-contain" />
+        <img src={withBasePath(faviconSrc)} alt="" width={size * 0.72} height={size * 0.72} className="object-contain" />
       </span>
     );
   }
