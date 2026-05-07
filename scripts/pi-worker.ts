@@ -304,7 +304,7 @@ async function main(): Promise<void> {
     const loader = new DefaultResourceLoader({
       cwd: worktreePath,
       agentDir: getAgentDir(),
-      appendSystemPrompt: `The current working directory is: ${worktreePath}`,
+      appendSystemPrompt: [`The current working directory is: ${worktreePath}`],
       // Disable extension discovery — extensions are not needed for headless runs
       // and may require interactive input or write to unexpected locations.
       noExtensions: true,
@@ -322,7 +322,8 @@ async function main(): Promise<void> {
       modelRegistry,
       resourceLoader: loader,
       sessionManager: sessionMgr,
-      tools: createCodingTools(worktreePath),
+      // createCodingTools = read, bash, edit, write — pass as names for new API
+      tools: ["read", "bash", "edit", "write"],
     });
 
     activeSession = session;
