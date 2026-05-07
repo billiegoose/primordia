@@ -370,13 +370,8 @@ export function EvolveRequestForm({
     handleFilesAdded(renamed, "paste");
   }
 
-  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    // Don't auto-submit on Enter to prevent accidental submissions on mobile.
-    // Only the submit button should trigger the request.
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-    }
-  }
+  // handleKeyDown removed — Enter inserts newlines by default (textarea behavior).
+  // Only the submit button triggers the request, preventing accidental mobile submissions.
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -417,7 +412,6 @@ export function EvolveRequestForm({
           ref={textareaRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           placeholder={placeholder}
           rows={compact ? undefined : 4}
