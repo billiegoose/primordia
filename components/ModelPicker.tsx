@@ -236,6 +236,199 @@ function buildProviderGroups(models: ModelOption[]): ProviderGroup[] {
   });
 }
 
+// ─── DropdownContent ─────────────────────────────────────────────────────────
+// Shared inner content for both desktop dropdown and mobile bottom sheet.
+
+interface DropdownContentProps {
+  search: string;
+  setSearch: (v: string) => void;
+  searchRef: React.RefObject<HTMLInputElement | null>;
+  dropdownRef: React.RefObject<HTMLDivElement | null>;
+  handleSearchKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  providerGroups: ProviderGroup[];
+  effectiveProvider: string | null;
+  setActiveProvider: (id: string) => void;
+  filteredModels: ModelOption[];
+  selectedModel: string;
+  handleSelect: (id: string) => void;
+  /** True when rendered inside the mobile bottom sheet */
+  mobile: boolean;
+}
+
+function ModelRow({
+  model,
+  isSelected,
+  showRowIcon,
+  onSelect,
+}: {
+  model: ModelOption;
+  isSelected: boolean;
+  showRowIcon: boolean;
+  onSelect: (id: string) => void;
+}) {
+  const provId = getModelProvider(model);
+  return (
+    <button
+      type="button"
+      data-selected={isSelected ? "true" : undefined}
+      onClick={() => onSelect(model.id)}
+      className={`w-full flex items-start gap-3 px-3 py-2.5 text-left transition-colors ${
+        isSelected ? "bg-gray-800" : "hover:bg-gray-800/60"
+      }`}
+    >
+      {showRowIcon ? (
+        <span className="flex-shrink-0 mt-0.5">
+          <ProviderIcon providerId={provId} size={22} />
+        </span>
+      ) : (
+        <span className="flex-shrink-0" style={{ width: 22 }} />
+      )}
+      <span className="flex-1 min-w-0">
+        <span className="flex items-center gap-2">
+          <span
+            className={`text-sm font-medium truncate ${isSelected ? "text-gray-100" : "text-gray-200"}`}
+          >
+            {model.label}
+          </span>
+          {model.inputPriceLabel && (
+            <span className="text-[10px] text-gray-500 flex-shrink-0">
+              {model.inputPriceLabel}
+            </span>
+          )}
+          {isSelected && (
+            <Check
+              size={13}
+              className="text-amber-400 flex-shrink-0 ml-auto"
+              aria-hidden="true"
+            />
+          )}
+        </span>
+        {model.description && (
+          <span className="block text-xs text-gray-500 truncate leading-tight mt-0.5">
+            {model.description}
+          </span>
+        )}
+      </span>
+    </button>
+  );
+}
+
+function DropdownContent({
+  search,
+  setSearch,
+  searchRef,
+  dropdownRef,
+  handleSearchKeyDown,
+  providerGroups,
+  effectiveProvider,
+  setActiveProvider,
+  filteredModels,
+  selectedModel,
+  handleSelect,
+  mobile,
+}: DropdownContentProps) {
+  const showRowIcon = !!search || providerGroups.length <= 1;
+
+  return (
+    <>
+      {/* Search bar */}
+      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-gray-800 flex-shrink-0">
+        <Search size={14} className="text-gray-500 flex-shrink-0" aria-hidden="true" />
+        <input
+          ref={searchRef}
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={handleSearchKeyDown}
+          placeholder="Search models…"
+          className="flex-1 bg-transparent text-sm text-gray-200 placeholder-gray-500 outline-none"
+        />
+        {search && (
+          <button
+            type="button"
+            onClick={() => setSearch("")}
+            className="text-gray-500 hover:text-gray-300 text-xs"
+            aria-label="Clear search"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+
+      {/* Mobile: horizontal provider scroll row (above model list) */}
+      {mobile && !search && providerGroups.length > 1 && (
+        <div className="flex-shrink-0 border-b border-gray-800 overflow-x-auto">
+          <div className="flex gap-1 px-2 py-1.5">
+            {providerGroups.map((group) => (
+              <button
+                key={group.id}
+                type="button"
+                onClick={() => setActiveProvider(group.id)}
+                className={`flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                  effectiveProvider === group.id
+                    ? "bg-gray-800 text-gray-100"
+                    : "text-gray-400 hover:bg-gray-800/60 hover:text-gray-200"
+                }`}
+              >
+                <ProviderIcon providerId={group.id} size={20} />
+                <span className="truncate max-w-[80px]">{group.shortLabel}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Body: desktop sidebar + model list, OR mobile model list only */}
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        {/* Desktop: vertical provider sidebar */}
+        {!mobile && !search && providerGroups.length > 1 && (
+          <div className="flex flex-col w-[120px] flex-shrink-0 border-r border-gray-800 overflow-y-auto max-h-72 py-1">
+            {providerGroups.map((group) => (
+              <button
+                key={group.id}
+                type="button"
+                onClick={() => setActiveProvider(group.id)}
+                className={`flex items-center gap-2 px-3 py-2 text-left transition-colors text-xs font-medium ${
+                  effectiveProvider === group.id
+                    ? "bg-gray-800 text-gray-100"
+                    : "text-gray-400 hover:bg-gray-800/60 hover:text-gray-200"
+                }`}
+              >
+                <ProviderIcon providerId={group.id} size={22} />
+                <span className="truncate leading-tight">{group.shortLabel}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Model list */}
+        <div
+          ref={dropdownRef}
+          className={`flex-1 overflow-y-auto py-1 min-w-0 ${
+            mobile ? "max-h-[calc(80dvh-8rem)]" : "max-h-72"
+          }`}
+        >
+          {filteredModels.length === 0 ? (
+            <div className="px-4 py-6 text-sm text-gray-500 text-center">
+              No models found
+            </div>
+          ) : (
+            filteredModels.map((model) => (
+              <ModelRow
+                key={model.id}
+                model={model}
+                isSelected={model.id === selectedModel}
+                showRowIcon={showRowIcon}
+                onSelect={handleSelect}
+              />
+            ))
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ─── ModelPicker props ─────────────────────────────────────────────────────────
 
 interface ModelPickerProps {
@@ -388,147 +581,55 @@ export function ModelPicker({
         />
       </button>
 
-      {/* ── Dropdown ──────────────────────────────────────────────────── */}
+      {/* ── Desktop dropdown (sm+) ──────────────────────────────────── */}
       {open && (
-        <div className="absolute left-0 top-full mt-1.5 z-50 w-[min(520px,calc(100vw-2rem))] rounded-xl border border-gray-700 bg-gray-900 shadow-2xl shadow-black/60 flex flex-col overflow-hidden">
-          {/* Search bar */}
-          <div className="flex items-center gap-2 px-3 py-2.5 border-b border-gray-800">
-            <Search size={14} className="text-gray-500 flex-shrink-0" aria-hidden="true" />
-            <input
-              ref={searchRef}
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={handleSearchKeyDown}
-              placeholder="Search models…"
-              className="flex-1 bg-transparent text-sm text-gray-200 placeholder-gray-500 outline-none"
-            />
-            {search && (
-              <button
-                type="button"
-                onClick={() => setSearch("")}
-                className="text-gray-500 hover:text-gray-300 text-xs"
-                aria-label="Clear search"
-              >
-                ✕
-              </button>
-            )}
-          </div>
+        <div className="hidden sm:flex absolute left-0 top-full mt-1.5 z-50 w-[min(520px,calc(100vw-2rem))] rounded-xl border border-gray-700 bg-gray-900 shadow-2xl shadow-black/60 flex-col overflow-hidden">
+          <DropdownContent
+            search={search}
+            setSearch={setSearch}
+            searchRef={searchRef}
+            dropdownRef={dropdownRef}
+            handleSearchKeyDown={handleSearchKeyDown}
+            providerGroups={providerGroups}
+            effectiveProvider={effectiveProvider}
+            setActiveProvider={setActiveProvider}
+            filteredModels={filteredModels}
+            selectedModel={selectedModel}
+            handleSelect={handleSelect}
+            mobile={false}
+          />
+        </div>
+      )}
 
-          {/* Body: provider tabs + model list */}
-          <div className="flex min-h-0">
-            {/* Provider sidebar — hidden when searching */}
-            {!search && providerGroups.length > 1 && (
-              <>
-                {/* Desktop: vertical sidebar */}
-                <div className="hidden sm:flex flex-col w-[120px] flex-shrink-0 border-r border-gray-800 overflow-y-auto max-h-72 py-1">
-                  {providerGroups.map((group) => (
-                    <button
-                      key={group.id}
-                      type="button"
-                      onClick={() => setActiveProvider(group.id)}
-                      className={`flex items-center gap-2 px-3 py-2 text-left transition-colors text-xs font-medium ${
-                        effectiveProvider === group.id
-                          ? "bg-gray-800 text-gray-100"
-                          : "text-gray-400 hover:bg-gray-800/60 hover:text-gray-200"
-                      }`}
-                    >
-                      <ProviderIcon providerId={group.id} size={22} />
-                      <span className="truncate leading-tight">{group.shortLabel}</span>
-                    </button>
-                  ))}
-                </div>
-
-                {/* Mobile: horizontal scroll row */}
-                <div className="sm:hidden flex-shrink-0 w-full border-b border-gray-800 overflow-x-auto">
-                  <div className="flex gap-1 px-2 py-1.5">
-                    {providerGroups.map((group) => (
-                      <button
-                        key={group.id}
-                        type="button"
-                        onClick={() => setActiveProvider(group.id)}
-                        className={`flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                          effectiveProvider === group.id
-                            ? "bg-gray-800 text-gray-100"
-                            : "text-gray-400 hover:bg-gray-800/60 hover:text-gray-200"
-                        }`}
-                      >
-                        <ProviderIcon providerId={group.id} size={18} />
-                        <span className="truncate max-w-[80px]">{group.shortLabel}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
-
-            {/* Model list */}
-            <div
-              ref={dropdownRef}
-              className="flex-1 overflow-y-auto max-h-72 py-1 min-w-0"
-            >
-              {filteredModels.length === 0 ? (
-                <div className="px-4 py-6 text-sm text-gray-500 text-center">
-                  No models found
-                </div>
-              ) : (
-                filteredModels.map((model) => {
-                  const isSelected = model.id === selectedModel;
-                  const provId = getModelProvider(model);
-                  // When searching, show provider icon per row; when browsing a provider, skip it
-                  const showRowIcon = !!search || providerGroups.length <= 1;
-                  return (
-                    <button
-                      key={model.id}
-                      type="button"
-                      data-selected={isSelected ? "true" : undefined}
-                      onClick={() => handleSelect(model.id)}
-                      className={`w-full flex items-start gap-3 px-3 py-2 text-left transition-colors ${
-                        isSelected
-                          ? "bg-gray-800"
-                          : "hover:bg-gray-800/60"
-                      }`}
-                    >
-                      {showRowIcon && (
-                        <span className="flex-shrink-0 mt-0.5">
-                          <ProviderIcon providerId={provId} size={22} />
-                        </span>
-                      )}
-                      {!showRowIcon && (
-                        /* Indent placeholder matching icon width */
-                        <span className="flex-shrink-0 w-0" />
-                      )}
-                      <span className="flex-1 min-w-0">
-                        <span className="flex items-center gap-2">
-                          <span
-                            className={`text-sm font-medium truncate ${isSelected ? "text-gray-100" : "text-gray-200"}`}
-                          >
-                            {model.label}
-                          </span>
-                          {model.inputPriceLabel && (
-                            <span className="text-[10px] text-gray-500 flex-shrink-0">
-                              {model.inputPriceLabel}
-                            </span>
-                          )}
-                          {isSelected && (
-                            <Check
-                              size={13}
-                              className="text-amber-400 flex-shrink-0 ml-auto"
-                              aria-hidden="true"
-                            />
-                          )}
-                        </span>
-                        {model.description && (
-                          <span className="block text-xs text-gray-500 truncate leading-tight mt-0.5">
-                            {model.description}
-                          </span>
-                        )}
-                      </span>
-                    </button>
-                  );
-                })
-              )}
+      {/* ── Mobile bottom sheet ──────────────────────────────────────── */}
+      {open && (
+        <div className="sm:hidden">
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 z-40 bg-black/60"
+            onClick={() => setOpen(false)}
+            aria-hidden="true"
+          />
+          {/* Sheet */}
+          <div className="fixed bottom-0 left-0 right-0 z-50 flex flex-col bg-gray-900 border-t border-gray-700 rounded-t-2xl shadow-2xl max-h-[80dvh]">
+            {/* Drag handle */}
+            <div className="flex justify-center pt-2.5 pb-1 flex-shrink-0">
+              <div className="w-10 h-1 rounded-full bg-gray-700" />
             </div>
+            <DropdownContent
+              search={search}
+              setSearch={setSearch}
+              searchRef={searchRef}
+              dropdownRef={dropdownRef}
+              handleSearchKeyDown={handleSearchKeyDown}
+              providerGroups={providerGroups}
+              effectiveProvider={effectiveProvider}
+              setActiveProvider={setActiveProvider}
+              filteredModels={filteredModels}
+              selectedModel={selectedModel}
+              handleSelect={handleSelect}
+              mobile={true}
+            />
           </div>
         </div>
       )}
