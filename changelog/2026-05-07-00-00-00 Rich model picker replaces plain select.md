@@ -12,7 +12,7 @@ Replaced the plain `<select>` for model selection in the Advanced panel of `Evol
 - **Model rows** — each row shows: provider icon (when searching or single-provider), model name, description (which includes pricing), and a checkmark on the selected model. Price is not duplicated — it appears once in the description line, and also in the trigger button.
 - **Provider icons** — SVG-based icons for Anthropic (asterisk glyph) and Google (Google G) and OpenAI (OpenAI logo); text-initial badges for all other providers (xAI, Mistral, Meta, Qwen, DeepSeek, and ~30 more OpenRouter providers).
 - **Keyboard / UX** — Escape clears search first, then closes the dropdown. Outside-click closes the dropdown. The selected model scrolls into view on open.
-- **Responsive** — on desktop (sm+), a popover dropdown with a left vertical provider sidebar; on mobile, a full-width bottom sheet with a drag handle, a dark backdrop, and a horizontal provider scroll row above the model list.
+- **Responsive** — a centered dialog on all screen sizes (fixed overlay with backdrop). Provider tabs always appear in the left vertical sidebar. The dialog is portal-rendered into `document.body` to avoid z-index stacking issues.
 
 ## Why
 
@@ -20,7 +20,7 @@ The old plain `<select>` was unwieldy for 157+ models across 33+ providers. The 
 
 Follow-up fixes:
 - **Model rows only visible when searching** — caused by mobile provider tabs being placed as a flex sibling inside the horizontal body div, collapsing the model list. Fixed by rendering tabs in a column above the list.
-- **Mobile bottom sheet** — now a fixed full-width sheet at the bottom of the viewport with backdrop, instead of an absolute dropdown.
+- **Mobile / responsive** — switched from bottom sheet (mobile) + absolute dropdown (desktop) to a single centered dialog on all screen sizes, portal-rendered into `document.body`.
 - **Price shown twice** — removed the redundant `inputPriceLabel` badge from model rows; pricing is already visible in the description line (e.g. "OpenRouter · reasoning · $3→$15/M").
 - **Model list curated from 157 → 35** — the original auto-generated list included 147 OpenRouter models, many of which are audio, image, creative writing, or general-purpose (not coding-focused), plus duplicates of native Anthropic/OpenAI models. Replaced with a hand-curated allowlist of 25 coding-appropriate OpenRouter models (Google Gemini, DeepSeek, Mistral Codestral/Devstral, xAI Grok Code, Meta Llama 4, Qwen3 Coder, Kimi K2, Mercury Coder, etc.) alongside the 10 native Anthropic/OpenAI models. Note: Baidu CoBuddy is not yet in the pi model registry and is not currently available.
 

@@ -3,16 +3,16 @@
 // components/ModelPicker.tsx
 // A rich model picker that replaces the plain <select> for model selection.
 //
-// Layout (matches the mockup):
+// Layout:
 //  • Trigger button: provider icon + model name + chevron
-//  • Dropdown:
+//  • Dialog (centered on all screen sizes):
 //      - Search bar at top
 //      - Left column: provider tabs (icon + name)
 //      - Right column: scrollable model list with name + description
-//  • On mobile the provider tabs move to a horizontal scroll row above the list
 
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
-import { ChevronDown, Search, Check } from "lucide-react";
+import { createPortal } from "react-dom";
+import { ChevronDown, Search, Check, X } from "lucide-react";
 import type { ModelOption } from "../lib/agent-config";
 
 // ─── Provider detection ────────────────────────────────────────────────────────
@@ -251,8 +251,7 @@ interface DropdownContentProps {
   filteredModels: ModelOption[];
   selectedModel: string;
   handleSelect: (id: string) => void;
-  /** True when rendered inside the mobile bottom sheet */
-  mobile: boolean;
+  onClose: () => void;
 }
 
 function ModelRow({
@@ -320,13 +319,13 @@ function DropdownContent({
   filteredModels,
   selectedModel,
   handleSelect,
-  mobile,
+  onClose,
 }: DropdownContentProps) {
   const showRowIcon = !!search || providerGroups.length <= 1;
 
   return (
     <>
-      {/* Search bar */}
+      {/* Header: search + close */}
       <div className="flex items-center gap-2 px-3 py-2.5 border-b border-gray-800 flex-shrink-0">
         <Search size={14} className="text-gray-500 flex-shrink-0" aria-hidden="true" />
         <input
@@ -338,46 +337,32 @@ function DropdownContent({
           placeholder="Search models…"
           className="flex-1 bg-transparent text-sm text-gray-200 placeholder-gray-500 outline-none"
         />
-        {search && (
+        {search ? (
           <button
             type="button"
             onClick={() => setSearch("")}
-            className="text-gray-500 hover:text-gray-300 text-xs"
+            className="text-gray-500 hover:text-gray-300 p-0.5"
             aria-label="Clear search"
           >
-            ✕
+            <X size={14} />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-gray-500 hover:text-gray-300 p-0.5"
+            aria-label="Close"
+          >
+            <X size={14} />
           </button>
         )}
       </div>
 
-      {/* Mobile: horizontal provider scroll row (above model list) */}
-      {mobile && !search && providerGroups.length > 1 && (
-        <div className="flex-shrink-0 border-b border-gray-800 overflow-x-auto">
-          <div className="flex gap-1 px-2 py-1.5">
-            {providerGroups.map((group) => (
-              <button
-                key={group.id}
-                type="button"
-                onClick={() => setActiveProvider(group.id)}
-                className={`flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                  effectiveProvider === group.id
-                    ? "bg-gray-800 text-gray-100"
-                    : "text-gray-400 hover:bg-gray-800/60 hover:text-gray-200"
-                }`}
-              >
-                <ProviderIcon providerId={group.id} size={20} />
-                <span className="truncate max-w-[80px]">{group.shortLabel}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Body: desktop sidebar + model list, OR mobile model list only */}
+      {/* Body: provider sidebar + model list */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* Desktop: vertical provider sidebar */}
-        {!mobile && !search && providerGroups.length > 1 && (
-          <div className="flex flex-col w-[120px] flex-shrink-0 border-r border-gray-800 overflow-y-auto max-h-72 py-1">
+        {/* Vertical provider sidebar */}
+        {!search && providerGroups.length > 1 && (
+          <div className="flex flex-col w-[120px] flex-shrink-0 border-r border-gray-800 overflow-y-auto py-1">
             {providerGroups.map((group) => (
               <button
                 key={group.id}
@@ -399,9 +384,7 @@ function DropdownContent({
         {/* Model list */}
         <div
           ref={dropdownRef}
-          className={`flex-1 overflow-y-auto py-1 min-w-0 ${
-            mobile ? "max-h-[calc(80dvh-8rem)]" : "max-h-72"
-          }`}
+          className="flex-1 overflow-y-auto py-1 min-w-0"
         >
           {filteredModels.length === 0 ? (
             <div className="px-4 py-6 text-sm text-gray-500 text-center">
@@ -491,21 +474,9 @@ export function ModelPicker({
   const selectedModelObj = models.find((m) => m.id === selectedModel);
   const selectedProvider = selectedModelObj ? getModelProvider(selectedModelObj) : null;
 
-  const containerRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Close on outside click
-  useEffect(() => {
-    if (!open) return;
-    function handleClick(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [open]);
 
   // Focus search on open
   useEffect(() => {
@@ -546,7 +517,7 @@ export function ModelPicker({
   // ── Trigger ──────────────────────────────────────────────────────────────
 
   return (
-    <div ref={containerRef} className="relative">
+    <div className="relative">
       <button
         type="button"
         data-id="evolve/model-picker-trigger"
@@ -576,57 +547,41 @@ export function ModelPicker({
         />
       </button>
 
-      {/* ── Desktop dropdown (sm+) ──────────────────────────────────── */}
-      {open && (
-        <div className="hidden sm:flex absolute left-0 top-full mt-1.5 z-50 w-[min(520px,calc(100vw-2rem))] rounded-xl border border-gray-700 bg-gray-900 shadow-2xl shadow-black/60 flex-col overflow-hidden">
-          <DropdownContent
-            search={search}
-            setSearch={setSearch}
-            searchRef={searchRef}
-            dropdownRef={dropdownRef}
-            handleSearchKeyDown={handleSearchKeyDown}
-            providerGroups={providerGroups}
-            effectiveProvider={effectiveProvider}
-            setActiveProvider={setActiveProvider}
-            filteredModels={filteredModels}
-            selectedModel={selectedModel}
-            handleSelect={handleSelect}
-            mobile={false}
-          />
-        </div>
-      )}
-
-      {/* ── Mobile bottom sheet ──────────────────────────────────────── */}
-      {open && (
-        <div className="sm:hidden">
+      {/* ── Dialog (all screen sizes) ────────────────────────────────── */}
+      {open && typeof document !== "undefined" && createPortal(
+        <>
           {/* Backdrop */}
           <div
             className="fixed inset-0 z-40 bg-black/60"
             onClick={() => setOpen(false)}
             aria-hidden="true"
           />
-          {/* Sheet */}
-          <div className="fixed bottom-0 left-0 right-0 z-50 flex flex-col bg-gray-900 border-t border-gray-700 rounded-t-2xl shadow-2xl max-h-[80dvh]">
-            {/* Drag handle */}
-            <div className="flex justify-center pt-2.5 pb-1 flex-shrink-0">
-              <div className="w-10 h-1 rounded-full bg-gray-700" />
+          {/* Dialog */}
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Pick a model"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none"
+          >
+            <div className="pointer-events-auto flex flex-col w-full max-w-lg rounded-xl border border-gray-700 bg-gray-900 shadow-2xl shadow-black/60 overflow-hidden max-h-[min(520px,85dvh)]">
+              <DropdownContent
+                search={search}
+                setSearch={setSearch}
+                searchRef={searchRef}
+                dropdownRef={dropdownRef}
+                handleSearchKeyDown={handleSearchKeyDown}
+                providerGroups={providerGroups}
+                effectiveProvider={effectiveProvider}
+                setActiveProvider={setActiveProvider}
+                filteredModels={filteredModels}
+                selectedModel={selectedModel}
+                handleSelect={handleSelect}
+                onClose={() => setOpen(false)}
+              />
             </div>
-            <DropdownContent
-              search={search}
-              setSearch={setSearch}
-              searchRef={searchRef}
-              dropdownRef={dropdownRef}
-              handleSearchKeyDown={handleSearchKeyDown}
-              providerGroups={providerGroups}
-              effectiveProvider={effectiveProvider}
-              setActiveProvider={setActiveProvider}
-              filteredModels={filteredModels}
-              selectedModel={selectedModel}
-              handleSelect={handleSelect}
-              mobile={true}
-            />
           </div>
-        </div>
+        </>,
+        document.body,
       )}
     </div>
   );
