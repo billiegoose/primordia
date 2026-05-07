@@ -10,7 +10,9 @@ Replaced the plain `<select>` for model selection in the Advanced panel of `Evol
 - **Search** — a search bar at the top filters models across all providers by name, id, or description.
 - **Provider sidebar** — on desktop, a left-column list of provider tabs (icon + name); on mobile, a horizontally-scrollable row of tabs above the model list. Clicking a tab filters the list to that provider.
 - **Model rows** — each row shows: provider icon (when searching or single-provider), model name, description (which includes pricing), and a checkmark on the selected model. Price is not duplicated — it appears once in the description line, and also in the trigger button.
-- **Provider icons** — SVG-based icons for Anthropic (asterisk glyph) and Google (Google G) and OpenAI (OpenAI logo); text-initial badges for all other providers (xAI, Mistral, Meta, Qwen, DeepSeek, and ~30 more OpenRouter providers).
+- **Provider icons** — inline SVGs for Anthropic, Google, and OpenAI; real favicon PNGs (via Google's favicon service, stored in `public/brand-icons/` and `components/brand-icons/`) for DeepSeek, Mistral, Meta, Qwen, NVIDIA, MoonshotAI, ByteDance Seed, Inception, Kwaipilot, xAI, and Z.ai; text-initial badge fallback for any unknown provider.
+- **Sidebar responsive** — provider sidebar shows icon-only on small screens (`w-10`) and icon+label on `sm+` (`w-[120px]`), with a `title` tooltip on each tab.
+- **Model row indent** — removed the spacer placeholder `<span>` that was adding unwanted left margin when browsing by provider (no icon shown per row in that mode).
 - **Keyboard / UX** — Escape clears search first, then closes the dropdown. Outside-click closes the dropdown. The selected model scrolls into view on open.
 - **Responsive** — a centered dialog on all screen sizes (fixed overlay with backdrop). Provider tabs always appear in the left vertical sidebar. The dialog is portal-rendered into `document.body` to avoid z-index stacking issues.
 
