@@ -16,6 +16,7 @@ export const TourCallbackContext = createContext<{
 }>({ onComplete: () => {}, onSkip: () => {} });
 
 // ─── Tour steps ───────────────────────────────────────────────────────────────
+// Selectors must be valid CSS selectors — use "#id" to target by id attribute.
 
 const sharedSteps: Tour["steps"] = [
   {
@@ -31,7 +32,7 @@ const sharedSteps: Tour["steps"] = [
         Takes about 2 minutes.
       </span>
     ),
-    selector: "onborda-hero",
+    selector: "#onborda-hero",
     side: "bottom",
     showControls: true,
     pointerPadding: 12,
@@ -48,7 +49,7 @@ const sharedSteps: Tour["steps"] = [
         live, in a private preview.
       </span>
     ),
-    selector: "onborda-hero",
+    selector: "#onborda-hero",
     side: "bottom",
     showControls: true,
     pointerPadding: 12,
@@ -64,7 +65,7 @@ const sharedSteps: Tour["steps"] = [
         credentials, evolve, branches, and admin tools.
       </span>
     ),
-    selector: "onborda-hamburger",
+    selector: "#onborda-hamburger",
     side: "bottom-left",
     showControls: true,
     pointerPadding: 8,
@@ -80,7 +81,7 @@ const sharedSteps: Tour["steps"] = [
         Primordia which AI service to use to build your changes.
       </span>
     ),
-    selector: "onborda-hamburger",
+    selector: "#onborda-hamburger",
     side: "bottom-left",
     showControls: true,
     pointerPadding: 8,
@@ -101,7 +102,7 @@ const sharedSteps: Tour["steps"] = [
         You only need to configure one. The exe.dev gateway is your automatic no-config fallback.
       </span>
     ),
-    selector: "onborda-priority-badge",
+    selector: "#onborda-priority-badge",
     side: "bottom",
     showControls: true,
     pointerPadding: 8,
@@ -118,7 +119,7 @@ const sharedSteps: Tour["steps"] = [
         is right on the card), paste it in, and hit <strong className="text-white">Save key</strong>.
       </span>
     ),
-    selector: "onborda-openrouter-card",
+    selector: "#onborda-openrouter-card",
     side: "top",
     showControls: true,
     pointerPadding: 8,
@@ -137,7 +138,7 @@ const sharedSteps: Tour["steps"] = [
         On Linux, you can also paste <code className="text-sky-400 bg-gray-800 px-1 rounded">~/.claude/.credentials.json</code> directly below the button.
       </span>
     ),
-    selector: "onborda-claude-signin",
+    selector: "#onborda-claude-signin",
     side: "bottom",
     showControls: true,
     pointerPadding: 8,
@@ -156,7 +157,7 @@ const sharedSteps: Tour["steps"] = [
         <strong className="text-white">Propose a change</strong> to start.
       </span>
     ),
-    selector: "onborda-hamburger",
+    selector: "#onborda-hamburger",
     side: "bottom-left",
     showControls: true,
     pointerPadding: 8,
@@ -175,7 +176,7 @@ const sharedSteps: Tour["steps"] = [
         The AI agent reads your request, looks at the codebase, writes the code, and builds a live preview.
       </span>
     ),
-    selector: "onborda-hamburger",
+    selector: "#onborda-hamburger",
     side: "bottom-left",
     showControls: true,
     pointerPadding: 8,
@@ -192,7 +193,7 @@ const sharedSteps: Tour["steps"] = [
         page and add it as context. Both help the AI understand exactly what you mean.
       </span>
     ),
-    selector: "onborda-hamburger",
+    selector: "#onborda-hamburger",
     side: "bottom-left",
     showControls: true,
     pointerPadding: 8,
@@ -212,7 +213,7 @@ const sharedSteps: Tour["steps"] = [
         <strong className="text-white">Reject</strong> to discard cleanly.
       </span>
     ),
-    selector: "onborda-hamburger",
+    selector: "#onborda-hamburger",
     side: "bottom-left",
     showControls: true,
     pointerPadding: 8,
@@ -233,7 +234,7 @@ const mainWrapUp: Tour["steps"][number] = {
       The tour won&apos;t show again. Go build something.
     </span>
   ),
-  selector: "onborda-hero",
+  selector: "#onborda-hero",
   side: "bottom",
   showControls: true,
   pointerPadding: 12,
@@ -251,7 +252,7 @@ const adminSteps: Tour["steps"] = [
         Let&apos;s take a quick look at the admin tools.
       </span>
     ),
-    selector: "onborda-hamburger",
+    selector: "#onborda-hamburger",
     side: "bottom-left",
     showControls: true,
     pointerPadding: 8,
@@ -270,7 +271,7 @@ const adminSteps: Tour["steps"] = [
         <strong className="text-white">can_evolve</strong> access to propose changes.
       </span>
     ),
-    selector: "onborda-admin-heading",
+    selector: "#onborda-admin-heading",
     side: "right",
     showControls: true,
     pointerPadding: 8,
@@ -286,7 +287,7 @@ const adminSteps: Tour["steps"] = [
         <strong className="text-white">can_evolve</strong>. Admins automatically have it.
       </span>
     ),
-    selector: "onborda-admin-evolve",
+    selector: "#onborda-admin-evolve",
     side: "top",
     showControls: true,
     pointerPadding: 8,
@@ -309,7 +310,7 @@ const adminSteps: Tour["steps"] = [
         • <strong className="text-white">Updates</strong> — pull upstream Primordia improvements
       </span>
     ),
-    selector: "onborda-admin-nav",
+    selector: "#onborda-admin-nav",
     side: "right",
     showControls: true,
     pointerPadding: 8,
@@ -331,7 +332,7 @@ const adminSteps: Tour["steps"] = [
         The tour won&apos;t show again. Everything is one menu click away.
       </span>
     ),
-    selector: "onborda-hero",
+    selector: "#onborda-hero",
     side: "bottom",
     showControls: true,
     pointerPadding: 12,
@@ -356,6 +357,10 @@ function TourTrigger() {
   const { startOnborda } = useOnborda();
   const pathname = usePathname();
   const startedRef = useRef(false);
+  // Keep a stable ref to startOnborda so the effect doesn't re-run when
+  // Onborda recreates the callback reference between renders.
+  const startOnbordaRef = useRef(startOnborda);
+  useEffect(() => { startOnbordaRef.current = startOnborda; });
 
   useEffect(() => {
     if (pathname !== "/" || startedRef.current) return;
@@ -365,11 +370,16 @@ function TourTrigger() {
         const user = data.user;
         if (user?.canEvolve && !user.tourCompleted) {
           startedRef.current = true;
-          startOnborda(user.isAdmin ? "admin" : "main");
+          // Small delay: let Onborda finish its own mount effects and let the
+          // page fully paint before the first element lookup runs.
+          setTimeout(() => startOnbordaRef.current(user.isAdmin ? "admin" : "main"), 300);
         }
       })
       .catch(() => {});
-  }, [pathname, startOnborda]);
+  // Only re-run when the pathname changes, not on every render where
+  // startOnborda gets a new reference.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
   return null;
 }
