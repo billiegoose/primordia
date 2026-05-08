@@ -2,9 +2,9 @@
  * Converts UTC time strings in various formats to the browser's local timezone.
  *
  * Handles patterns like:
- *   - "10:30pm (UTC)" → "2:30pm (local timezone)"
- *   - "resets 10:30pm (UTC)" → "resets 2:30pm (local timezone)"
- *   - "at 10:30pm UTC" → "at 2:30pm local"
+ *   - "10:30pm (UTC)" → "2:30pm EST"
+ *   - "resets 10:30pm (UTC)" → "resets 2:30pm EST"
+ *   - "at 10:30pm UTC" → "at 2:30pm EST"
  */
 
 export function convertUtcTimeToLocal(text: string): string {
@@ -69,5 +69,30 @@ function convertTimeStrToLocale(timeStr: string): string {
   const localAmPm = localHours >= 12 ? 'pm' : 'am';
   const displayHours = localHours % 12 || 12;
 
-  return `${displayHours}:${String(localMinutes).padStart(2, '0')}${localAmPm}`;
+  // Get local timezone abbreviation (e.g., EST, PST, GMT)
+  const tzAbbr = getTimezoneAbbreviation();
+
+  return `${displayHours}:${String(localMinutes).padStart(2, '0')}${localAmPm} ${tzAbbr}`;
+}
+
+function getTimezoneAbbreviation(): string {
+  const now = new Date();
+  const parts = now.toString().match(/(\w{3,4})\s\d{4}/);
+  if (parts && parts[1]) {
+    return parts[1];
+  }
+  // Fallback: use Intl.DateTimeFormat
+  try {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZoneName: 'short',
+    });
+    const parts2 = formatter.formatToParts(now);
+    const tzPart = parts2.find(p => p.type === 'timeZoneName');
+    if (tzPart && tzPart.value) {
+      return tzPart.value;
+    }
+  } catch {
+    // ignore
+  }
+  return 'local';
 }
