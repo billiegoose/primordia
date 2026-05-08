@@ -195,6 +195,7 @@ export default function CredentialsSettingsClient() {
                 </button>
               )}
               <button
+                id="onborda-claude-signin"
                 data-id="credentials/start-auth"
                 onClick={() => void startAuth()}
                 className={`${isSet ? "flex-1" : "w-full"} px-4 py-2 rounded-lg text-sm font-medium bg-sky-600 hover:bg-sky-500 text-white transition-colors`}

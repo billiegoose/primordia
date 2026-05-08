@@ -68,7 +68,7 @@ export function HeroSection({ installUrl, defaultVmName, installBranch }: { inst
       </div>
 
       {/* Headline */}
-      <h1 className="animate-fade-up-2 relative font-mono font-black text-6xl sm:text-7xl md:text-8xl leading-none tracking-tighter mb-6">
+      <h1 id="onborda-hero" className="animate-fade-up-2 relative font-mono font-black text-6xl sm:text-7xl md:text-8xl leading-none tracking-tighter mb-6">
         <span className="text-shimmer">PRIMORDIA</span>
       </h1>
 

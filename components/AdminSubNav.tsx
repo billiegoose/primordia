@@ -58,6 +58,7 @@ export default function AdminSubNav({ currentTab }: AdminSubNavProps) {
 
       {/* Desktop: vertical sidebar */}
       <nav
+        id="onborda-admin-nav"
         className="hidden lg:flex flex-col gap-0.5 w-44 shrink-0 sticky top-6"
         aria-label="Admin navigation"
       >

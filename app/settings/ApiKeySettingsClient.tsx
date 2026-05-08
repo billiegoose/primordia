@@ -140,7 +140,7 @@ export default function ApiKeySettingsClient() {
             Keys are encrypted in your browser and never stored in plaintext.
           </p>
         </div>
-        <div className="flex items-center gap-1.5 flex-wrap text-xs">
+        <div id="onborda-priority-badge" className="flex items-center gap-1.5 flex-wrap text-xs">
           <span className="px-1.5 py-0.5 rounded bg-sky-900/30 text-sky-400 border border-sky-800/40">Claude.ai</span>
           <span className="text-gray-600">›</span>
           <span className="px-1.5 py-0.5 rounded bg-amber-900/20 text-amber-500/80 border border-amber-800/30 font-medium">Anthropic API key</span>
@@ -239,7 +239,7 @@ export default function ApiKeySettingsClient() {
       </div>
 
       {/* OpenRouter — fully functional */}
-      <div className="rounded-xl border border-gray-700 bg-gray-900 p-5 flex flex-col gap-4">
+      <div id="onborda-openrouter-card" className="rounded-xl border border-gray-700 bg-gray-900 p-5 flex flex-col gap-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-violet-400/10 flex items-center justify-center text-sm font-bold text-violet-400 shrink-0">

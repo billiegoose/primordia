@@ -139,6 +139,7 @@ export function HamburgerMenu({ sessionUser, onLogout, items, containerRef }: Ha
     <AdminUpdatesBell sessionUser={sessionUser} />
     <div className="relative" ref={menuRef}>
       <button
+        id="onborda-hamburger"
         data-id="nav/menu-toggle"
         type="button"
         onClick={() => {

@@ -73,7 +73,7 @@ export default async function AdminPage() {
       <div className="flex flex-col lg:flex-row gap-4 lg:gap-8 items-start mt-2">
       <AdminSubNav currentTab="users" />
       <div className="flex-1 min-w-0">
-      <section>
+      <section id="onborda-admin-heading">
         <h2 className="text-base font-medium text-gray-200 mb-3">Evolve permissions</h2>
         <p className="text-sm text-gray-500 mb-4">
           Control which users can access the evolve flow to propose changes to this app.

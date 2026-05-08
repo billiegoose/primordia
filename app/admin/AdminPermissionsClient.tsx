@@ -57,7 +57,7 @@ export default function AdminPermissionsClient({ users: initial, adminRoleName, 
         </div>
       )}
 
-      <div className="rounded-xl border border-gray-800 overflow-hidden">
+      <div id="onborda-admin-evolve" className="rounded-xl border border-gray-800 overflow-hidden">
         <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>

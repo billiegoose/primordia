@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { getPublicOrigin } from "@/lib/public-origin";
 import { ensureCanonicalUrl } from "@/lib/auto-canonical";
+import { ProductTour } from "@/components/ProductTour";
 import "./globals.css";
 
 export const viewport = {
@@ -28,7 +29,7 @@ export default async function RootLayout({
   return (
     <html lang="en">
       <body className="font-mono antialiased bg-gray-950 text-gray-100">
-        {children}
+        <ProductTour>{children}</ProductTour>
       </body>
     </html>
   );

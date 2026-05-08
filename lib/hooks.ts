@@ -11,6 +11,7 @@ export interface SessionUser {
   username: string;
   isAdmin: boolean;
   canEvolve?: boolean;
+  tourCompleted?: boolean;
 }
 
 // ─── Hooks ──────────────────────────────────────────────────────────────────
