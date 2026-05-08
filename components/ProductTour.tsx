@@ -66,7 +66,7 @@ const sharedSteps: Tour["steps"] = [
       </span>
     ),
     selector: "#onborda-hamburger",
-    side: "bottom-left",
+    side: "bottom-right",
     showControls: true,
     pointerPadding: 8,
     pointerRadius: 8,
@@ -82,7 +82,7 @@ const sharedSteps: Tour["steps"] = [
       </span>
     ),
     selector: "#onborda-hamburger",
-    side: "bottom-left",
+    side: "bottom-right",
     showControls: true,
     pointerPadding: 8,
     pointerRadius: 8,
@@ -146,25 +146,24 @@ const sharedSteps: Tour["steps"] = [
     nextRoute: "/",
   },
   {
-    // Step 7 — Evolve intro (back on /)
+    // Step 7 — Evolve intro (on /); nextRoute navigates to /evolve
     icon: "🚀",
     title: "Propose a change",
     content: (
       <span>
-        That&apos;s it for credentials. Now let&apos;s see the evolve flow.
-        <br /><br />
-        Open the <strong className="text-white">☰ menu</strong> and click{" "}
-        <strong className="text-white">Propose a change</strong> to start.
+        That&apos;s it for credentials. Now let&apos;s see the evolve flow — click{" "}
+        <strong className="text-white">Next</strong> to open the evolve page.
       </span>
     ),
     selector: "#onborda-hamburger",
-    side: "bottom-left",
+    side: "bottom-right",
     showControls: true,
     pointerPadding: 8,
     pointerRadius: 8,
+    nextRoute: "/evolve",
   },
   {
-    // Step 8 — Evolve form description
+    // Step 8 — Evolve form textarea (on /evolve)
     icon: "✏️",
     title: "Describe what you want",
     content: (
@@ -173,34 +172,34 @@ const sharedSteps: Tour["steps"] = [
         <br /><br />
         <em className="text-gray-300">&quot;Add a dark mode toggle to the nav bar.&quot;</em>
         <br /><br />
-        The AI agent reads your request, looks at the codebase, writes the code, and builds a live preview.
+        The AI agent reads the codebase, writes the code, and builds a live preview.
       </span>
     ),
-    selector: "#onborda-hamburger",
-    side: "bottom-left",
+    selector: "#onborda-evolve-textarea",
+    side: "top",
     showControls: true,
     pointerPadding: 8,
     pointerRadius: 8,
   },
   {
-    // Step 9 — Attachments & inspector
+    // Step 9 — Attach files button (on /evolve)
     icon: "📎",
     title: "Attach context",
     content: (
       <span>
-        You can also <strong className="text-white">attach screenshots or files</strong> as reference, or use the{" "}
-        <strong className="text-white">element inspector</strong> (crosshair button) to click any part of the
+        Attach screenshots or files as reference, or use the{" "}
+        <strong className="text-white">Pick element</strong> button to click any part of the
         page and add it as context. Both help the AI understand exactly what you mean.
       </span>
     ),
-    selector: "#onborda-hamburger",
-    side: "bottom-left",
+    selector: "#onborda-evolve-attach",
+    side: "top",
     showControls: true,
     pointerPadding: 8,
     pointerRadius: 8,
   },
   {
-    // Step 10 — Submit & session page
+    // Step 10 — Submit button (on /evolve); nextRoute returns to /
     icon: "⚙️",
     title: "Submit and review",
     content: (
@@ -213,11 +212,12 @@ const sharedSteps: Tour["steps"] = [
         <strong className="text-white">Reject</strong> to discard cleanly.
       </span>
     ),
-    selector: "#onborda-hamburger",
-    side: "bottom-left",
+    selector: "#onborda-evolve-submit",
+    side: "top",
     showControls: true,
     pointerPadding: 8,
     pointerRadius: 8,
+    nextRoute: "/",
   },
 ];
 
@@ -253,7 +253,7 @@ const adminSteps: Tour["steps"] = [
       </span>
     ),
     selector: "#onborda-hamburger",
-    side: "bottom-left",
+    side: "bottom-right",
     showControls: true,
     pointerPadding: 8,
     pointerRadius: 8,

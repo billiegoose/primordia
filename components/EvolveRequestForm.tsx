@@ -408,6 +408,7 @@ export function EvolveRequestForm({
         className={`flex flex-col gap-3 rounded-lg ${compact ? "flex-1 min-h-0" : ""} transition-all ${isDragging ? "bg-amber-950/10 ring-2 ring-amber-500/60 ring-offset-4 ring-offset-gray-950" : ""}`}
       >
         <textarea
+          id="onborda-evolve-textarea"
           data-id="evolve/request-input"
           ref={textareaRef}
           value={input}
@@ -504,6 +505,7 @@ export function EvolveRequestForm({
 
           {/* File attach button */}
           <button
+            id="onborda-evolve-attach"
             type="button"
             data-id="evolve/attach-files"
             onClick={() => { trackEvent("evolve-form/attach-files-clicked/v1", {}); fileInputRef.current?.click(); }}
@@ -536,6 +538,7 @@ export function EvolveRequestForm({
 
           {/* Submit button — full-width on mobile when it wraps to its own row */}
           <button
+            id="onborda-evolve-submit"
             type="submit"
             data-id="evolve/submit-request"
             disabled={isSubmitDisabled}
