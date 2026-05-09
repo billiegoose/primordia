@@ -13,7 +13,8 @@ type SecretType =
   | 'OPENROUTER_API_KEY'
   | 'OPENAI_API_KEY'
   | 'GEMINI_API_KEY'
-  | 'CLAUDE_CODE_CREDENTIALS_JSON';
+  | 'CLAUDE_CODE_CREDENTIALS_JSON'
+  | 'CHATGPT_SUBSCRIPTION_OAUTH';
 
 const SERVER_PREF_KEYS: Record<SecretType, string> = {
   ANTHROPIC_API_KEY: 'encrypted_api_key',
@@ -21,6 +22,7 @@ const SERVER_PREF_KEYS: Record<SecretType, string> = {
   OPENAI_API_KEY: 'encrypted_openai_api_key',
   GEMINI_API_KEY: 'encrypted_gemini_api_key',
   CLAUDE_CODE_CREDENTIALS_JSON: 'encrypted_credentials',
+  CHATGPT_SUBSCRIPTION_OAUTH: 'encrypted_chatgpt_subscription_oauth',
 };
 
 const ALL_TYPES = Object.keys(SERVER_PREF_KEYS) as SecretType[];

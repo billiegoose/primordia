@@ -24,7 +24,8 @@ export type SecretType =
   | 'OPENROUTER_API_KEY'
   | 'OPENAI_API_KEY'
   | 'GEMINI_API_KEY'
-  | 'CLAUDE_CODE_CREDENTIALS_JSON';
+  | 'CLAUDE_CODE_CREDENTIALS_JSON'
+  | 'CHATGPT_SUBSCRIPTION_OAUTH';
 
 const AES_KEY_STORAGE = 'primordia_aes_key';
 

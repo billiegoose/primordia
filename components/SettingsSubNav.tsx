@@ -10,11 +10,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { withBasePath } from "@/lib/base-path";
 
-type TabId = "api-key" | "claude-ai";
+type TabId = "api-key" | "subscriptions";
 
 const tabs: { id: TabId; label: string; href: string }[] = [
   { id: "api-key", label: "API Keys", href: "/settings" },
-  { id: "claude-ai", label: "Claude.ai Subscription", href: "/settings/claude-ai" },
+  { id: "subscriptions", label: "Subscriptions", href: "/settings/subscriptions" },
 ];
 
 export default function SettingsSubNav({ currentTab }: { currentTab: TabId }) {
@@ -30,7 +30,7 @@ export default function SettingsSubNav({ currentTab }: { currentTab: TabId }) {
         if (!res.ok) return;
         const { types } = (await res.json()) as { types: string[] };
         setApiKeyActive(types.includes('ANTHROPIC_API_KEY') || types.includes('OPENROUTER_API_KEY'));
-        setCredentialsActive(types.includes('CLAUDE_CODE_CREDENTIALS_JSON'));
+        setCredentialsActive(types.includes('CLAUDE_CODE_CREDENTIALS_JSON') || types.includes('CHATGPT_SUBSCRIPTION_OAUTH'));
       } catch {}
     }
     void check();
@@ -38,7 +38,7 @@ export default function SettingsSubNav({ currentTab }: { currentTab: TabId }) {
 
   function isActive(tabId: TabId) {
     if (tabId === "api-key") return apiKeyActive;
-    if (tabId === "claude-ai") return credentialsActive;
+    if (tabId === "subscriptions") return credentialsActive;
     return false;
   }
 
