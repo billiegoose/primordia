@@ -240,9 +240,6 @@ _step "Installing git hooks..."
 mkdir -p "${GIT_HOOKS_DST}"
 install_git_hook "reference-transaction"
 git -C "${BARE_REPO}" config receive.denyCurrentBranch ignore
-rm -f \
-  "${GIT_HOOKS_DST}/pre-receive.disabled-checked-out-worktree" \
-  "${GIT_HOOKS_DST}/post-receive.disabled-checked-out-worktree"
 _done "Git hooks installed"
 
 # ── Install bun ───────────────────────────────────────────────────────────────
