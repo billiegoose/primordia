@@ -85,7 +85,7 @@ export default function ChatGptSubscriptionSettingsClient() {
     setDeviceFlow(null);
     if (pollTimer.current) window.clearTimeout(pollTimer.current);
     try {
-      const res = await fetch(withBasePath("/api/llm-key/chatgpt-subscription"), {
+      const res = await fetch(withBasePath("/api/oauth/chatgpt-subscription"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "start" }),
@@ -111,7 +111,7 @@ export default function ChatGptSubscriptionSettingsClient() {
 
   async function pollChatGpt(flow: DeviceFlowState) {
     try {
-      const res = await fetch(withBasePath("/api/llm-key/chatgpt-subscription"), {
+      const res = await fetch(withBasePath("/api/oauth/chatgpt-subscription"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "complete", deviceAuthId: flow.deviceAuthId, userCode: flow.userCode }),

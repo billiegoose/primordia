@@ -85,7 +85,7 @@ export function bustPublicKeyCache(): void {
 
 async function fetchPublicKey(): Promise<CryptoKey> {
   if (cachedPublicKey) return cachedPublicKey;
-  const res = await fetch(withBasePath('/api/llm-key/public-key'));
+  const res = await fetch(withBasePath('/api/credential-encryption/public-key'));
   if (!res.ok) throw new Error(`Failed to fetch server public key: ${res.statusText}`);
   const data = (await res.json()) as { publicKey: JsonWebKey };
   const key = await crypto.subtle.importKey(

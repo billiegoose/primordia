@@ -1,4 +1,4 @@
-// app/api/llm-key/chatgpt-subscription/route.ts
+// app/api/oauth/chatgpt-subscription/route.ts
 // ChatGPT subscription OAuth helpers. This mirrors the Codex device-code
 // "Sign in with ChatGPT" flow directly in Next.js, without spawning Codex or
 // any other CLI process.
@@ -26,7 +26,7 @@ async function requireUser() {
   return getSessionUser();
 }
 
-/** JSON body for POST /llm-key/chatgpt-subscription */
+/** JSON body for POST /api/oauth/chatgpt-subscription */
 export interface ChatGptSubscriptionBody {
   action: 'start' | 'complete';
   deviceAuthId?: string;
@@ -36,7 +36,7 @@ export interface ChatGptSubscriptionBody {
 /**
  * Start or complete ChatGPT device-code OAuth
  * @description Starts the ChatGPT device authorization flow, or polls once for completion and returns ordinary OAuth credentials when authorized. The route does not spawn a CLI process.
- * @tag Llm-key
+ * @tag OAuth
  * @body ChatGptSubscriptionBody
  */
 export async function POST(req: Request) {

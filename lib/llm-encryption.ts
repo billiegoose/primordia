@@ -6,7 +6,7 @@
 // process — clients encrypt with the public key (JWK) and the server decrypts.
 //
 // Because the keypair is ephemeral, clients must re-encrypt on each page
-// session. The public key is fetched fresh via /api/llm-key/public-key on
+// session. The public key is fetched fresh via /api/credential-encryption/public-key on
 // every evolve/chat submission so that a server restart is handled gracefully.
 
 import { webcrypto } from 'crypto';

@@ -43,9 +43,8 @@ app/api/
 │   ├── reset-stuck/route.ts   ← POST force-reset sessions stuck in 'accepting'/'fixing-types' back to 'ready'
 │   └── attachment/[sessionId]/route.ts ← GET serve user-uploaded attachment files from a session's worktree
 ├── secrets/[type]/route.ts        ← Unified GET/POST/DELETE for all user secrets (ANTHROPIC_API_KEY, OPENROUTER_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, CLAUDE_CODE_CREDENTIALS_JSON, CHATGPT_SUBSCRIPTION_OAUTH); stored in encrypted_credentials by auth_source
-├── llm-key/
-│   ├── public-key/route.ts        ← GET server's ephemeral RSA-OAEP public key as JWK for hybrid credential transmission
-│   └── chatgpt-subscription/route.ts ← POST starts/completes ChatGPT device-code OAuth flow for subscription credentials
+├── credential-encryption/public-key/route.ts ← GET server's ephemeral RSA-OAEP public key as JWK for hybrid credential transmission
+├── oauth/chatgpt-subscription/route.ts ← POST starts/completes ChatGPT device-code OAuth flow for subscription credentials
 ├── admin/
 │   ├── permissions/route.ts   ← POST grant/revoke grantable roles (can_evolve); admin only
 │   ├── logs/route.ts          ← GET SSE stream of production server logs; admin only
