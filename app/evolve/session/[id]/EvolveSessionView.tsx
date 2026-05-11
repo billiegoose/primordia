@@ -1334,7 +1334,7 @@ export default function EvolveSessionView({
           const encKey = isOpenRouterModel
             ? await encryptStoredOpenRouterApiKey()
             : await encryptStoredApiKey();
-          if (encKey) acceptBody.encryptedApiKey = encKey;
+          if (encKey) acceptBody.encryptedApiKey = JSON.stringify(encKey);
         }
       }
       const res = await fetch(withBasePath('/api/evolve/manage'), {
@@ -1896,13 +1896,13 @@ export default function EvolveSessionView({
                     if (encryptedChatGptOAuth) formData.append('encryptedChatGptOAuth', JSON.stringify(encryptedChatGptOAuth));
                   } else if (authSource === 'openrouter-api-key') {
                     const encryptedApiKey = await encryptStoredOpenRouterApiKey();
-                    if (encryptedApiKey) formData.append('encryptedApiKey', encryptedApiKey);
+                    if (encryptedApiKey) formData.append('encryptedApiKey', JSON.stringify(encryptedApiKey));
                   } else if (authSource === 'openai-api-key') {
                     const encryptedApiKey = await encryptSecretForTransmission('OPENAI_API_KEY');
-                    if (encryptedApiKey) formData.append('encryptedApiKey', encryptedApiKey);
+                    if (encryptedApiKey) formData.append('encryptedApiKey', JSON.stringify(encryptedApiKey));
                   } else if (authSource === 'anthropic-api-key') {
                     const encryptedApiKey = await encryptStoredApiKey();
-                    if (encryptedApiKey) formData.append('encryptedApiKey', encryptedApiKey);
+                    if (encryptedApiKey) formData.append('encryptedApiKey', JSON.stringify(encryptedApiKey));
                   }
                   const res = await fetch(withBasePath('/api/evolve/followup'), {
                     method: 'POST',
