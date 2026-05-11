@@ -184,10 +184,6 @@ export default function ChatGptSubscriptionSettingsClient() {
         )}
       </div>
 
-      <p className="text-sm text-gray-400 leading-relaxed">
-        Sign in with your ChatGPT subscription using the Codex device-code OAuth flow. Primordia stores the returned OAuth credentials directly; no Codex or OpenAI CLI process is spawned.
-      </p>
-
       {credentials && (
         <div className="flex flex-col gap-2 rounded-lg border border-gray-800 bg-gray-950/60 p-3 text-xs text-gray-400">
           <p><span className="text-gray-500">Account:</span> {credentials.tokens.accountId ?? "Unknown"}</p>
@@ -245,33 +241,35 @@ export default function ChatGptSubscriptionSettingsClient() {
             <span>Open verification page</span>
             <ExternalLink size={14} className="shrink-0" aria-hidden="true" />
           </a>
-
-          <p className="text-xs text-gray-500">Paste the code on the verification page. Primordia will connect automatically after you authorize ChatGPT.</p>
         </div>
       )}
 
       {error && <p className="text-sm text-red-400">{error}</p>}
 
-      <div className="flex items-center gap-2">
-        {credentials && (
-          <button
-            data-id="chatgpt-subscription/disconnect"
-            onClick={() => void disconnect()}
-            disabled={busy}
-            className="px-3 py-1.5 rounded-lg text-sm text-red-400 hover:text-red-300 hover:bg-red-900/20 border border-red-800/50 transition-colors disabled:opacity-60"
-          >
-            Disconnect
-          </button>
-        )}
-        <button
-          data-id="chatgpt-subscription/start-auth"
-          onClick={() => void startAuth()}
-          disabled={busy || Boolean(deviceFlow)}
-          className={`${credentials ? "flex-1" : "w-full"} px-4 py-2 rounded-lg text-sm font-medium bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-900 text-white transition-colors disabled:cursor-not-allowed`}
-        >
-          {busy ? "Starting…" : credentials ? "Sign in again" : "Sign in with ChatGPT"}
-        </button>
-      </div>
+      {(credentials || !deviceFlow) && (
+        <div className="flex items-center gap-2">
+          {credentials && (
+            <button
+              data-id="chatgpt-subscription/disconnect"
+              onClick={() => void disconnect()}
+              disabled={busy}
+              className="px-3 py-1.5 rounded-lg text-sm text-red-400 hover:text-red-300 hover:bg-red-900/20 border border-red-800/50 transition-colors disabled:opacity-60"
+            >
+              Disconnect
+            </button>
+          )}
+          {!deviceFlow && (
+            <button
+              data-id="chatgpt-subscription/start-auth"
+              onClick={() => void startAuth()}
+              disabled={busy}
+              className={`${credentials ? "flex-1" : "w-full"} px-4 py-2 rounded-lg text-sm font-medium bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-900 text-white transition-colors disabled:cursor-not-allowed`}
+            >
+              {busy ? "Starting…" : credentials ? "Sign in again" : "Sign in with ChatGPT"}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
