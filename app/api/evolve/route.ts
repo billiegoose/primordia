@@ -23,6 +23,7 @@ import {
 import { getSessionUser, hasEvolvePermission } from '../../../lib/auth';
 import { getDb } from '../../../lib/db';
 import { PREF_HARNESS, PREF_MODEL, PREF_CAVEMAN, PREF_CAVEMAN_INTENSITY, CAVEMAN_INTENSITIES, DEFAULT_CAVEMAN_INTENSITY, type CavemanIntensity } from '../../../lib/user-prefs';
+import { PREF_PRESET } from '../../../lib/presets';
 import {
   getSessionFromFilesystem,
   appendSessionEvent,
@@ -125,6 +126,7 @@ export async function POST(request: Request) {
   let model: string = DEFAULT_MODEL;
   let cavemanMode = false;
   let cavemanIntensity: CavemanIntensity = DEFAULT_CAVEMAN_INTENSITY;
+  let presetId: string | null = null;
   let encryptedApiKey: string | null = null;
   let encryptedCredentials: string | null = null;
   let encryptedChatGptOAuth: string | null = null;
@@ -142,6 +144,8 @@ export async function POST(request: Request) {
     if (typeof harnessField === 'string' && harnessField) harness = harnessField;
     const modelField = formData.get('model');
     if (typeof modelField === 'string' && modelField) model = modelField;
+    const presetField = formData.get('presetId');
+    if (typeof presetField === 'string' && presetField) presetId = presetField;
     const cavemanModeField = formData.get('cavemanMode');
     if (cavemanModeField === 'true') cavemanMode = true;
     const cavemanIntensityField = formData.get('cavemanIntensity');
@@ -295,6 +299,7 @@ export async function POST(request: Request) {
       await db.setUserPreferences(user.id, {
         [PREF_HARNESS]: harness,
         [PREF_MODEL]: model,
+        ...(presetId ? { [PREF_PRESET]: presetId } : {}),
         [PREF_CAVEMAN]: String(cavemanMode),
         [PREF_CAVEMAN_INTENSITY]: cavemanIntensity,
       });

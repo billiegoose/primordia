@@ -16,6 +16,7 @@ import { HamburgerMenu, buildStandardMenuItems } from "@/components/HamburgerMen
 import { useSessionUser } from "@/lib/hooks";
 import { withBasePath } from "@/lib/base-path";
 import { encryptChatGptSubscriptionForTransmission, encryptStoredApiKey, encryptStoredOpenRouterApiKey } from "@/lib/api-key-client";
+import { encryptSecretForTransmission } from "@/lib/secrets-client";
 import { useSounds } from "@/lib/sounds";
 import { encryptStoredCredentials, updateStoredCredentials } from "@/lib/credentials-client";
 import { EvolveRequestForm } from "@/components/EvolveRequestForm";
@@ -1873,7 +1874,7 @@ export default function EvolveSessionView({
                 autoFocus
                 defaultHarness={sessionHarness}
                 defaultModel={sessionModel}
-                onSubmit={async ({ request, harness, model, files }) => {
+                onSubmit={async ({ request, harness, model, authSource, files }) => {
                   // Prepend element context to the request when present.
                   let fullRequest = request;
                   if (elementContext) {
@@ -1885,21 +1886,21 @@ export default function EvolveSessionView({
                   formData.append('request', fullRequest);
                   formData.append('harness', harness);
                   formData.append('model', model);
+                  formData.append('authSource', authSource);
                   for (const file of files) formData.append('attachments', file);
-                  // Only one auth token is ever sent. Credentials are only
-                  // meaningful for the claude-code harness; Pi openai-codex
-                  // models use ChatGPT OAuth; OpenRouter models (id contains
-                  // '/') use the OpenRouter key; others use Anthropic.
-                  if (harness === 'claude-code') {
+                  if (authSource === 'claude-subscription') {
                     const encryptedCredentials = await encryptStoredCredentials();
                     if (encryptedCredentials) formData.append('encryptedCredentials', JSON.stringify(encryptedCredentials));
-                  } else if (harness === 'pi' && model.startsWith('openai-codex:')) {
+                  } else if (authSource === 'chatgpt-subscription') {
                     const encryptedChatGptOAuth = await encryptChatGptSubscriptionForTransmission();
                     if (encryptedChatGptOAuth) formData.append('encryptedChatGptOAuth', JSON.stringify(encryptedChatGptOAuth));
-                  } else if (model.includes('/')) {
+                  } else if (authSource === 'openrouter-api-key') {
                     const encryptedApiKey = await encryptStoredOpenRouterApiKey();
                     if (encryptedApiKey) formData.append('encryptedApiKey', encryptedApiKey);
-                  } else {
+                  } else if (authSource === 'openai-api-key') {
+                    const encryptedApiKey = await encryptSecretForTransmission('OPENAI_API_KEY');
+                    if (encryptedApiKey) formData.append('encryptedApiKey', encryptedApiKey);
+                  } else if (authSource === 'anthropic-api-key') {
                     const encryptedApiKey = await encryptStoredApiKey();
                     if (encryptedApiKey) formData.append('encryptedApiKey', encryptedApiKey);
                   }
