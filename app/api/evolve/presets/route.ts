@@ -6,8 +6,10 @@ import { getDb } from '@/lib/db';
 import {
   BUILT_IN_PRESETS,
   PREF_CUSTOM_PRESETS,
+  PREF_DISABLED_BUILT_IN_PRESETS,
   PREF_PRESET,
   parseCustomPresets,
+  parseDisabledBuiltInPresetIds,
   type EvolvePreset,
   type PresetAuthSource,
 } from '@/lib/presets';
@@ -39,6 +41,7 @@ export async function GET() {
   const db = await getDb();
   const keys = [
     PREF_CUSTOM_PRESETS,
+    PREF_DISABLED_BUILT_IN_PRESETS,
     PREF_PRESET,
     'encrypted_credentials',
     'encrypted_chatgpt_subscription_oauth',
@@ -47,7 +50,11 @@ export async function GET() {
     'encrypted_openai_api_key',
   ];
   const prefs = await db.getUserPreferences(user.id, keys);
-  const presets = [...BUILT_IN_PRESETS, ...parseCustomPresets(prefs[PREF_CUSTOM_PRESETS])];
+  const disabledBuiltIns = new Set(parseDisabledBuiltInPresetIds(prefs[PREF_DISABLED_BUILT_IN_PRESETS]));
+  const presets = [
+    ...BUILT_IN_PRESETS.filter((preset) => !disabledBuiltIns.has(preset.id)),
+    ...parseCustomPresets(prefs[PREF_CUSTOM_PRESETS]),
+  ];
   const availablePresets = presets.filter((preset) => isPresetAvailable(preset, prefs));
   const preferredPresetId = prefs[PREF_PRESET] || null;
   const selected = availablePresets.find((p) => p.id === preferredPresetId) ?? availablePresets[0] ?? null;

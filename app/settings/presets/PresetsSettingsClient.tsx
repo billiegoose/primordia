@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { Edit3, Plus, Trash2 } from "lucide-react";
 import { withBasePath } from "@/lib/base-path";
 import { PRESET_AUTH_SOURCE_LABELS, type EvolvePreset, type PresetAuthSource } from "@/lib/presets";
 import { firstModelForAuthSource, getHarnessesForAuthSource, filterModelsForAuthSource } from "@/lib/preset-options";
@@ -21,9 +21,33 @@ function emptyPreset(): EvolvePreset {
   };
 }
 
+function PresetCard({
+  preset,
+  disabled = false,
+  right,
+}: {
+  preset: EvolvePreset;
+  disabled?: boolean;
+  right?: ReactNode;
+}) {
+  return (
+    <div className={`rounded-lg border px-3 py-2 flex items-center justify-between gap-3 ${disabled ? "border-gray-800 bg-gray-950/20 opacity-55" : "border-gray-800 bg-gray-950/40"}`}>
+      <div className="min-w-0">
+        <div className="text-sm text-gray-100 truncate">{preset.name}</div>
+        <div className="text-xs text-gray-500 mt-0.5 truncate">
+          {PRESET_AUTH_SOURCE_LABELS[preset.authSource]} · {preset.harness} · {preset.model}
+        </div>
+      </div>
+      {right && <div className="shrink-0">{right}</div>}
+    </div>
+  );
+}
+
 export default function PresetsSettingsClient() {
   const [builtIn, setBuiltIn] = useState<EvolvePreset[]>([]);
+  const [disabledBuiltInIds, setDisabledBuiltInIds] = useState<string[]>([]);
   const [custom, setCustom] = useState<EvolvePreset[]>([]);
+  const [editingIds, setEditingIds] = useState<Set<string>>(new Set());
   const [modelOptionsByHarness, setModelOptionsByHarness] = useState<Record<string, ModelOption[]>>({});
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -31,9 +55,10 @@ export default function PresetsSettingsClient() {
   useEffect(() => {
     fetch(withBasePath('/api/settings/presets'))
       .then((r) => r.json())
-      .then((data: { builtInPresets?: EvolvePreset[]; customPresets?: EvolvePreset[] }) => {
+      .then((data: { builtInPresets?: EvolvePreset[]; customPresets?: EvolvePreset[]; disabledBuiltInPresetIds?: string[] }) => {
         setBuiltIn(data.builtInPresets ?? []);
         setCustom(data.customPresets ?? []);
+        setDisabledBuiltInIds(data.disabledBuiltInPresetIds ?? []);
       })
       .catch(() => setMessage('Could not load presets.'));
     fetch(withBasePath('/api/evolve/models'))
@@ -44,6 +69,18 @@ export default function PresetsSettingsClient() {
 
   function updatePreset(id: string, patch: Partial<EvolvePreset>) {
     setCustom((prev) => prev.map((p) => p.id === id ? { ...p, ...patch } : p));
+  }
+
+  function editPreset(id: string, editing: boolean) {
+    setEditingIds((prev) => {
+      const next = new Set(prev);
+      if (editing) next.add(id); else next.delete(id);
+      return next;
+    });
+  }
+
+  function toggleBuiltIn(id: string) {
+    setDisabledBuiltInIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
   }
 
   function changeAuthSource(preset: EvolvePreset, authSource: PresetAuthSource) {
@@ -77,18 +114,26 @@ export default function PresetsSettingsClient() {
       const res = await fetch(withBasePath('/api/settings/presets'), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customPresets: cleaned }),
+        body: JSON.stringify({ customPresets: cleaned, disabledBuiltInPresetIds: disabledBuiltInIds }),
       });
-      const data = await res.json() as { customPresets?: EvolvePreset[]; error?: string };
+      const data = await res.json() as { customPresets?: EvolvePreset[]; disabledBuiltInPresetIds?: string[]; error?: string };
       if (!res.ok) throw new Error(data.error ?? `Save failed: ${res.status}`);
       setCustom(data.customPresets ?? cleaned);
+      setDisabledBuiltInIds(data.disabledBuiltInPresetIds ?? disabledBuiltInIds);
+      setEditingIds(new Set());
       setMessage('Saved.');
-      trackEvent('settings/presets-saved/v1', { count: cleaned.length });
+      trackEvent('settings/presets-saved/v1', { count: cleaned.length, disabledBuiltInCount: disabledBuiltInIds.length });
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Save failed.');
     } finally {
       setSaving(false);
     }
+  }
+
+  function addPreset() {
+    const preset = emptyPreset();
+    setCustom((prev) => [...prev, preset]);
+    editPreset(preset.id, true);
   }
 
   return (
@@ -101,19 +146,34 @@ export default function PresetsSettingsClient() {
       <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4">
         <h2 className="text-sm font-semibold text-gray-200 mb-3">Built-in presets</h2>
         <div className="grid gap-2">
-          {builtIn.map((p) => (
-            <div key={p.id} className="rounded-lg border border-gray-800 bg-gray-950/40 px-3 py-2">
-              <div className="text-sm text-gray-100">{p.name}</div>
-              <div className="text-xs text-gray-500 mt-0.5">{PRESET_AUTH_SOURCE_LABELS[p.authSource]} · {p.harness} · {p.model}</div>
-            </div>
-          ))}
+          {builtIn.map((p) => {
+            const disabled = disabledBuiltInIds.includes(p.id);
+            return (
+              <PresetCard
+                key={p.id}
+                preset={p}
+                disabled={disabled}
+                right={
+                  <label className="inline-flex items-center gap-2 text-xs text-gray-400 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={!disabled}
+                      onChange={() => toggleBuiltIn(p.id)}
+                      className="accent-amber-500"
+                    />
+                    {disabled ? 'Disabled' : 'Enabled'}
+                  </label>
+                }
+              />
+            );
+          })}
         </div>
       </div>
 
       <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4 space-y-3">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-sm font-semibold text-gray-200">Custom presets</h2>
-          <button type="button" onClick={() => setCustom((prev) => [...prev, emptyPreset()])} className="inline-flex items-center gap-1.5 rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-200 hover:bg-gray-800">
+          <button type="button" onClick={addPreset} className="inline-flex items-center gap-1.5 rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-200 hover:bg-gray-800">
             <Plus size={14} /> Add preset
           </button>
         </div>
@@ -121,53 +181,77 @@ export default function PresetsSettingsClient() {
         {custom.length === 0 ? (
           <p className="text-sm text-gray-500 border border-dashed border-gray-800 rounded-lg p-4">No custom presets yet.</p>
         ) : custom.map((p) => {
+          const isEditing = editingIds.has(p.id);
           const harnesses = getHarnessesForAuthSource(p.authSource);
           const selectedHarness = harnesses.some((h) => h.id === p.harness) ? p.harness : (harnesses[0]?.id ?? p.harness);
           const selectableModels = filterModelsForAuthSource(modelOptionsByHarness[selectedHarness] ?? [], p.authSource, selectedHarness);
           const selectedModel = selectableModels.some((m) => m.id === p.model) ? p.model : (selectableModels[0]?.id ?? p.model);
-          return (
-          <div key={p.id} className="rounded-lg border border-gray-800 bg-gray-950/40 p-3 space-y-3">
-            <label className="flex flex-col gap-1 text-xs text-gray-400">
-              Display name
-              <input value={p.name} onChange={(e) => updatePreset(p.id, { name: e.target.value })} className="rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-sm text-gray-100 outline-none focus:border-amber-500" />
-            </label>
 
-            <div className="grid gap-3 md:grid-cols-3">
+          if (!isEditing) {
+            return (
+              <PresetCard
+                key={p.id}
+                preset={{ ...p, harness: selectedHarness, model: selectedModel }}
+                right={
+                  <div className="flex items-center gap-1">
+                    <button type="button" onClick={() => editPreset(p.id, true)} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-gray-300 hover:bg-gray-800">
+                      <Edit3 size={13} /> Edit
+                    </button>
+                    <button type="button" onClick={() => setCustom((prev) => prev.filter((x) => x.id !== p.id))} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-red-300 hover:bg-red-950/30">
+                      <Trash2 size={13} /> Delete
+                    </button>
+                  </div>
+                }
+              />
+            );
+          }
+
+          return (
+            <div key={p.id} className="rounded-lg border border-amber-700/40 bg-gray-950/40 p-3 space-y-3">
               <label className="flex flex-col gap-1 text-xs text-gray-400">
-                1. Billing source
-                <select value={p.authSource} onChange={(e) => changeAuthSource(p, e.target.value as PresetAuthSource)} className="rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-sm text-gray-100 outline-none focus:border-amber-500">
-                  {AUTH_SOURCES.map((source) => <option key={source} value={source}>{PRESET_AUTH_SOURCE_LABELS[source]}</option>)}
-                </select>
+                Display name
+                <input value={p.name} onChange={(e) => updatePreset(p.id, { name: e.target.value })} className="rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-sm text-gray-100 outline-none focus:border-amber-500" />
               </label>
-              <label className="flex flex-col gap-1 text-xs text-gray-400">
-                2. Harness
-                <select value={selectedHarness} onChange={(e) => changeHarness(p, e.target.value)} className="rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-sm text-gray-100 outline-none focus:border-amber-500">
-                  {harnesses.map((h) => <option key={h.id} value={h.id}>{h.label}</option>)}
-                </select>
-              </label>
-              <div className="flex flex-col gap-1 text-xs text-gray-400">
-                3. Model
-                <ModelPicker
-                  modelOptionsByHarness={modelOptionsByHarness}
-                  authSource={p.authSource}
-                  selectedHarness={selectedHarness}
-                  selectedModel={selectedModel}
-                  onChange={(model) => updatePreset(p.id, { harness: selectedHarness, model })}
-                  disabled={selectableModels.length === 0}
-                  compact
-                />
+
+              <div className="grid gap-3 md:grid-cols-3">
+                <label className="flex flex-col gap-1 text-xs text-gray-400">
+                  1. Billing source
+                  <select value={p.authSource} onChange={(e) => changeAuthSource(p, e.target.value as PresetAuthSource)} className="rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-sm text-gray-100 outline-none focus:border-amber-500">
+                    {AUTH_SOURCES.map((source) => <option key={source} value={source}>{PRESET_AUTH_SOURCE_LABELS[source]}</option>)}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-gray-400">
+                  2. Harness
+                  <select value={selectedHarness} onChange={(e) => changeHarness(p, e.target.value)} className="rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-sm text-gray-100 outline-none focus:border-amber-500">
+                    {harnesses.map((h) => <option key={h.id} value={h.id}>{h.label}</option>)}
+                  </select>
+                </label>
+                <div className="flex flex-col gap-1 text-xs text-gray-400">
+                  3. Model
+                  <ModelPicker
+                    modelOptionsByHarness={modelOptionsByHarness}
+                    authSource={p.authSource}
+                    selectedHarness={selectedHarness}
+                    selectedModel={selectedModel}
+                    onChange={(model) => updatePreset(p.id, { harness: selectedHarness, model })}
+                    disabled={selectableModels.length === 0}
+                    compact
+                  />
+                </div>
+              </div>
+
+              {selectableModels.length === 0 && (
+                <p className="text-xs text-amber-300">No models match this billing source + harness yet.</p>
+              )}
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => editPreset(p.id, false)} className="rounded-lg px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800">
+                  Done editing
+                </button>
+                <button type="button" onClick={() => setCustom((prev) => prev.filter((x) => x.id !== p.id))} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-red-300 hover:bg-red-950/30">
+                  <Trash2 size={14} /> Delete
+                </button>
               </div>
             </div>
-
-            {selectableModels.length === 0 && (
-              <p className="text-xs text-amber-300">No models match this billing source + harness yet.</p>
-            )}
-            <div className="flex justify-end">
-              <button type="button" onClick={() => setCustom((prev) => prev.filter((x) => x.id !== p.id))} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-red-300 hover:bg-red-950/30">
-                <Trash2 size={14} /> Remove
-              </button>
-            </div>
-          </div>
           );
         })}
 

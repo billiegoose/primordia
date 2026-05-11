@@ -71,6 +71,7 @@ export const PRESET_AUTH_SOURCE_LABELS: Record<PresetAuthSource, string> = {
 };
 
 export const PREF_CUSTOM_PRESETS = 'evolve:custom-presets';
+export const PREF_DISABLED_BUILT_IN_PRESETS = 'evolve:disabled-built-in-presets';
 export const PREF_PRESET = 'evolve:preferred-preset';
 
 export function normalizeAuthSource(value: string): PresetAuthSource | null {
@@ -115,4 +116,21 @@ export function serializeCustomPresets(presets: EvolvePreset[]): string {
     harness: p.harness,
     model: p.model,
   })));
+}
+
+export function parseDisabledBuiltInPresetIds(raw: string | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    const builtInIds = new Set(BUILT_IN_PRESETS.map((p) => p.id));
+    return parsed.filter((id): id is string => typeof id === 'string' && builtInIds.has(id));
+  } catch {
+    return [];
+  }
+}
+
+export function serializeDisabledBuiltInPresetIds(ids: string[]): string {
+  const builtInIds = new Set(BUILT_IN_PRESETS.map((p) => p.id));
+  return JSON.stringify([...new Set(ids)].filter((id) => builtInIds.has(id)));
 }

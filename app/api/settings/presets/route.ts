@@ -6,8 +6,11 @@ import { getDb } from '@/lib/db';
 import {
   BUILT_IN_PRESETS,
   PREF_CUSTOM_PRESETS,
+  PREF_DISABLED_BUILT_IN_PRESETS,
   parseCustomPresets,
   serializeCustomPresets,
+  parseDisabledBuiltInPresetIds,
+  serializeDisabledBuiltInPresetIds,
   normalizeAuthSource,
   type EvolvePreset,
 } from '@/lib/presets';
@@ -29,8 +32,12 @@ export async function GET() {
   if (!user) return Response.json({ error: 'Authentication required' }, { status: 401 });
 
   const db = await getDb();
-  const prefs = await db.getUserPreferences(user.id, [PREF_CUSTOM_PRESETS]);
-  return Response.json({ builtInPresets: BUILT_IN_PRESETS, customPresets: parseCustomPresets(prefs[PREF_CUSTOM_PRESETS]) });
+  const prefs = await db.getUserPreferences(user.id, [PREF_CUSTOM_PRESETS, PREF_DISABLED_BUILT_IN_PRESETS]);
+  return Response.json({
+    builtInPresets: BUILT_IN_PRESETS,
+    customPresets: parseCustomPresets(prefs[PREF_CUSTOM_PRESETS]),
+    disabledBuiltInPresetIds: parseDisabledBuiltInPresetIds(prefs[PREF_DISABLED_BUILT_IN_PRESETS]),
+  });
 }
 
 export async function PUT(req: Request) {
@@ -39,15 +46,20 @@ export async function PUT(req: Request) {
 
   let body: unknown;
   try { body = await req.json(); } catch { return Response.json({ error: 'Invalid JSON body' }, { status: 400 }); }
-  const raw = (body && typeof body === 'object' && Array.isArray((body as Record<string, unknown>).customPresets))
-    ? (body as { customPresets: unknown[] }).customPresets
-    : null;
+  const rec = body && typeof body === 'object' ? body as Record<string, unknown> : null;
+  const raw = rec && Array.isArray(rec.customPresets) ? rec.customPresets : null;
+  const disabledRaw = rec && Array.isArray(rec.disabledBuiltInPresetIds) ? rec.disabledBuiltInPresetIds : [];
   if (!raw) return Response.json({ error: 'customPresets array required' }, { status: 400 });
 
   const customPresets = raw.map(cleanPreset);
   if (customPresets.some((p) => !p)) return Response.json({ error: 'Each preset needs name, authSource, harness, and model' }, { status: 400 });
 
+  const disabledBuiltInPresetIds = parseDisabledBuiltInPresetIds(JSON.stringify(disabledRaw));
+
   const db = await getDb();
-  await db.setUserPreferences(user.id, { [PREF_CUSTOM_PRESETS]: serializeCustomPresets(customPresets as EvolvePreset[]) });
-  return Response.json({ customPresets });
+  await db.setUserPreferences(user.id, {
+    [PREF_CUSTOM_PRESETS]: serializeCustomPresets(customPresets as EvolvePreset[]),
+    [PREF_DISABLED_BUILT_IN_PRESETS]: serializeDisabledBuiltInPresetIds(disabledBuiltInPresetIds),
+  });
+  return Response.json({ customPresets, disabledBuiltInPresetIds });
 }
