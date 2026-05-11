@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, ExternalLink, Eye, EyeOff, Loader2 } from "lucide-react";
+import { Check, CheckCircle2, Copy, ExternalLink, Eye, EyeOff, Loader2 } from "lucide-react";
 import { getSecret, setSecret, clearSecret } from "@/lib/secrets-client";
 import { withBasePath } from "@/lib/base-path";
 import { trackEvent } from "@/lib/events-client";
@@ -53,6 +53,7 @@ export default function ChatGptSubscriptionSettingsClient() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deviceFlow, setDeviceFlow] = useState<DeviceFlowState | null>(null);
+  const [codeCopied, setCodeCopied] = useState(false);
   const pollTimer = useRef<number | null>(null);
 
   const prettyCredentials = useMemo(() => {
@@ -83,6 +84,7 @@ export default function ChatGptSubscriptionSettingsClient() {
     setBusy(true);
     setError(null);
     setDeviceFlow(null);
+    setCodeCopied(false);
     if (pollTimer.current) window.clearTimeout(pollTimer.current);
     try {
       const res = await fetch(withBasePath("/api/oauth/chatgpt-subscription"), {
@@ -100,7 +102,6 @@ export default function ChatGptSubscriptionSettingsClient() {
       };
       setDeviceFlow(next);
       trackEvent("settings/subscriptions/chatgpt-started/v1", {});
-      window.open(next.verificationUrl, "_blank", "noopener,noreferrer");
       pollChatGpt(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start ChatGPT authentication.");
@@ -122,6 +123,7 @@ export default function ChatGptSubscriptionSettingsClient() {
         await setSecret("CHATGPT_SUBSCRIPTION_OAUTH", value);
         setCredentials(parseCredentials(value));
         setDeviceFlow(null);
+        setCodeCopied(false);
         trackEvent("settings/subscriptions/chatgpt-connected/v1", {});
         return;
       }
@@ -130,6 +132,18 @@ export default function ChatGptSubscriptionSettingsClient() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "ChatGPT authentication failed.");
       setDeviceFlow(null);
+      setCodeCopied(false);
+    }
+  }
+
+  async function copyUserCode() {
+    if (!deviceFlow) return;
+    try {
+      await navigator.clipboard.writeText(deviceFlow.userCode);
+      setCodeCopied(true);
+      window.setTimeout(() => setCodeCopied(false), 2000);
+    } catch {
+      setError("Could not copy the code. Please copy it manually.");
     }
   }
 
@@ -141,6 +155,7 @@ export default function ChatGptSubscriptionSettingsClient() {
       await clearSecret("CHATGPT_SUBSCRIPTION_OAUTH");
       setCredentials(null);
       setDeviceFlow(null);
+      setCodeCopied(false);
       setShowCredentials(false);
       trackEvent("settings/subscriptions/chatgpt-disconnected/v1", {});
     } catch {
@@ -197,12 +212,36 @@ export default function ChatGptSubscriptionSettingsClient() {
       )}
 
       {deviceFlow && (
-        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
-          <p className="text-sm text-amber-100">A ChatGPT sign-in window was opened. Enter this code there:</p>
-          <p className="mt-2 font-mono text-2xl font-bold tracking-widest text-white">{deviceFlow.userCode}</p>
-          <a href={deviceFlow.verificationUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-amber-200 hover:text-amber-100">
-            Open verification page <ExternalLink size={14} aria-hidden="true" />
-          </a>
+        <div className="rounded-xl border border-amber-400/30 bg-gradient-to-br from-amber-500/15 via-gray-900 to-gray-950 p-4 shadow-lg shadow-amber-950/20">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-300/80">Step 1</p>
+              <p className="mt-1 text-sm text-amber-50">Copy this one-time ChatGPT sign-in code.</p>
+              <div className="mt-3 inline-flex rounded-xl border border-amber-300/25 bg-black/30 px-4 py-3 font-mono text-3xl font-bold tracking-[0.18em] text-white shadow-inner shadow-black/30">
+                {deviceFlow.userCode}
+              </div>
+            </div>
+            <button
+              type="button"
+              data-id="chatgpt-subscription/copy-code"
+              onClick={() => void copyUserCode()}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-300/30 bg-amber-300/15 px-3 py-2 text-sm font-medium text-amber-50 transition-colors hover:bg-amber-300/25"
+            >
+              {codeCopied ? <Check size={16} aria-hidden="true" /> : <Copy size={16} aria-hidden="true" />}
+              {codeCopied ? "Copied" : "Copy code"}
+            </button>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-3 rounded-lg border border-gray-700/70 bg-gray-950/60 p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-gray-400">Step 2</p>
+              <p className="mt-1 text-sm text-gray-300">Open ChatGPT&apos;s verification page and paste the code.</p>
+            </div>
+            <a href={deviceFlow.verificationUrl} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-lg bg-amber-300 px-3 py-2 text-sm font-semibold text-gray-950 transition-colors hover:bg-amber-200">
+              Open link <ExternalLink size={15} aria-hidden="true" />
+            </a>
+          </div>
+
           <p className="mt-3 inline-flex items-center gap-2 text-xs text-amber-200/80"><Loader2 className="animate-spin" size={14} aria-hidden="true" /> Waiting for authorization…</p>
         </div>
       )}
