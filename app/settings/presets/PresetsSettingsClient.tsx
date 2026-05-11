@@ -49,7 +49,7 @@ export default function PresetsSettingsClient() {
   const [custom, setCustom] = useState<EvolvePreset[]>([]);
   const [editingIds, setEditingIds] = useState<Set<string>>(new Set());
   const [modelOptionsByHarness, setModelOptionsByHarness] = useState<Record<string, ModelOption[]>>({});
-  const [saving, setSaving] = useState(false);
+  const [savingTarget, setSavingTarget] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -80,7 +80,11 @@ export default function PresetsSettingsClient() {
   }
 
   function toggleBuiltIn(id: string) {
-    setDisabledBuiltInIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+    const nextDisabled = disabledBuiltInIds.includes(id)
+      ? disabledBuiltInIds.filter((x) => x !== id)
+      : [...disabledBuiltInIds, id];
+    setDisabledBuiltInIds(nextDisabled);
+    void persistPresets(custom, nextDisabled, `builtin:${id}`);
   }
 
   function changeAuthSource(preset: EvolvePreset, authSource: PresetAuthSource) {
@@ -96,8 +100,8 @@ export default function PresetsSettingsClient() {
     updatePreset(preset.id, { harness, model });
   }
 
-  function normalizedPresets(): EvolvePreset[] {
-    return custom.map((p) => {
+  function normalizedPresets(source = custom): EvolvePreset[] {
+    return source.map((p) => {
       const harnesses = getHarnessesForAuthSource(p.authSource);
       const harness = harnesses.some((h) => h.id === p.harness) ? p.harness : (harnesses[0]?.id ?? p.harness);
       const models = filterModelsForAuthSource(modelOptionsByHarness[harness] ?? [], p.authSource, harness);
@@ -106,28 +110,38 @@ export default function PresetsSettingsClient() {
     });
   }
 
-  async function save() {
-    setSaving(true);
+  async function persistPresets(nextCustom = custom, nextDisabled = disabledBuiltInIds, target = 'presets') {
+    setSavingTarget(target);
     setMessage(null);
     try {
-      const cleaned = normalizedPresets();
+      const cleaned = normalizedPresets(nextCustom);
       const res = await fetch(withBasePath('/api/settings/presets'), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customPresets: cleaned, disabledBuiltInPresetIds: disabledBuiltInIds }),
+        body: JSON.stringify({ customPresets: cleaned, disabledBuiltInPresetIds: nextDisabled }),
       });
       const data = await res.json() as { customPresets?: EvolvePreset[]; disabledBuiltInPresetIds?: string[]; error?: string };
       if (!res.ok) throw new Error(data.error ?? `Save failed: ${res.status}`);
       setCustom(data.customPresets ?? cleaned);
-      setDisabledBuiltInIds(data.disabledBuiltInPresetIds ?? disabledBuiltInIds);
-      setEditingIds(new Set());
+      setDisabledBuiltInIds(data.disabledBuiltInPresetIds ?? nextDisabled);
+      setEditingIds((prev) => {
+        const next = new Set(prev);
+        if (target.startsWith('custom:')) next.delete(target);
+        return next;
+      });
       setMessage('Saved.');
-      trackEvent('settings/presets-saved/v1', { count: cleaned.length, disabledBuiltInCount: disabledBuiltInIds.length });
+      trackEvent('settings/presets-saved/v1', { count: cleaned.length, disabledBuiltInCount: nextDisabled.length, target });
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Save failed.');
     } finally {
-      setSaving(false);
+      setSavingTarget(null);
     }
+  }
+
+  function deletePreset(id: string) {
+    const nextCustom = custom.filter((p) => p.id !== id);
+    setCustom(nextCustom);
+    void persistPresets(nextCustom, disabledBuiltInIds, `delete:${id}`);
   }
 
   function addPreset() {
@@ -159,7 +173,8 @@ export default function PresetsSettingsClient() {
                       type="checkbox"
                       checked={!disabled}
                       onChange={() => toggleBuiltIn(p.id)}
-                      className="accent-amber-500"
+                      disabled={savingTarget === `builtin:${p.id}`}
+                      className="accent-amber-500 disabled:opacity-50"
                     />
                     {disabled ? 'Disabled' : 'Enabled'}
                   </label>
@@ -197,7 +212,7 @@ export default function PresetsSettingsClient() {
                     <button type="button" onClick={() => editPreset(p.id, true)} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-gray-300 hover:bg-gray-800">
                       <Edit3 size={13} /> Edit
                     </button>
-                    <button type="button" onClick={() => setCustom((prev) => prev.filter((x) => x.id !== p.id))} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-red-300 hover:bg-red-950/30">
+                    <button type="button" onClick={() => deletePreset(p.id)} disabled={savingTarget === `delete:${p.id}`} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-red-300 hover:bg-red-950/30 disabled:opacity-50">
                       <Trash2 size={13} /> Delete
                     </button>
                   </div>
@@ -244,10 +259,10 @@ export default function PresetsSettingsClient() {
                 <p className="text-xs text-amber-300">No models match this billing source + harness yet.</p>
               )}
               <div className="flex justify-end gap-2">
-                <button type="button" onClick={() => editPreset(p.id, false)} className="rounded-lg px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800">
-                  Done editing
+                <button type="button" onClick={() => persistPresets(custom, disabledBuiltInIds, p.id)} disabled={savingTarget === p.id} className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-500 disabled:opacity-50">
+                  {savingTarget === p.id ? 'Saving…' : 'Save preset'}
                 </button>
-                <button type="button" onClick={() => setCustom((prev) => prev.filter((x) => x.id !== p.id))} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-red-300 hover:bg-red-950/30">
+                <button type="button" onClick={() => deletePreset(p.id)} disabled={savingTarget === `delete:${p.id}`} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-red-300 hover:bg-red-950/30 disabled:opacity-50">
                   <Trash2 size={14} /> Delete
                 </button>
               </div>
@@ -255,10 +270,7 @@ export default function PresetsSettingsClient() {
           );
         })}
 
-        <div className="flex items-center gap-3 pt-2">
-          <button type="button" onClick={save} disabled={saving} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-50">{saving ? 'Saving…' : 'Save presets'}</button>
-          {message && <span className="text-sm text-gray-400">{message}</span>}
-        </div>
+        {message && <div className="pt-2 text-sm text-gray-400">{message}</div>}
       </div>
     </section>
   );
