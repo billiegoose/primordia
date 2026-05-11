@@ -9,3 +9,5 @@ Encrypted credential blobs now persist in a dedicated `encrypted_credentials` ta
 The obsolete `/api/llm-key/encrypted-key`, `/api/llm-key/encrypted-openrouter-key`, and `/api/llm-key/encrypted-credentials` storage endpoints were removed. Credential storage now goes through `/api/secrets/[type]`.
 
 Credential-related helper endpoints now have clearer names: the hybrid encryption public key is served by `/api/credential-encryption/public-key`, and the ChatGPT subscription OAuth device flow uses `/api/oauth/chatgpt-subscription`.
+
+The ChatGPT OAuth route now catches upstream network failures and malformed upstream responses, returning explicit `502` JSON errors instead of a generic internal server error.
