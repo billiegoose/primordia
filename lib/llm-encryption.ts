@@ -51,27 +51,15 @@ function isHybridEncryptedPayload(value: unknown): value is HybridEncryptedPaylo
   );
 }
 
-/**
- * Decrypts an encrypted API key. New clients send the same hybrid envelope used
- * for all secrets. Legacy direct RSA-OAEP base64 payloads are still accepted so
- * older open tabs do not fail during deploy.
- */
-export async function decryptApiKey(payloadOrCiphertext: string | HybridEncryptedPayload): Promise<string> {
-  if (isHybridEncryptedPayload(payloadOrCiphertext)) {
-    return decryptHybridCredentials(payloadOrCiphertext);
-  }
+/** Decrypts an API key from the same hybrid envelope used for all secrets. */
+export async function decryptApiKey(payload: string | HybridEncryptedPayload): Promise<string> {
+  if (isHybridEncryptedPayload(payload)) return decryptHybridCredentials(payload);
 
-  try {
-    const parsed = JSON.parse(payloadOrCiphertext) as unknown;
-    if (isHybridEncryptedPayload(parsed)) return decryptHybridCredentials(parsed);
-  } catch {
-    // Legacy plain base64 RSA-OAEP ciphertext.
+  const parsed = JSON.parse(payload) as unknown;
+  if (!isHybridEncryptedPayload(parsed)) {
+    throw new Error('Invalid hybrid encrypted API key payload');
   }
-
-  const { privateKey } = await getKeyPair();
-  const ciphertext = Buffer.from(payloadOrCiphertext, 'base64');
-  const plaintext = await subtle.decrypt({ name: 'RSA-OAEP' }, privateKey, ciphertext);
-  return new TextDecoder().decode(plaintext);
+  return decryptHybridCredentials(parsed);
 }
 
 /**
