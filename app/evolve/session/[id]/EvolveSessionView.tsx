@@ -1480,17 +1480,22 @@ export default function EvolveSessionView({
     status === "rejected" ||
     status === "ready";
 
+  /**
+   * Preview URL is deterministic from the session ID. Keep a fallback so the
+   * toolbar/open-in-new-tab control remains available even if the dev server is
+   * currently stopped and no live previewUrl has been persisted yet.
+   */
+  const effectivePreviewUrl = previewUrl ?? `/preview/${sessionId}`;
+
   /** Whether to show the preview as a desktop sidebar. */
-  const showPreviewSidebar = status === "ready" && !!previewUrl;
+  const showPreviewSidebar = status === "ready";
 
   /**
    * The URL to open in the Web Preview panel when it first becomes available.
    * Derived once from the initial request so the preview starts on the most
    * relevant page rather than always defaulting to the landing page.
    */
-  const smartPreviewUrl = previewUrl
-    ? deriveSmartPreviewUrl(events, previewUrl)
-    : null;
+  const smartPreviewUrl = deriveSmartPreviewUrl(events, effectivePreviewUrl);
 
   /** Width of the session (left) panel in pixels when sidebar is visible. */
   const [mainWidthPx, setMainWidthPx] = useState(560);
