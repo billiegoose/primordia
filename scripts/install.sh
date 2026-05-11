@@ -236,11 +236,15 @@ install_git_hook() {
   mv "$tmp" "$dst"
 }
 
-_step "Installing git hooks..."
 mkdir -p "${GIT_HOOKS_DST}"
-install_git_hook "reference-transaction"
+if [[ ! -f "${GIT_HOOKS_DST}/reference-transaction" ]] || ! diff -q "${GIT_HOOKS_SRC}/reference-transaction" "${GIT_HOOKS_DST}/reference-transaction" >/dev/null 2>&1; then
+  _step "Installing git hooks..."
+  install_git_hook "reference-transaction"
+  _done "Git hooks installed"
+else
+  success "Using git hooks"
+fi
 git -C "${BARE_REPO}" config receive.denyCurrentBranch ignore
-_done "Git hooks installed"
 
 # ── Install bun ───────────────────────────────────────────────────────────────
 
