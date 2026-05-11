@@ -23,7 +23,7 @@ import {
 import { getSessionUser, hasEvolvePermission } from '../../../lib/auth';
 import { getDb } from '../../../lib/db';
 import { PREF_HARNESS, PREF_MODEL, PREF_CAVEMAN, PREF_CAVEMAN_INTENSITY, CAVEMAN_INTENSITIES, DEFAULT_CAVEMAN_INTENSITY, type CavemanIntensity } from '../../../lib/user-prefs';
-import { PREF_PRESET } from '../../../lib/presets';
+import { normalizeAuthSource, PREF_PRESET, type PresetAuthSource } from '../../../lib/presets';
 import {
   getSessionFromFilesystem,
   appendSessionEvent,
@@ -127,6 +127,7 @@ export async function POST(request: Request) {
   let cavemanMode = false;
   let cavemanIntensity: CavemanIntensity = DEFAULT_CAVEMAN_INTENSITY;
   let presetId: string | null = null;
+  let authSource: PresetAuthSource | null = null;
   let encryptedApiKey: string | null = null;
   let encryptedCredentials: string | null = null;
   let encryptedChatGptOAuth: string | null = null;
@@ -146,6 +147,8 @@ export async function POST(request: Request) {
     if (typeof modelField === 'string' && modelField) model = modelField;
     const presetField = formData.get('presetId');
     if (typeof presetField === 'string' && presetField) presetId = presetField;
+    const authSourceField = formData.get('authSource');
+    if (typeof authSourceField === 'string') authSource = normalizeAuthSource(authSourceField);
     const cavemanModeField = formData.get('cavemanMode');
     if (cavemanModeField === 'true') cavemanMode = true;
     const cavemanIntensityField = formData.get('cavemanIntensity');
@@ -184,14 +187,30 @@ export async function POST(request: Request) {
       }
     }
   } else {
-    const body = (await request.json()) as { request?: string; encryptedApiKey?: string; encryptedCredentials?: string; encryptedChatGptOAuth?: string };
+    const body = (await request.json()) as { request?: string; authSource?: string; encryptedApiKey?: string; encryptedCredentials?: string; encryptedChatGptOAuth?: string };
     if (!body.request || typeof body.request !== 'string') {
       return Response.json({ error: 'request string required' }, { status: 400 });
     }
     requestText = body.request;
+    if (body.authSource) authSource = normalizeAuthSource(body.authSource);
     if (body.encryptedApiKey) encryptedApiKey = body.encryptedApiKey;
     if (body.encryptedCredentials) encryptedCredentials = body.encryptedCredentials;
     if (body.encryptedChatGptOAuth) encryptedChatGptOAuth = body.encryptedChatGptOAuth;
+  }
+
+  if (authSource === 'exe-dev-gateway') {
+    encryptedApiKey = null;
+    encryptedCredentials = null;
+    encryptedChatGptOAuth = null;
+  } else if (authSource === 'claude-subscription') {
+    encryptedApiKey = null;
+    encryptedChatGptOAuth = null;
+  } else if (authSource === 'chatgpt-subscription') {
+    encryptedApiKey = null;
+    encryptedCredentials = null;
+  } else if (authSource === 'openrouter-api-key' || authSource === 'openai-api-key' || authSource === 'anthropic-api-key') {
+    encryptedCredentials = null;
+    encryptedChatGptOAuth = null;
   }
 
   // Decrypt the user's API key (if provided) right before use.
@@ -259,7 +278,16 @@ export async function POST(request: Request) {
   // Write the initial_request event synchronously so getSessionFromFilesystem()
   // can find the session immediately (the ndjson file is the session existence marker).
   const ndjsonPath = getSessionNdjsonPath(worktreePath);
-  appendSessionEvent(ndjsonPath, { type: 'initial_request', request: requestText, attachments: savedAttachmentPaths.map(p => path.basename(p)), ts: Date.now() });
+  appendSessionEvent(ndjsonPath, {
+    type: 'initial_request',
+    request: requestText,
+    attachments: savedAttachmentPaths.map(p => path.basename(p)),
+    ...(presetId ? { presetId } : {}),
+    ...(authSource ? { authSource } : {}),
+    harness,
+    model,
+    ts: Date.now(),
+  });
 
   const session: LocalSession = {
     id: sessionId,

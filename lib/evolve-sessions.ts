@@ -849,6 +849,7 @@ export async function runFollowupInWorktree(
   internalSectionType?: 'type_fix' | 'auto_commit',
   /** Temporary file paths for user-uploaded attachments. Copied into worktree/attachments/ and deleted from /tmp. */
   attachmentPaths: string[] = [],
+  requestMetadata: { presetId?: string; authSource?: string; harness?: string; model?: string } = {},
 ): Promise<void> {
   const ndjsonPath = getSessionNdjsonPath(session.worktreePath);
 
@@ -866,7 +867,13 @@ export async function runFollowupInWorktree(
       appendSessionEvent(ndjsonPath, { type: 'section_start', sectionType: internalSectionType, label: sectionLabels[internalSectionType], ts: Date.now() });
     } else {
       appendSessionEvent(ndjsonPath, { type: 'section_start', sectionType: 'followup', label: '🔄 Follow-up Request', ts: Date.now() });
-      appendSessionEvent(ndjsonPath, { type: 'followup_request', request: followupRequest, attachments: attachmentPaths.map(p => path.basename(p)), ts: Date.now() });
+      appendSessionEvent(ndjsonPath, {
+        type: 'followup_request',
+        request: followupRequest,
+        attachments: attachmentPaths.map(p => path.basename(p)),
+        ...requestMetadata,
+        ts: Date.now(),
+      });
       const fuHarnessLabel = HARNESS_OPTIONS.find((h) => h.id === fuHarnessId)?.label ?? fuHarnessId;
       const fuModelLabel = getModelLabel(fuHarnessId, fuModelId);
       // Resolve auth — credentials beat API key; both beat the gateway.

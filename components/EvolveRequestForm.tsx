@@ -14,9 +14,7 @@ import { useState, useRef, useEffect, useCallback, FormEvent, memo } from "react
 import { Paperclip, Settings, ChevronDown, Crosshair, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { withBasePath } from "../lib/base-path";
-import { encryptChatGptSubscriptionForTransmission, encryptStoredApiKey, encryptStoredOpenRouterApiKey } from "../lib/api-key-client";
-import { encryptStoredCredentials } from "../lib/credentials-client";
-import { encryptSecretForTransmission } from "../lib/secrets-client";
+import { appendCredentialFieldsForAuthSource } from "../lib/preset-credentials-client";
 import {
   DEFAULT_HARNESS,
   DEFAULT_MODEL,
@@ -83,6 +81,7 @@ interface EvolveRequestFormProps {
     harness: string;
     model: string;
     authSource: PresetAuthSource;
+    presetId: string;
     files: File[];
   }) => Promise<void>;
   /**
@@ -258,6 +257,7 @@ export function EvolveRequestForm({
           harness: selectedHarness,
           model: selectedModel,
           authSource: selectedPreset.authSource,
+          presetId: selectedPreset.id,
           files: allFiles,
         });
         // Reset form on success (caveman mode/intensity are sticky — not reset).
@@ -278,22 +278,7 @@ export function EvolveRequestForm({
           formData.append("attachments", file);
         }
         // Preset auth source decides which one credential to send.
-        if (selectedPreset.authSource === 'claude-subscription') {
-          const encryptedCredentials = await encryptStoredCredentials();
-          if (encryptedCredentials) formData.append("encryptedCredentials", JSON.stringify(encryptedCredentials));
-        } else if (selectedPreset.authSource === 'chatgpt-subscription') {
-          const encryptedChatGptOAuth = await encryptChatGptSubscriptionForTransmission();
-          if (encryptedChatGptOAuth) formData.append("encryptedChatGptOAuth", JSON.stringify(encryptedChatGptOAuth));
-        } else if (selectedPreset.authSource === 'openrouter-api-key') {
-          const encryptedApiKey = await encryptStoredOpenRouterApiKey();
-          if (encryptedApiKey) formData.append("encryptedApiKey", JSON.stringify(encryptedApiKey));
-        } else if (selectedPreset.authSource === 'openai-api-key') {
-          const encryptedApiKey = await encryptSecretForTransmission('OPENAI_API_KEY');
-          if (encryptedApiKey) formData.append("encryptedApiKey", JSON.stringify(encryptedApiKey));
-        } else if (selectedPreset.authSource === 'anthropic-api-key') {
-          const encryptedApiKey = await encryptStoredApiKey();
-          if (encryptedApiKey) formData.append("encryptedApiKey", JSON.stringify(encryptedApiKey));
-        }
+        await appendCredentialFieldsForAuthSource(formData, selectedPreset.authSource);
 
         const res = await fetch(withBasePath("/api/evolve"), { method: "POST", body: formData });
         const data = (await res.json()) as { sessionId?: string; error?: string };

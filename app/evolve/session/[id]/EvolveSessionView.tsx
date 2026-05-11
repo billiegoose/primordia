@@ -15,10 +15,9 @@ import { FloatingEvolveDialog, EvolveSubmitToast } from "@/components/FloatingEv
 import { HamburgerMenu, buildStandardMenuItems } from "@/components/HamburgerMenu";
 import { useSessionUser } from "@/lib/hooks";
 import { withBasePath } from "@/lib/base-path";
-import { encryptChatGptSubscriptionForTransmission, encryptStoredApiKey, encryptStoredOpenRouterApiKey } from "@/lib/api-key-client";
-import { encryptSecretForTransmission } from "@/lib/secrets-client";
+import { appendCredentialFieldsForAuthSource, getCredentialFieldsForAuthSource } from "@/lib/preset-credentials-client";
 import { useSounds } from "@/lib/sounds";
-import { encryptStoredCredentials, updateStoredCredentials } from "@/lib/credentials-client";
+import { updateStoredCredentials } from "@/lib/credentials-client";
 import { EvolveRequestForm } from "@/components/EvolveRequestForm";
 import Link from "next/link";
 import type { DiffFileSummary } from "./page";
@@ -28,6 +27,7 @@ import HorizontalResizeHandle from "./HorizontalResizeHandle";
 import type { SessionEvent, AgentAuthInfo } from "@/lib/session-events";
 import { convertUtcTimeToLocal } from "@/lib/utc-to-local-time";
 import { HARNESS_OPTIONS, type ModelOption } from "@/lib/agent-config";
+import { normalizeAuthSource, type PresetAuthSource } from "@/lib/presets";
 import { deriveSmartPreviewUrl } from "@/lib/smart-preview-url";
 import { trackEvent } from "@/lib/events-client";
 
@@ -851,6 +851,32 @@ interface EvolveSessionViewProps {
 
 // ─── CopyBranchName ──────────────────────────────────────────────────────────
 
+function getSessionCredentialAuthSource(events: SessionEvent[], sessionModel?: string): PresetAuthSource | null {
+  for (const event of [...events].reverse()) {
+    if ((event.type === 'followup_request' || event.type === 'initial_request') && 'authSource' in event) {
+      const authSource = typeof event.authSource === 'string' ? normalizeAuthSource(event.authSource) : null;
+      if (authSource) return authSource;
+    }
+  }
+
+  // Legacy sessions did not record the preset auth source. Fall back to the
+  // coarse auth metadata from the last agent run, then to model-shape heuristics.
+  const lastAgent = [...events].reverse().find(
+    (event): event is Extract<SessionEvent, { type: 'section_start'; sectionType: 'agent' }> =>
+      event.type === 'section_start' && event.sectionType === 'agent',
+  );
+  if (lastAgent?.auth?.source === 'claude-credentials') return 'claude-subscription';
+  if (lastAgent?.auth?.source === 'chatgpt-subscription') return 'chatgpt-subscription';
+  if (lastAgent?.auth?.source === 'llm-gateway') return 'exe-dev-gateway';
+  if (lastAgent?.auth?.source === 'api-key') {
+    const model = lastAgent.modelId ?? sessionModel ?? '';
+    if (model.includes('/')) return 'openrouter-api-key';
+    if (model.startsWith('openai') || model.startsWith('gpt-') || model.includes('gpt')) return 'openai-api-key';
+    return 'anthropic-api-key';
+  }
+  return null;
+}
+
 function CopyBranchName({ branch }: { branch: string }) {
   const [copied, setCopied] = useState(false);
 
@@ -1317,26 +1343,12 @@ export default function EvolveSessionView({
     setAcceptRejectLoading(true);
     setAcceptRejectError(null);
     try {
-      // Attach credentials so the server can forward them to any agent sessions
-      // spawned during accept (type-fix, auto-commit). Pi openai-codex models
-      // use ChatGPT OAuth; otherwise Claude Code credentials win, OpenRouter
-      // models use the OpenRouter key, and everything else uses Anthropic.
+      // Attach only the credential selected by the session's most recent preset
+      // so accept-time agent passes (type-fix, auto-commit) use the same billing
+      // source as the evolve/follow-up run they are completing.
       const acceptBody: Record<string, string> = { action: 'accept', sessionId };
-      if (sessionModel?.startsWith('openai-codex:')) {
-        const encChatGptOAuth = await encryptChatGptSubscriptionForTransmission();
-        if (encChatGptOAuth) acceptBody.encryptedChatGptOAuth = JSON.stringify(encChatGptOAuth);
-      } else {
-        const encCreds = await encryptStoredCredentials();
-        if (encCreds) {
-          acceptBody.encryptedCredentials = JSON.stringify(encCreds);
-        } else {
-          const isOpenRouterModel = sessionModel?.includes('/') ?? false;
-          const encKey = isOpenRouterModel
-            ? await encryptStoredOpenRouterApiKey()
-            : await encryptStoredApiKey();
-          if (encKey) acceptBody.encryptedApiKey = JSON.stringify(encKey);
-        }
-      }
+      if (sessionCredentialAuthSource) acceptBody.authSource = sessionCredentialAuthSource;
+      Object.assign(acceptBody, await getCredentialFieldsForAuthSource(sessionCredentialAuthSource));
       const res = await fetch(withBasePath('/api/evolve/manage'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1496,6 +1508,7 @@ export default function EvolveSessionView({
     ?? (lastAgentSection?.model && sessionHarness
       ? modelOptionsByHarness[sessionHarness]?.find((m) => m.label === lastAgentSection.model)?.id
       : undefined);
+  const sessionCredentialAuthSource = getSessionCredentialAuthSource(events, sessionModel);
   // Human-readable agent label for UI messages like "Waiting for X to finish…"
   // Label for the *currently running* agent — derived from the active section
   // (last content section while the pipeline is running). This is correct even
@@ -1874,7 +1887,7 @@ export default function EvolveSessionView({
                 autoFocus
                 defaultHarness={sessionHarness}
                 defaultModel={sessionModel}
-                onSubmit={async ({ request, harness, model, authSource, files }) => {
+                onSubmit={async ({ request, harness, model, authSource, presetId, files }) => {
                   // Prepend element context to the request when present.
                   let fullRequest = request;
                   if (elementContext) {
@@ -1886,24 +1899,10 @@ export default function EvolveSessionView({
                   formData.append('request', fullRequest);
                   formData.append('harness', harness);
                   formData.append('model', model);
+                  formData.append('presetId', presetId);
                   formData.append('authSource', authSource);
                   for (const file of files) formData.append('attachments', file);
-                  if (authSource === 'claude-subscription') {
-                    const encryptedCredentials = await encryptStoredCredentials();
-                    if (encryptedCredentials) formData.append('encryptedCredentials', JSON.stringify(encryptedCredentials));
-                  } else if (authSource === 'chatgpt-subscription') {
-                    const encryptedChatGptOAuth = await encryptChatGptSubscriptionForTransmission();
-                    if (encryptedChatGptOAuth) formData.append('encryptedChatGptOAuth', JSON.stringify(encryptedChatGptOAuth));
-                  } else if (authSource === 'openrouter-api-key') {
-                    const encryptedApiKey = await encryptStoredOpenRouterApiKey();
-                    if (encryptedApiKey) formData.append('encryptedApiKey', JSON.stringify(encryptedApiKey));
-                  } else if (authSource === 'openai-api-key') {
-                    const encryptedApiKey = await encryptSecretForTransmission('OPENAI_API_KEY');
-                    if (encryptedApiKey) formData.append('encryptedApiKey', JSON.stringify(encryptedApiKey));
-                  } else if (authSource === 'anthropic-api-key') {
-                    const encryptedApiKey = await encryptStoredApiKey();
-                    if (encryptedApiKey) formData.append('encryptedApiKey', JSON.stringify(encryptedApiKey));
-                  }
+                  await appendCredentialFieldsForAuthSource(formData, authSource);
                   const res = await fetch(withBasePath('/api/evolve/followup'), {
                     method: 'POST',
                     body: formData,
