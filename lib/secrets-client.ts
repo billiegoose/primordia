@@ -29,6 +29,13 @@ export type SecretType =
   | 'CHATGPT_SUBSCRIPTION_OAUTH';
 
 const AES_KEY_STORAGE = 'primordia_aes_key';
+const LEGACY_CREDENTIALS_AES_KEY_STORAGE = 'primordia_credentials_aes_key';
+
+function clearLegacyAesKey(): void {
+  try {
+    localStorage.removeItem(LEGACY_CREDENTIALS_AES_KEY_STORAGE);
+  } catch {}
+}
 
 export type HybridEncryptedSecret = {
   wrappedKey: string;
@@ -46,6 +53,7 @@ async function loadAesKey(): Promise<CryptoKey | null> {
   if (cachedAesKey) return cachedAesKey;
   if (typeof window === 'undefined') return null;
   try {
+    clearLegacyAesKey();
     const jwkStr = localStorage.getItem(AES_KEY_STORAGE);
     if (!jwkStr) return null;
     const jwk = JSON.parse(jwkStr) as JsonWebKey;
@@ -72,6 +80,7 @@ async function getOrCreateAesKey(): Promise<CryptoKey> {
   );
   const jwk = await crypto.subtle.exportKey('jwk', key);
   localStorage.setItem(AES_KEY_STORAGE, JSON.stringify(jwk));
+  clearLegacyAesKey();
   cachedAesKey = key;
   return key;
 }
@@ -178,6 +187,7 @@ export async function clearSecret(type: SecretType): Promise<void> {
       if (data.types.length === 0) {
         cachedAesKey = null;
         localStorage.removeItem(AES_KEY_STORAGE);
+        clearLegacyAesKey();
       }
     }
   } catch {
@@ -195,6 +205,7 @@ export function clearOrphanedSecretsKey(): void {
   try {
     cachedAesKey = null;
     localStorage.removeItem(AES_KEY_STORAGE);
+    clearLegacyAesKey();
   } catch {}
 }
 
@@ -217,6 +228,7 @@ export async function adoptNewAesKey(newKeyJwkStr: string): Promise<void> {
 
   if (!oldKeyJwkStr || oldKeyJwkStr === newKeyJwkStr) {
     localStorage.setItem(AES_KEY_STORAGE, newKeyJwkStr);
+    clearLegacyAesKey();
     cachedAesKey = null;
     return;
   }
@@ -241,6 +253,7 @@ export async function adoptNewAesKey(newKeyJwkStr: string): Promise<void> {
   } catch {
     // Can't import keys — just adopt the new key without migrating.
     localStorage.setItem(AES_KEY_STORAGE, newKeyJwkStr);
+    clearLegacyAesKey();
     cachedAesKey = null;
     return;
   }
@@ -286,6 +299,7 @@ export async function adoptNewAesKey(newKeyJwkStr: string): Promise<void> {
   }
 
   localStorage.setItem(AES_KEY_STORAGE, newKeyJwkStr);
+  clearLegacyAesKey();
   cachedAesKey = null;
 }
 

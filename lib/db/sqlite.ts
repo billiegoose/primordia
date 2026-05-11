@@ -51,9 +51,7 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
       id TEXT PRIMARY KEY,
       status TEXT NOT NULL DEFAULT 'pending',
       user_id TEXT,
-      expires_at INTEGER NOT NULL,
-      api_key_jwk TEXT,
-      credentials_key_jwk TEXT
+      expires_at INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS roles (
       name TEXT PRIMARY KEY,
@@ -114,18 +112,7 @@ export async function createSqliteAdapter(): Promise<DbAdapter> {
     );
   `);
 
-  // Migration: add push-flow columns to cross_device_tokens (no longer used but kept for compat)
-  try {
-    db.exec("ALTER TABLE cross_device_tokens ADD COLUMN api_key_jwk TEXT");
-  } catch {
-    // Column already exists — ignore
-  }
-  try {
-    db.exec("ALTER TABLE cross_device_tokens ADD COLUMN credentials_key_jwk TEXT");
-  } catch {
-    // Column already exists — ignore
-  }
-  // Migration: add encrypted_credentials column for pull-flow ECDH credential transfer
+  // Migration: add encrypted_credentials column for ECDH credential transfer
   try {
     db.exec("ALTER TABLE cross_device_tokens ADD COLUMN encrypted_credentials TEXT");
   } catch {

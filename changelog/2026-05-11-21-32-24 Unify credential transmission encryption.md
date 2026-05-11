@@ -6,6 +6,8 @@ This removes the old API-key-specific direct RSA-OAEP path and makes API keys, C
 
 Encrypted credential blobs now persist in a dedicated `encrypted_credentials` table keyed by `user_id` and clean `auth_source` values such as `anthropic-api-key`, `openrouter-api-key`, `claude-subscription`, and `chatgpt-subscription`, instead of ad-hoc user preference keys.
 
+The browser now has exactly one credential AES key: `localStorage.primordia_aes_key`. Cross-device sign-in transfers only that key, and any old `primordia_credentials_aes_key` value is ignored and removed when credential storage code runs.
+
 The obsolete `/api/llm-key/encrypted-key`, `/api/llm-key/encrypted-openrouter-key`, and `/api/llm-key/encrypted-credentials` storage endpoints were removed. Credential storage now goes through `/api/secrets/[type]`.
 
 Credential-related helper endpoints now have clearer names: the hybrid encryption public key is served by `/api/credential-encryption/public-key`, and the ChatGPT subscription OAuth device flow uses `/api/oauth/chatgpt-subscription`.
