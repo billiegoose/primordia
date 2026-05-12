@@ -14,6 +14,7 @@ import {
   normalizeAuthSource,
   type EvolvePreset,
 } from '@/lib/presets';
+import { SECRET_AUTH_SOURCES, withPresetAvailability } from '@/lib/preset-availability';
 
 function cleanPreset(input: unknown): EvolvePreset | null {
   if (!input || typeof input !== 'object') return null;
@@ -33,9 +34,14 @@ export async function GET() {
 
   const db = await getDb();
   const prefs = await db.getUserPreferences(user.id, [PREF_CUSTOM_PRESETS, PREF_DISABLED_BUILT_IN_PRESETS]);
+  const storedAuthSources = new Set<string>();
+  for (const authSource of SECRET_AUTH_SOURCES) {
+    const stored = await db.getEncryptedCredential(user.id, authSource);
+    if (stored) storedAuthSources.add(authSource);
+  }
   return Response.json({
-    builtInPresets: BUILT_IN_PRESETS,
-    customPresets: parseCustomPresets(prefs[PREF_CUSTOM_PRESETS]),
+    builtInPresets: BUILT_IN_PRESETS.map((preset) => withPresetAvailability(preset, storedAuthSources)),
+    customPresets: parseCustomPresets(prefs[PREF_CUSTOM_PRESETS]).map((preset) => withPresetAvailability(preset, storedAuthSources)),
     disabledBuiltInPresetIds: parseDisabledBuiltInPresetIds(prefs[PREF_DISABLED_BUILT_IN_PRESETS]),
   });
 }
@@ -61,5 +67,13 @@ export async function PUT(req: Request) {
     [PREF_CUSTOM_PRESETS]: serializeCustomPresets(customPresets as EvolvePreset[]),
     [PREF_DISABLED_BUILT_IN_PRESETS]: serializeDisabledBuiltInPresetIds(disabledBuiltInPresetIds),
   });
-  return Response.json({ customPresets, disabledBuiltInPresetIds });
+  const storedAuthSources = new Set<string>();
+  for (const authSource of SECRET_AUTH_SOURCES) {
+    const stored = await db.getEncryptedCredential(user.id, authSource);
+    if (stored) storedAuthSources.add(authSource);
+  }
+  return Response.json({
+    customPresets: (customPresets as EvolvePreset[]).map((preset) => withPresetAvailability(preset, storedAuthSources)),
+    disabledBuiltInPresetIds,
+  });
 }

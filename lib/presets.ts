@@ -44,6 +44,14 @@ export const BUILT_IN_PRESETS: EvolvePreset[] = [
     builtIn: true,
   },
   {
+    id: 'builtin:pi-chatgpt-codex-mini',
+    name: 'Pi + ChatGPT + Codex Mini',
+    authSource: 'chatgpt-subscription',
+    harness: 'pi',
+    model: 'openai-codex:gpt-5.1-codex-mini',
+    builtIn: true,
+  },
+  {
     id: 'builtin:pi-openrouter-sonnet',
     name: 'Pi + OpenRouter + Sonnet',
     authSource: 'openrouter-api-key',

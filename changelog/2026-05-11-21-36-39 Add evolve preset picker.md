@@ -9,3 +9,5 @@ The preset editor now uses a three-stage Billing Source → Harness → Model fl
 Evolve, follow-up, and accept-time agent passes now consistently send only the credential selected by the active preset billing source. The chosen preset/auth source is recorded in the session event log so accept-time type-fix, auto-commit, and conflict-resolution runs can continue with the same credential instead of guessing from the model or preferring unrelated stored credentials.
 
 Account Settings copy now matches the preset model: saved API keys and subscription credentials are presented as explicit billing sources for presets, not as a global credential priority chain. The onboarding tour script was updated with the same model so future guidance does not reintroduce credential ordering.
+
+Added a built-in Pi + ChatGPT subscription preset and changed preset availability handling so presets stay visible when their billing source is missing. Unavailable presets are grayed out with a missing-billing-source indicator, while usable presets remain selectable; built-in presets no longer show a redundant built-in pill, but custom presets still do.

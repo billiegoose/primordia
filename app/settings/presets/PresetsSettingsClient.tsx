@@ -4,12 +4,17 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Edit3, Loader, Plus, ToggleLeft, ToggleRight, Trash2 } from "lucide-react";
 import { withBasePath } from "@/lib/base-path";
 import { PRESET_AUTH_SOURCE_LABELS, type EvolvePreset, type PresetAuthSource } from "@/lib/presets";
+import type { EvolvePresetWithAvailability } from "@/lib/preset-availability";
 import { firstModelForAuthSource, getHarnessesForAuthSource, filterModelsForAuthSource } from "@/lib/preset-options";
 import type { ModelOption } from "@/lib/agent-config";
 import { ModelPicker } from "@/components/ModelPicker";
 import { trackEvent } from "@/lib/events-client";
 
 const AUTH_SOURCES = Object.keys(PRESET_AUTH_SOURCE_LABELS) as PresetAuthSource[];
+
+function markAvailable(preset: EvolvePreset): EvolvePresetWithAvailability {
+  return { ...preset, available: true };
+}
 
 function emptyPreset(): EvolvePreset {
   return {
@@ -24,29 +29,32 @@ function emptyPreset(): EvolvePreset {
 function PresetCard({
   preset,
   disabled = false,
+  showDisabledPill = disabled,
   right,
 }: {
-  preset: EvolvePreset;
+  preset: EvolvePresetWithAvailability | EvolvePreset;
   disabled?: boolean;
+  showDisabledPill?: boolean;
   right?: ReactNode;
 }) {
+  const unavailable = 'available' in preset && !preset.available;
   return (
     <div
       className={`border rounded-xl overflow-hidden transition-colors ${
-        disabled ? "border-gray-700/50 opacity-60" : "border-gray-700"
+        disabled || unavailable ? "border-gray-700/50 opacity-60" : "border-gray-700"
       }`}
     >
       <div className="flex items-start gap-3 px-4 py-3 bg-gray-800/50">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-medium text-gray-100">{preset.name}</span>
-            {preset.builtIn && (
-              <span className="text-xs px-1.5 py-0.5 rounded bg-gray-700 text-gray-400">built-in</span>
-            )}
             {!preset.builtIn && (
               <span className="text-xs px-1.5 py-0.5 rounded bg-gray-700 text-gray-400">custom</span>
             )}
-            {disabled && (
+            {unavailable && preset.unavailableReason && (
+              <span className="text-xs px-1.5 py-0.5 rounded bg-amber-950/50 text-amber-400 border border-amber-900/50">{preset.unavailableReason}</span>
+            )}
+            {showDisabledPill && (
               <span className="text-xs px-1.5 py-0.5 rounded bg-gray-700 text-gray-500">disabled</span>
             )}
           </div>
@@ -61,9 +69,9 @@ function PresetCard({
 }
 
 export default function PresetsSettingsClient() {
-  const [builtIn, setBuiltIn] = useState<EvolvePreset[]>([]);
+  const [builtIn, setBuiltIn] = useState<EvolvePresetWithAvailability[]>([]);
   const [disabledBuiltInIds, setDisabledBuiltInIds] = useState<string[]>([]);
-  const [custom, setCustom] = useState<EvolvePreset[]>([]);
+  const [custom, setCustom] = useState<EvolvePresetWithAvailability[]>([]);
   const [editingIds, setEditingIds] = useState<Set<string>>(new Set());
   const [modelOptionsByHarness, setModelOptionsByHarness] = useState<Record<string, ModelOption[]>>({});
   const [savingTarget, setSavingTarget] = useState<string | null>(null);
@@ -72,7 +80,7 @@ export default function PresetsSettingsClient() {
   useEffect(() => {
     fetch(withBasePath('/api/settings/presets'))
       .then((r) => r.json())
-      .then((data: { builtInPresets?: EvolvePreset[]; customPresets?: EvolvePreset[]; disabledBuiltInPresetIds?: string[] }) => {
+      .then((data: { builtInPresets?: EvolvePresetWithAvailability[]; customPresets?: EvolvePresetWithAvailability[]; disabledBuiltInPresetIds?: string[] }) => {
         setBuiltIn(data.builtInPresets ?? []);
         setCustom(data.customPresets ?? []);
         setDisabledBuiltInIds(data.disabledBuiltInPresetIds ?? []);
@@ -137,9 +145,9 @@ export default function PresetsSettingsClient() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ customPresets: cleaned, disabledBuiltInPresetIds: nextDisabled }),
       });
-      const data = await res.json() as { customPresets?: EvolvePreset[]; disabledBuiltInPresetIds?: string[]; error?: string };
+      const data = await res.json() as { customPresets?: EvolvePresetWithAvailability[]; disabledBuiltInPresetIds?: string[]; error?: string };
       if (!res.ok) throw new Error(data.error ?? `Save failed: ${res.status}`);
-      setCustom(data.customPresets ?? cleaned);
+      setCustom(data.customPresets ?? cleaned.map(markAvailable));
       setDisabledBuiltInIds(data.disabledBuiltInPresetIds ?? nextDisabled);
       setEditingIds((prev) => {
         const next = new Set(prev);
@@ -163,7 +171,7 @@ export default function PresetsSettingsClient() {
 
   function addPreset() {
     const preset = emptyPreset();
-    setCustom((prev) => [...prev, preset]);
+    setCustom((prev) => [...prev, markAvailable(preset)]);
     editPreset(preset.id, true);
   }
 
@@ -185,6 +193,7 @@ export default function PresetsSettingsClient() {
                 key={p.id}
                 preset={p}
                 disabled={disabled}
+                showDisabledPill={disabled}
                 right={
                   <button
                     type="button"

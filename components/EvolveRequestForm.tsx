@@ -23,6 +23,7 @@ import {
   type CavemanIntensity,
 } from "../lib/agent-config";
 import { PRESET_AUTH_SOURCE_LABELS, type EvolvePreset, type PresetAuthSource } from "../lib/presets";
+import type { EvolvePresetWithAvailability } from "../lib/preset-availability";
 import { PageElementInspector, PageElementInfo, captureElementFiles } from "./PageElementInspector";
 import { useSounds } from "@/lib/sounds";
 import { trackEvent } from "@/lib/events-client";
@@ -152,9 +153,10 @@ export function EvolveRequestForm({
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [presets, setPresets] = useState<EvolvePreset[]>([]);
+  const [presets, setPresets] = useState<EvolvePresetWithAvailability[]>([]);
   const [selectedPresetId, setSelectedPresetId] = useState<string>("");
-  const selectedPreset = presets.find((p) => p.id === selectedPresetId) ?? presets[0] ?? {
+  const availablePresets = presets.filter((preset) => preset.available);
+  const selectedPreset = presets.find((p) => p.id === selectedPresetId && p.available) ?? availablePresets[0] ?? {
     id: 'fallback',
     name: 'Default',
     authSource: 'exe-dev-gateway' as PresetAuthSource,
@@ -171,10 +173,11 @@ export function EvolveRequestForm({
   useEffect(() => {
     fetch(withBasePath('/api/evolve/presets'))
       .then((r) => r.json())
-      .then((data: { presets?: EvolvePreset[]; selectedPresetId?: string | null }) => {
+      .then((data: { presets?: EvolvePresetWithAvailability[]; selectedPresetId?: string | null }) => {
         const nextPresets = data.presets ?? [];
+        const firstAvailable = nextPresets.find((preset) => preset.available);
         setPresets(nextPresets);
-        setSelectedPresetId(data.selectedPresetId ?? nextPresets[0]?.id ?? "");
+        setSelectedPresetId(data.selectedPresetId ?? firstAvailable?.id ?? "");
       })
       .catch(() => { /* fallback object keeps form usable */ });
   }, []);
@@ -370,7 +373,7 @@ export function EvolveRequestForm({
 
   // ── Render ────────────────────────────────────────────────────────────────
 
-  const isSubmitDisabled = isLoading || disabled || !input.trim() || presets.length === 0;
+  const isSubmitDisabled = isLoading || disabled || !input.trim() || availablePresets.length === 0;
   const buttonLabel =
     disabled && disabledLabel ? disabledLabel : isLoading ? "Submitting…" : submitLabel;
 
@@ -580,9 +583,13 @@ export function EvolveRequestForm({
                     className="flex-1 text-xs bg-gray-800 text-gray-200 border border-gray-700 rounded px-2 py-1.5 focus:outline-none focus:border-gray-500 disabled:opacity-50"
                   >
                     {presets.length === 0 ? (
+                      <option value={selectedPreset.id}>No presets</option>
+                    ) : availablePresets.length === 0 ? (
                       <option value={selectedPreset.id}>No available presets</option>
                     ) : presets.map((preset) => (
-                      <option key={preset.id} value={preset.id}>{preset.name}</option>
+                      <option key={preset.id} value={preset.id} disabled={!preset.available}>
+                        {preset.available ? preset.name : `${preset.name} — ${preset.unavailableReason ?? 'unavailable'}`}
+                      </option>
                     ))}
                   </select>
                 </div>
