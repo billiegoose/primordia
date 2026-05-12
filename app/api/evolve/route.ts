@@ -11,7 +11,8 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
-import { getLlmClient } from '../../../lib/llm-client';
+import { AuthStorage, ModelRegistry } from '@mariozechner/pi-coding-agent';
+import { complete, type UserMessage } from '@mariozechner/pi-ai';
 import { decryptApiKey, decryptHybridCredentials } from '../../../lib/llm-encryption';
 import {
   startLocalEvolve,
@@ -32,45 +33,120 @@ import {
 import { DEFAULT_HARNESS, DEFAULT_MODEL } from '../../../lib/agent-config';
 
 
-/** Ask Claude to choose a short, descriptive kebab-case slug for the request.
- *  Falls back to the first-4-words approach if the API call fails. */
-async function generateSlug(text: string): Promise<string> {
-  try {
-    const { client } = getLlmClient();
-    const response = await client.messages.create({
-      model: 'claude-haiku-4-5',
-      max_tokens: 32,
-      messages: [
-        {
-          role: 'user',
-          content:
-            `Generate a short kebab-case slug (2–4 words, lowercase, hyphens only) that ` +
-            `captures the essence of this feature request. Reply with only the slug, nothing else.\n\n` +
-            `Request: ${text}`,
-        },
-      ],
-    });
-    const block = response.content[0];
-    if (block.type === 'text') {
-      const cleaned = block.text
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9-]/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, '');
-      if (cleaned.length > 0) return cleaned;
-    }
-  } catch {
-    // Fall through to simple fallback
+const ANTHROPIC_GATEWAY_BASE_URL = 'http://169.254.169.254/gateway/llm/anthropic';
+const OPENAI_GATEWAY_BASE_URL = 'http://169.254.169.254/gateway/llm/openai';
+
+type SlugModelProvider = 'anthropic' | 'openai' | 'openai-codex' | 'openrouter';
+
+/** Infer the pi provider and strip any Primordia-only model ID namespace. */
+function normalizeSlugModelSelection(modelId: string): { provider: SlugModelProvider; modelId: string } {
+  if (modelId.startsWith('openai-codex:')) {
+    return { provider: 'openai-codex', modelId: modelId.slice('openai-codex:'.length) };
   }
-  // Fallback: first 4 words
+  if (modelId.startsWith('gpt-') || /^o\d/.test(modelId) || modelId.startsWith('codex-')) {
+    return { provider: 'openai', modelId };
+  }
+  if (modelId.includes('/')) return { provider: 'openrouter', modelId };
+  return { provider: 'anthropic', modelId };
+}
+
+function cleanGeneratedSlug(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+function fallbackSlug(text: string): string {
   return text
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, '')
     .trim()
     .split(/\s+/)
     .slice(0, 4)
-    .join('-');
+    .join('-') || 'evolve-session';
+}
+
+/** Ask the selected evolve model to choose a short, descriptive kebab-case slug for the request.
+ *  Uses the same auth source class selected for the evolve run when possible, and falls back
+ *  to a deterministic first-4-words slug if the model call fails. */
+async function generateSlug(
+  text: string,
+  model: string,
+  authSource: PresetAuthSource | null,
+  apiKey?: string,
+  chatGptOAuth?: string,
+): Promise<string> {
+  try {
+    const { provider, modelId } = normalizeSlugModelSelection(model);
+    const authStorage = AuthStorage.inMemory();
+
+    if (authSource === 'chatgpt-subscription' && provider === 'openai-codex' && chatGptOAuth) {
+      const stored = JSON.parse(chatGptOAuth) as {
+        tokens?: {
+          accessToken?: string;
+          refreshToken?: string;
+          accountId?: string | null;
+          accessTokenExpiresAt?: number | null;
+        };
+      };
+      const access = stored.tokens?.accessToken;
+      const refresh = stored.tokens?.refreshToken;
+      if (access && refresh) {
+        authStorage.set('openai-codex', {
+          type: 'oauth',
+          access,
+          refresh,
+          expires: stored.tokens?.accessTokenExpiresAt ?? 0,
+          accountId: stored.tokens?.accountId ?? undefined,
+        });
+      }
+    } else if (apiKey) {
+      authStorage.setRuntimeApiKey(provider, apiKey);
+    } else if (authSource === 'exe-dev-gateway' || authSource === 'claude-subscription' || authSource === null) {
+      // The exe.dev gateway handles Anthropic/OpenAI auth with any non-empty key.
+      authStorage.setRuntimeApiKey('anthropic', 'gateway');
+      authStorage.setRuntimeApiKey('openai', 'gateway');
+    }
+
+    const modelRegistry = ModelRegistry.create(authStorage);
+    if (!apiKey && (authSource === 'exe-dev-gateway' || authSource === 'claude-subscription' || authSource === null)) {
+      modelRegistry.registerProvider('anthropic', { baseUrl: ANTHROPIC_GATEWAY_BASE_URL });
+      modelRegistry.registerProvider('openai', { baseUrl: OPENAI_GATEWAY_BASE_URL });
+    }
+
+    const selectedModel = modelRegistry.find(provider, modelId);
+    if (!selectedModel) throw new Error(`Model '${modelId}' not found for provider '${provider}'`);
+
+    const auth = await modelRegistry.getApiKeyAndHeaders(selectedModel);
+    if (!auth.ok) throw new Error(auth.error);
+
+    const userMessage: UserMessage = {
+      role: 'user',
+      content:
+        `Generate a short kebab-case slug (2–4 words, lowercase, hyphens only) that ` +
+        `captures the essence of this feature request. Reply with only the slug, nothing else.\n\n` +
+        `Request: ${text}`,
+      timestamp: Date.now(),
+    };
+
+    const response = await complete(
+      selectedModel,
+      { messages: [userMessage] },
+      { apiKey: auth.apiKey, headers: auth.headers, maxTokens: 32 },
+    );
+    const generatedText = response.content
+      .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+      .map((block) => block.text)
+      .join('\n');
+    const cleaned = cleanGeneratedSlug(generatedText);
+    if (cleaned.length > 0) return cleaned;
+  } catch {
+    // Fall through to simple fallback.
+  }
+  return fallbackSlug(text);
 }
 
 /** Return a branch name that doesn't already exist in the repo.
@@ -251,7 +327,13 @@ export async function POST(request: Request) {
   }
 
   const repoRoot = process.cwd();
-  const slug = await generateSlug(requestText);
+  const slug = await generateSlug(
+    requestText,
+    model,
+    authSource,
+    decryptedApiKey,
+    decryptedChatGptOAuth,
+  );
   const branch = await findUniqueBranch(slug, repoRoot);
   const sessionId = branch;
 
