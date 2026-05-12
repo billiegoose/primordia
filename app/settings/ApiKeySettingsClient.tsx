@@ -35,7 +35,7 @@ function ComingSoonCard({ source, name, description }: {
   );
 }
 
-export default function ApiKeySettingsClient() {
+export default function ApiKeySettingsClient({ hideHeader = false }: { hideHeader?: boolean } = {}) {
   // Anthropic key state
   const [isKeySet, setIsKeySet] = useState(false);
   const [inputValue, setInputValue] = useState("");
@@ -181,18 +181,20 @@ export default function ApiKeySettingsClient() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-3">
-        <div>
-          <h2 className="text-base font-medium text-gray-200 mb-1">API Keys</h2>
-          <p className="text-sm text-gray-400 leading-relaxed">
-            Connect your own AI provider keys to use them for evolve requests.
-            Keys are encrypted in your browser and never stored in plaintext.
+      {!hideHeader && (
+        <div className="flex flex-col gap-3">
+          <div>
+            <h2 className="text-base font-medium text-gray-200 mb-1">API Keys</h2>
+            <p className="text-sm text-gray-400 leading-relaxed">
+              Connect your own AI provider keys to use them for evolve requests.
+              Keys are encrypted in your browser and never stored in plaintext.
+            </p>
+          </div>
+          <p className="text-xs text-gray-500 leading-relaxed">
+            Saved keys become billing sources you can choose explicitly in Evolve presets.
           </p>
         </div>
-        <p className="text-xs text-gray-500 leading-relaxed">
-          Saved keys become billing sources you can choose explicitly in Evolve presets.
-        </p>
-      </div>
+      )}
 
       {/* Anthropic — fully functional */}
       <div className="rounded-xl border border-gray-700 bg-gray-900 p-5 flex flex-col gap-4">

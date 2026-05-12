@@ -5,12 +5,12 @@ import { getEvolvePrefs } from "@/lib/user-prefs";
 import { buildPageTitle } from "@/lib/page-title";
 import { PageNavBar } from "@/components/PageNavBar";
 import SettingsSubNav from "@/components/SettingsSubNav";
-import ApiKeySettingsClient from "./ApiKeySettingsClient";
+import BillingSourcesSettingsClient from "./BillingSourcesSettingsClient";
 
 export function generateMetadata(): Metadata {
   return {
     title: buildPageTitle("Account Settings"),
-    description: "Manage your personal API keys and authentication settings.",
+    description: "Manage your personal billing sources and authentication settings.",
   };
 }
 
@@ -28,9 +28,9 @@ export default async function SettingsPage() {
     <main className="flex flex-col w-full max-w-5xl mx-auto px-4 py-6 min-h-dvh">
       <PageNavBar subtitle="Account Settings" currentPage="settings" initialSession={sessionUser} initialHarness={evolvePrefs.initialHarness} initialModel={evolvePrefs.initialModel} initialCavemanMode={evolvePrefs.initialCavemanMode} initialCavemanIntensity={evolvePrefs.initialCavemanIntensity} />
       <div className="flex flex-col lg:flex-row gap-4 lg:gap-8 items-start mt-2">
-        <SettingsSubNav currentTab="api-key" />
+        <SettingsSubNav currentTab="billing-sources" />
         <div className="flex-1 min-w-0">
-          <ApiKeySettingsClient />
+          <BillingSourcesSettingsClient />
         </div>
       </div>
     </main>
