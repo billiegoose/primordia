@@ -5,8 +5,8 @@
 // Streams live Claude Code progress via SSE from /api/evolve/stream.
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { GitBranch, Loader2, FileText, Copy, Check, RotateCw, Key } from "lucide-react";
-import { ClaudeIcon } from "@/components/brand-icons/ClaudeIcon";
+import { GitBranch, Loader2, FileText, Copy, Check, RotateCw } from "lucide-react";
+import { AgentIdentityLine } from "@/components/AgentIdentity";
 import { AnsiRenderer } from "@/components/AnsiRenderer";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { NavHeader } from "@/components/NavHeader";
@@ -15,9 +15,9 @@ import { FloatingEvolveDialog, EvolveSubmitToast } from "@/components/FloatingEv
 import { HamburgerMenu, buildStandardMenuItems } from "@/components/HamburgerMenu";
 import { useSessionUser } from "@/lib/hooks";
 import { withBasePath } from "@/lib/base-path";
-import { encryptStoredApiKey, encryptStoredOpenRouterApiKey } from "@/lib/api-key-client";
+import { appendCredentialFieldsForAuthSource, getCredentialFieldsForAuthSource } from "@/lib/preset-credentials-client";
 import { useSounds } from "@/lib/sounds";
-import { encryptStoredCredentials, updateStoredCredentials } from "@/lib/credentials-client";
+import { updateStoredCredentials } from "@/lib/credentials-client";
 import { EvolveRequestForm } from "@/components/EvolveRequestForm";
 import Link from "next/link";
 import type { DiffFileSummary } from "./page";
@@ -25,7 +25,9 @@ import { DiffFileExpander } from "./DiffFileExpander";
 import { WebPreviewPanel, type ElementSelection } from "./WebPreviewPanel";
 import HorizontalResizeHandle from "./HorizontalResizeHandle";
 import type { SessionEvent, AgentAuthInfo } from "@/lib/session-events";
+import { convertUtcTimeToLocal } from "@/lib/utc-to-local-time";
 import { HARNESS_OPTIONS, type ModelOption } from "@/lib/agent-config";
+import { normalizeAuthSource, type PresetAuthSource } from "@/lib/presets";
 import { deriveSmartPreviewUrl } from "@/lib/smart-preview-url";
 import { trackEvent } from "@/lib/events-client";
 
@@ -45,8 +47,9 @@ function formatDuration(ms: number): string {
   return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
 }
 
-function MetricsRow({ metrics }: { metrics: SectionMetrics }) {
-  const { durationMs, costUsd, inputTokens, outputTokens } = metrics;
+function MetricsRow({ metrics, hideCost = false }: { metrics: SectionMetrics; hideCost?: boolean }) {
+  const { durationMs, inputTokens, outputTokens } = metrics;
+  const costUsd = hideCost ? undefined : metrics.costUsd;
   const hasAny = durationMs != null || costUsd != null || inputTokens != null || outputTokens != null;
   if (!hasAny) return null;
   return (
@@ -88,7 +91,9 @@ interface SectionGroup {
   /** Stable IDs for harness/model — used by the follow-up form to populate selects correctly. */
   harnessId?: string;
   modelId?: string;
-  /** Auth source recorded in the section_start event for this agent run. */
+  /** Auth source recorded from the request event for this agent run. */
+  authSource?: PresetAuthSource;
+  /** Coarse auth source recorded in the section_start event for this agent run. */
   auth?: AgentAuthInfo;
   /** Unix ms timestamp from the section_start event — used for live elapsed-time display. */
   startTs?: number;
@@ -98,7 +103,11 @@ interface SectionGroup {
 /** Group a flat list of SessionEvents into display sections. */
 function groupEventsIntoSections(events: SessionEvent[]): SectionGroup[] {
   const sections: SectionGroup[] = [{ type: 'setup', label: 'Setup', events: [] }];
+  let pendingAuthSource: PresetAuthSource | undefined;
   for (const event of events) {
+    if ((event.type === 'initial_request' || event.type === 'followup_request') && typeof event.authSource === 'string') {
+      pendingAuthSource = normalizeAuthSource(event.authSource) ?? pendingAuthSource;
+    }
     if (event.type === 'section_start') {
       const group: SectionGroup = { type: event.sectionType, label: event.label, events: [], startTs: event.ts };
       if (event.sectionType === 'agent') {
@@ -106,6 +115,7 @@ function groupEventsIntoSections(events: SessionEvent[]): SectionGroup[] {
         group.model = event.model;
         group.harnessId = event.harnessId;
         group.modelId = event.modelId;
+        group.authSource = pendingAuthSource;
         group.auth = event.auth;
       }
       sections.push(group);
@@ -251,24 +261,27 @@ function ThinkingBlock({
   startTs?: number;
   endTs?: number;
 }) {
+  const hasVisibleThinking = content.trim().length > 0;
   const label = isStreaming
-    ? '🧠 Thinking...'
+    ? (hasVisibleThinking ? '🧠 Thinking...' : '🧠 Thinking privately...')
     : (startTs != null && endTs != null)
-      ? `🧠 Thought for ${formatThinkDuration(startTs, endTs)}`
-      : '🧠 Thinking';
+      ? `🧠 ${hasVisibleThinking ? 'Thought' : 'Thought privately'} for ${formatThinkDuration(startTs, endTs)}`
+      : (hasVisibleThinking ? '🧠 Thinking' : '🧠 Thinking privately');
   return (
     <details className="group/thinking my-1">
       <summary className="flex items-center gap-1.5 text-xs cursor-pointer select-none list-none">
         <span className="inline-block group-open/thinking:rotate-90 transition-transform text-gray-600">▶</span>
         <span className="text-gray-500">{label}</span>
       </summary>
-      {content ? (
+      {hasVisibleThinking ? (
         <div className="mt-1 ml-4 pl-3 border-l border-gray-800 text-xs text-gray-500 font-mono whitespace-pre-wrap break-words leading-relaxed max-h-96 overflow-y-auto">
           {content}
         </div>
       ) : (
         <div className="mt-1 ml-4 pl-3 border-l border-gray-800 text-xs text-gray-600 italic">
-          {isStreaming ? 'Thinking...' : 'No content'}
+          {isStreaming
+            ? 'The model is reasoning, but this provider has not exposed reasoning text for this block yet.'
+            : 'The model reasoned during this step, but this provider did not expose the reasoning text.'}
         </div>
       )}
     </details>
@@ -299,31 +312,8 @@ function splitAgentEventsForDisplay(events: SessionEvent[]): {
   };
 }
 
-/**
- * Small icon badge shown next to the agent name indicating which auth source
- * was used for the run. Nothing is rendered for the exe.dev gateway (default).
- */
-function AgentAuthBadge({ auth }: { auth?: AgentAuthInfo }) {
-  if (!auth || auth.source === 'llm-gateway') return null;
-  if (auth.source === 'api-key') {
-    return (
-      <span title="Used API Key" className="inline-flex items-center text-amber-400/70 hover:text-amber-400 transition-colors cursor-default">
-        <Key size={11} strokeWidth={2.5} aria-label="Used API Key" />
-      </span>
-    );
-  }
-  if (auth.source === 'claude-credentials') {
-    return (
-      <span title="Used claude.ai login" className="inline-flex items-center text-sky-400/70 hover:text-sky-400 transition-colors cursor-default">
-        <ClaudeIcon size={16} />
-      </span>
-    );
-  }
-  return null;
-}
-
 /** Render a running agent/type-fix/auto-commit section (streaming events live). */
-function RunningAgentSection({ events, label, isTypeFixSection, isAutoCommitSection, worktreePath, harness, model, auth, startTs }: {
+function RunningAgentSection({ events, label, isTypeFixSection, isAutoCommitSection, worktreePath, harness, model, authSource, auth, startTs }: {
   events: SessionEvent[];
   label: string;
   isTypeFixSection: boolean;
@@ -331,13 +321,13 @@ function RunningAgentSection({ events, label, isTypeFixSection, isAutoCommitSect
   worktreePath?: string;
   harness?: string;
   model?: string;
+  authSource?: PresetAuthSource;
   auth?: AgentAuthInfo;
   startTs?: number;
 }) {
   const borderClass = isAutoCommitSection ? "border-green-700/50" : isTypeFixSection ? "border-orange-700/50" : "border-blue-700/50";
   const headingClass = isAutoCommitSection ? "text-green-300" : isTypeFixSection ? "text-orange-300" : "text-blue-300";
-  const agentLabel = harness ? (model ? `${harness} (${model})` : harness) : 'Claude Code';
-  const runningLabel = (isTypeFixSection || isAutoCommitSection) ? label : `🤖 ${agentLabel} running…`;
+  const runningLabel = (isTypeFixSection || isAutoCommitSection) ? label : null;
 
   // Live elapsed-time counter updated every second.
   const [elapsed, setElapsed] = useState<number>(startTs ? Date.now() - startTs : 0);
@@ -354,9 +344,13 @@ function RunningAgentSection({ events, label, isTypeFixSection, isAutoCommitSect
   return (
     <div className={`rounded-lg border ${borderClass} bg-gray-900 text-sm overflow-hidden`}>
       <div className="px-4 py-2.5 border-b border-gray-800 flex items-center gap-2">
-        <span className={`font-semibold text-xs ${headingClass}`}>{runningLabel}</span>
-        {!isTypeFixSection && !isAutoCommitSection && <AgentAuthBadge auth={auth} />}
+        {runningLabel ? (
+          <span className={`font-semibold text-xs ${headingClass}`}>{runningLabel}</span>
+        ) : (
+          <AgentIdentityLine authSource={authSource} auth={auth} harness={harness} model={model} className={`font-semibold text-xs ${headingClass}`} />
+        )}
         <span className="ml-auto flex items-center gap-1.5 text-gray-500 text-xs">
+          {!runningLabel && <span>running…</span>}
           <span className="flex items-center gap-1.5 animate-pulse">
             <span className="w-1.5 h-1.5 rounded-full bg-current inline-block" />
           </span>
@@ -395,19 +389,22 @@ function RunningAgentSection({ events, label, isTypeFixSection, isAutoCommitSect
         })}
       </div>
       {latestMetrics && (
-        <MetricsRow metrics={{
-          durationMs: elapsed > 0 ? elapsed : (latestMetrics.durationMs ?? undefined),
-          costUsd: latestMetrics.costUsd ?? undefined,
-          inputTokens: latestMetrics.inputTokens ?? undefined,
-          outputTokens: latestMetrics.outputTokens ?? undefined,
-        }} />
+        <MetricsRow
+          hideCost={auth?.source === 'chatgpt-subscription'}
+          metrics={{
+            durationMs: elapsed > 0 ? elapsed : (latestMetrics.durationMs ?? undefined),
+            costUsd: latestMetrics.costUsd ?? undefined,
+            inputTokens: latestMetrics.inputTokens ?? undefined,
+            outputTokens: latestMetrics.outputTokens ?? undefined,
+          }}
+        />
       )}
     </div>
   );
 }
 
 /** Render a completed agent/type-fix/auto-commit section with tool calls collapsed. */
-function DoneAgentSection({ events, label, isTypeFixSection, isAutoCommitSection, worktreePath, harness, model, auth, startTs }: {
+function DoneAgentSection({ events, label, isTypeFixSection, isAutoCommitSection, worktreePath, harness, model, authSource, auth, startTs }: {
   events: SessionEvent[];
   label: string;
   isTypeFixSection: boolean;
@@ -415,6 +412,7 @@ function DoneAgentSection({ events, label, isTypeFixSection, isAutoCommitSection
   worktreePath?: string;
   harness?: string;
   model?: string;
+  authSource?: PresetAuthSource;
   auth?: AgentAuthInfo;
   startTs?: number;
 }) {
@@ -425,22 +423,32 @@ function DoneAgentSection({ events, label, isTypeFixSection, isAutoCommitSection
   const metricsEvent = [...events].reverse().find((e): e is Extract<SessionEvent, { type: 'metrics' }> => e.type === 'metrics');
   const hasError = resultEvent?.subtype === 'error' || resultEvent?.subtype === 'timeout' || resultEvent?.subtype === 'aborted';
 
+  // Convert UTC time in error message to local timezone (client-side only to avoid SSR hydration mismatch)
+  const [convertedMessage, setConvertedMessage] = useState<string | null>(null);
+  useEffect(() => {
+    if (hasError && resultEvent?.message) {
+      setConvertedMessage(convertUtcTimeToLocal(resultEvent.message));
+    } else {
+      setConvertedMessage(null);
+    }
+  }, [hasError, resultEvent?.message]);
+
   const borderClass = isAutoCommitSection ? "border-green-700/50" : isTypeFixSection ? "border-orange-700/50" : "border-blue-700/50";
   const headingClass = isAutoCommitSection ? "text-green-300" : isTypeFixSection ? "text-orange-300" : "text-blue-300";
   const doneBorderClass = hasError ? "border-red-700/50" : borderClass;
   const doneHeadingClass = hasError ? "text-red-400" : headingClass;
-  const agentLabel = harness ? (model ? `${harness} (${model})` : harness) : 'Claude Code';
   const doneTitle = hasError
-    ? (isAutoCommitSection ? "❌ Auto-commit failed" : isTypeFixSection ? "❌ Auto-fix failed" : `❌ ${agentLabel} errored`)
-    : (isAutoCommitSection ? "📦 Unstaged changes committed" : isTypeFixSection ? "🔧 Type errors fixed" : `🤖 ${agentLabel} finished`);
+    ? (isAutoCommitSection ? "❌ Auto-commit failed" : isTypeFixSection ? "❌ Auto-fix failed" : "❌")
+    : (isAutoCommitSection ? "📦 Unstaged changes committed" : isTypeFixSection ? "🔧 Type errors fixed" : null);
 
   const { detailEvents, finalEvents, toolCallCount } = splitAgentEventsForDisplay(events);
 
   return (
     <div className={`rounded-lg border ${doneBorderClass} bg-gray-900 text-sm overflow-hidden`}>
       <div className="px-4 py-2.5 border-b border-gray-800 flex items-center gap-2">
-        <span className={`font-semibold text-xs ${doneHeadingClass}`}>{doneTitle}</span>
-        {!isTypeFixSection && !isAutoCommitSection && <AgentAuthBadge auth={auth} />}
+        {doneTitle ? <span className={`font-semibold text-xs ${doneHeadingClass}`}>{doneTitle}</span> : null}
+        {!isTypeFixSection && !isAutoCommitSection && <AgentIdentityLine authSource={authSource} auth={auth} harness={harness} model={model} className={`font-semibold text-xs ${doneHeadingClass}`} />}
+        {!isTypeFixSection && !isAutoCommitSection && <span className="ml-auto text-xs text-gray-500">{hasError ? "errored" : "finished"}</span>}
       </div>
       {toolCallCount > 0 && (
         <details className="group border-b border-gray-800">
@@ -490,23 +498,26 @@ function DoneAgentSection({ events, label, isTypeFixSection, isAutoCommitSection
           })}
         </div>
       )}
-      {hasError && resultEvent?.message && (
+      {hasError && convertedMessage && (
         <div className="px-4 py-3 border-t border-gray-800">
           <p className="text-xs font-semibold text-red-400 mb-1">Error details</p>
-          <pre className="text-xs text-red-300 whitespace-pre-wrap break-all font-mono bg-red-950/30 rounded p-2">{resultEvent.message}</pre>
+          <pre className="text-xs text-red-300 whitespace-pre-wrap break-all font-mono bg-red-950/30 rounded p-2">{convertedMessage}</pre>
         </div>
       )}
       {metricsEvent && (
-        <MetricsRow metrics={{
-          // Prefer the recorded durationMs; fall back to computing from
-          // section_start → result timestamps when durationMs is null/0.
-          durationMs: (metricsEvent.durationMs != null && metricsEvent.durationMs > 0)
-            ? metricsEvent.durationMs
-            : (startTs != null && resultEvent != null ? resultEvent.ts - startTs : undefined),
-          costUsd: metricsEvent.costUsd ?? undefined,
-          inputTokens: metricsEvent.inputTokens ?? undefined,
-          outputTokens: metricsEvent.outputTokens ?? undefined,
-        }} />
+        <MetricsRow
+          hideCost={auth?.source === 'chatgpt-subscription'}
+          metrics={{
+            // Prefer the recorded durationMs; fall back to computing from
+            // section_start → result timestamps when durationMs is null/0.
+            durationMs: (metricsEvent.durationMs != null && metricsEvent.durationMs > 0)
+              ? metricsEvent.durationMs
+              : (startTs != null && resultEvent != null ? resultEvent.ts - startTs : undefined),
+            costUsd: metricsEvent.costUsd ?? undefined,
+            inputTokens: metricsEvent.inputTokens ?? undefined,
+            outputTokens: metricsEvent.outputTokens ?? undefined,
+          }}
+        />
       )}
     </div>
   );
@@ -576,8 +587,8 @@ function StructuredSection({
         )}
         {agentEvents.length > 0 && (
           isActive && !hasResult
-            ? <RunningAgentSection events={agentEvents} label={label} isTypeFixSection={false} isAutoCommitSection={false} worktreePath={worktreePath} harness={harness} model={model} auth={section.auth} startTs={startTs} />
-            : <DoneAgentSection events={agentEvents} label={label} isTypeFixSection={false} isAutoCommitSection={false} worktreePath={worktreePath} harness={harness} model={model} auth={section.auth} startTs={startTs} />
+            ? <RunningAgentSection events={agentEvents} label={label} isTypeFixSection={false} isAutoCommitSection={false} worktreePath={worktreePath} harness={harness} model={model} authSource={section.authSource} auth={section.auth} startTs={startTs} />
+            : <DoneAgentSection events={agentEvents} label={label} isTypeFixSection={false} isAutoCommitSection={false} worktreePath={worktreePath} harness={harness} model={model} authSource={section.authSource} auth={section.auth} startTs={startTs} />
         )}
       </>
     );
@@ -587,9 +598,9 @@ function StructuredSection({
   if (type === 'agent' || type === 'claude' || type === 'type_fix' || type === 'auto_commit' || type === 'conflict_resolution') {
     const hasResult = events.some((e) => e.type === 'result');
     if (isActive && !hasResult) {
-      return <RunningAgentSection events={events} label={label} isTypeFixSection={type === 'type_fix'} isAutoCommitSection={type === 'auto_commit'} worktreePath={worktreePath} harness={harness} model={model} auth={section.auth} startTs={startTs} />;
+      return <RunningAgentSection events={events} label={label} isTypeFixSection={type === 'type_fix'} isAutoCommitSection={type === 'auto_commit'} worktreePath={worktreePath} harness={harness} model={model} authSource={section.authSource} auth={section.auth} startTs={startTs} />;
     }
-    return <DoneAgentSection events={events} label={label} isTypeFixSection={type === 'type_fix'} isAutoCommitSection={type === 'auto_commit'} worktreePath={worktreePath} harness={harness} model={model} auth={section.auth} startTs={startTs} />;
+    return <DoneAgentSection events={events} label={label} isTypeFixSection={type === 'type_fix'} isAutoCommitSection={type === 'auto_commit'} worktreePath={worktreePath} harness={harness} model={model} authSource={section.authSource} auth={section.auth} startTs={startTs} />;
   }
 
   // ── Deploy ───────────────────────────────────────────────────────────────
@@ -731,11 +742,37 @@ function WebPreviewCard({
 
       {/* Iframe / placeholder area */}
       <div className={fullHeight ? 'flex-1 min-h-0' : ''}>
-        {proxyServerStatus === 'running' && previewUrl ? (
+        {previewUrl ? (
           <WebPreviewPanel
             src={previewUrl}
             sessionId={cardSessionId}
             fullHeight={fullHeight}
+            serverRunning={proxyServerStatus === 'running'}
+            offlineContent={(
+              <div className="flex h-full flex-col items-center justify-center gap-4">
+                {proxyServerStatus === 'starting' ? (
+                  <>
+                    <div className="w-20 h-20 rounded-full border-2 border-yellow-600 text-yellow-400 flex items-center justify-center animate-pulse">
+                      <span className="text-3xl ml-1">▶</span>
+                    </div>
+                    <span className="text-sm text-yellow-600 animate-pulse">Starting preview…</span>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      data-id="session/start-preview"
+                      type="button"
+                      onClick={onRestartServer}
+                      disabled={isRestartingServer}
+                      className="w-20 h-20 rounded-full border-2 border-gray-500 hover:border-white text-gray-400 hover:text-white flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <span className="text-3xl ml-1">▶</span>
+                    </button>
+                    <span className="text-sm text-gray-400">Start Preview</span>
+                  </>
+                )}
+              </div>
+            )}
             onElementSelected={onElementSelected}
           />
         ) : (
@@ -831,6 +868,32 @@ interface EvolveSessionViewProps {
 }
 
 // ─── CopyBranchName ──────────────────────────────────────────────────────────
+
+function getSessionCredentialAuthSource(events: SessionEvent[], sessionModel?: string): PresetAuthSource | null {
+  for (const event of [...events].reverse()) {
+    if ((event.type === 'followup_request' || event.type === 'initial_request') && 'authSource' in event) {
+      const authSource = typeof event.authSource === 'string' ? normalizeAuthSource(event.authSource) : null;
+      if (authSource) return authSource;
+    }
+  }
+
+  // Legacy sessions did not record the preset auth source. Fall back to the
+  // coarse auth metadata from the last agent run, then to model-shape heuristics.
+  const lastAgent = [...events].reverse().find(
+    (event): event is Extract<SessionEvent, { type: 'section_start'; sectionType: 'agent' }> =>
+      event.type === 'section_start' && event.sectionType === 'agent',
+  );
+  if (lastAgent?.auth?.source === 'claude-credentials') return 'claude-subscription';
+  if (lastAgent?.auth?.source === 'chatgpt-subscription') return 'chatgpt-subscription';
+  if (lastAgent?.auth?.source === 'llm-gateway') return 'exe-dev-gateway';
+  if (lastAgent?.auth?.source === 'api-key') {
+    const model = lastAgent.modelId ?? sessionModel ?? '';
+    if (model.includes('/')) return 'openrouter-api-key';
+    if (model.startsWith('openai') || model.startsWith('gpt-') || model.includes('gpt')) return 'openai-api-key';
+    return 'anthropic-api-key';
+  }
+  return null;
+}
 
 function CopyBranchName({ branch }: { branch: string }) {
   const [copied, setCopied] = useState(false);
@@ -1298,21 +1361,12 @@ export default function EvolveSessionView({
     setAcceptRejectLoading(true);
     setAcceptRejectError(null);
     try {
-      // Attach credentials so the server can forward them to any agent sessions
-      // spawned during accept (type-fix, auto-commit). Try credentials first
-      // (claude-code harness); OpenRouter models use the OpenRouter key;
-      // everything else uses the Anthropic key.
+      // Attach only the credential selected by the session's most recent preset
+      // so accept-time agent passes (type-fix, auto-commit) use the same billing
+      // source as the evolve/follow-up run they are completing.
       const acceptBody: Record<string, string> = { action: 'accept', sessionId };
-      const encCreds = await encryptStoredCredentials();
-      if (encCreds) {
-        acceptBody.encryptedCredentials = JSON.stringify(encCreds);
-      } else {
-        const isOpenRouterModel = sessionModel?.includes('/') ?? false;
-        const encKey = isOpenRouterModel
-          ? await encryptStoredOpenRouterApiKey()
-          : await encryptStoredApiKey();
-        if (encKey) acceptBody.encryptedApiKey = encKey;
-      }
+      if (sessionCredentialAuthSource) acceptBody.authSource = sessionCredentialAuthSource;
+      Object.assign(acceptBody, await getCredentialFieldsForAuthSource(sessionCredentialAuthSource));
       const res = await fetch(withBasePath('/api/evolve/manage'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1431,17 +1485,22 @@ export default function EvolveSessionView({
     status === "rejected" ||
     status === "ready";
 
+  /**
+   * Preview URL is deterministic from the session ID. Keep a fallback so the
+   * toolbar/open-in-new-tab control remains available even if the dev server is
+   * currently stopped and no live previewUrl has been persisted yet.
+   */
+  const effectivePreviewUrl = previewUrl ?? `/preview/${sessionId}`;
+
   /** Whether to show the preview as a desktop sidebar. */
-  const showPreviewSidebar = status === "ready" && !!previewUrl;
+  const showPreviewSidebar = status === "ready";
 
   /**
    * The URL to open in the Web Preview panel when it first becomes available.
    * Derived once from the initial request so the preview starts on the most
    * relevant page rather than always defaulting to the landing page.
    */
-  const smartPreviewUrl = previewUrl
-    ? deriveSmartPreviewUrl(events, previewUrl)
-    : null;
+  const smartPreviewUrl = deriveSmartPreviewUrl(events, effectivePreviewUrl);
 
   /** Width of the session (left) panel in pixels when sidebar is visible. */
   const [mainWidthPx, setMainWidthPx] = useState(560);
@@ -1472,6 +1531,7 @@ export default function EvolveSessionView({
     ?? (lastAgentSection?.model && sessionHarness
       ? modelOptionsByHarness[sessionHarness]?.find((m) => m.label === lastAgentSection.model)?.id
       : undefined);
+  const sessionCredentialAuthSource = getSessionCredentialAuthSource(events, sessionModel);
   // Human-readable agent label for UI messages like "Waiting for X to finish…"
   // Label for the *currently running* agent — derived from the active section
   // (last content section while the pipeline is running). This is correct even
@@ -1850,7 +1910,7 @@ export default function EvolveSessionView({
                 autoFocus
                 defaultHarness={sessionHarness}
                 defaultModel={sessionModel}
-                onSubmit={async ({ request, harness, model, files }) => {
+                onSubmit={async ({ request, harness, model, authSource, presetId, files }) => {
                   // Prepend element context to the request when present.
                   let fullRequest = request;
                   if (elementContext) {
@@ -1862,20 +1922,10 @@ export default function EvolveSessionView({
                   formData.append('request', fullRequest);
                   formData.append('harness', harness);
                   formData.append('model', model);
+                  formData.append('presetId', presetId);
+                  formData.append('authSource', authSource);
                   for (const file of files) formData.append('attachments', file);
-                  // Only one auth token is ever sent. Credentials are only
-                  // meaningful for the claude-code harness; OpenRouter models
-                  // (id contains '/') use the OpenRouter key; others use Anthropic.
-                  if (harness === 'claude-code') {
-                    const encryptedCredentials = await encryptStoredCredentials();
-                    if (encryptedCredentials) formData.append('encryptedCredentials', JSON.stringify(encryptedCredentials));
-                  } else if (model.includes('/')) {
-                    const encryptedApiKey = await encryptStoredOpenRouterApiKey();
-                    if (encryptedApiKey) formData.append('encryptedApiKey', encryptedApiKey);
-                  } else {
-                    const encryptedApiKey = await encryptStoredApiKey();
-                    if (encryptedApiKey) formData.append('encryptedApiKey', encryptedApiKey);
-                  }
+                  await appendCredentialFieldsForAuthSource(formData, authSource);
                   const res = await fetch(withBasePath('/api/evolve/followup'), {
                     method: 'POST',
                     body: formData,

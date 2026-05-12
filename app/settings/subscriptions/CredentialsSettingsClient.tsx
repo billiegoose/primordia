@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { ExternalLink, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
-import { ClaudeIcon } from "@/components/brand-icons/ClaudeIcon";
-import { hasStoredCredentials, setStoredCredentials, clearOrphanedCredentialsKey } from "@/lib/credentials-client";
+import { useMemo, useState, useEffect, useRef } from "react";
+import { Check, ChevronDown, ChevronRight, Copy, ExternalLink, Loader2, Key, EyeOff } from "lucide-react";
+import { AuthSourceIcon } from "@/components/AgentIdentity";
+import { setStoredCredentials } from "@/lib/credentials-client";
+import { decryptStoredSecretPayload } from "@/lib/secrets-client";
 import { withBasePath } from "@/lib/base-path";
 import { trackEvent } from "@/lib/events-client";
+import { useDecryptEffect, generateScramble } from "@/lib/use-decrypt-effect";
 
 type Step =
   | { kind: "idle" }
@@ -15,31 +17,51 @@ type Step =
   | { kind: "done" }
   | { kind: "error"; message: string };
 
-export default function CredentialsSettingsClient() {
-  const [isSet, setIsSet] = useState(false);
+export default function CredentialsSettingsClient({ initialCiphertext }: { initialCiphertext?: string | null }) {
+  const [isSet, setIsSet] = useState(Boolean(initialCiphertext));
+  const [storedValue, setStoredValue] = useState<string | null>(null);
+  const [credRevealed, setCredRevealed] = useState(false);
   const [step, setStep] = useState<Step>({ kind: "idle" });
   const [code, setCode] = useState("");
-  const [showPaste, setShowPaste] = useState(false);
   const [pasteValue, setPasteValue] = useState("");
   const [pasteError, setPasteError] = useState<string | null>(null);
   const [pasteSaved, setPasteSaved] = useState(false);
   const [pasteLoading, setPasteLoading] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [copiedCredentials, setCopiedCredentials] = useState(false);
   const sessionIdRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    async function checkStatus() {
-      if (!hasStoredCredentials()) { setIsSet(false); return; }
-      try {
-        const res = await fetch(withBasePath('/api/secrets/CLAUDE_CODE_CREDENTIALS_JSON'));
-        if (res.ok) {
-          const data = (await res.json()) as { ciphertext: string | null };
-          if (!data.ciphertext) { clearOrphanedCredentialsKey(); setIsSet(false); return; }
-        }
-      } catch {}
-      setIsSet(true);
+  const { displayValue: decryptDisplay, isDecrypting, decrypt } = useDecryptEffect({
+    duration: 1000,
+    onComplete: () => setCredRevealed(true),
+  });
+
+  const prettyStoredCredentials = useMemo(() => {
+    if (!storedValue) return "";
+    try {
+      return JSON.stringify(JSON.parse(storedValue), null, 2);
+    } catch {
+      return storedValue;
     }
-    void checkStatus();
-  }, []);
+  }, [storedValue]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function decryptInitialCredentials() {
+      const val = await decryptStoredSecretPayload(initialCiphertext);
+      if (cancelled || !val) return;
+      setIsSet(true);
+      setStoredValue(val);
+      setCredRevealed(false);
+      setPasteValue("");
+    }
+
+    void decryptInitialCredentials();
+    return () => {
+      cancelled = true;
+    };
+  }, [initialCiphertext]);
 
   useEffect(() => {
     return () => {
@@ -84,6 +106,9 @@ export default function CredentialsSettingsClient() {
       await setStoredCredentials(credentials);
       trackEvent("settings/claude-auth-completed/v1", {});
       setIsSet(true);
+      setStoredValue(credentials);
+      setCredRevealed(false);
+      setPasteValue("");
       setStep({ kind: "done" });
     } catch (e) {
       setStep({ kind: "error", message: e instanceof Error ? e.message : "Failed to complete authentication." });
@@ -104,11 +129,22 @@ export default function CredentialsSettingsClient() {
     setCode("");
   }
 
+  async function copyCredentials() {
+    try {
+      await navigator.clipboard.writeText(prettyStoredCredentials);
+      setCopiedCredentials(true);
+      setTimeout(() => setCopiedCredentials(false), 2000);
+    } catch {}
+  }
+
   async function clearCredentials() {
     try {
       await setStoredCredentials(null);
       trackEvent("settings/credentials-cleared/v1", {});
       setIsSet(false);
+      setStoredValue(null);
+      setCredRevealed(false);
+      setPasteValue("");
       setStep({ kind: "idle" });
     } catch {}
   }
@@ -133,6 +169,8 @@ export default function CredentialsSettingsClient() {
       await setStoredCredentials(result.value);
       trackEvent("settings/credentials-saved/v1", {});
       setIsSet(true);
+      setStoredValue(result.value);
+      setCredRevealed(false);
       setPasteValue("");
       setPasteSaved(true);
       setStep({ kind: "done" });
@@ -144,33 +182,22 @@ export default function CredentialsSettingsClient() {
     }
   }
 
+  const storedCredentialsDisplay = isDecrypting
+    ? decryptDisplay
+    : credRevealed
+    ? prettyStoredCredentials
+    : generateScramble(prettyStoredCredentials);
+  const showStoredCredentials = isDecrypting || credRevealed;
+
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-3">
-        <div>
-          <h2 className="text-base font-medium text-gray-200 mb-1">Claude.ai Subscription</h2>
-          <p className="text-sm text-gray-400 leading-relaxed">
-            Sign in with your Claude.ai account to use your subscription for evolve requests.
-            Credentials are encrypted in your browser — the encryption key never leaves your device(s).
-          </p>
-        </div>
-        <div className="flex items-center gap-1.5 flex-wrap text-xs">
-          <span className="px-1.5 py-0.5 rounded bg-sky-900/30 text-sky-400 border border-sky-800/40 font-medium">Claude.ai</span>
-          <span className="text-gray-600">›</span>
-          <span className="px-1.5 py-0.5 rounded bg-amber-900/20 text-amber-500/80 border border-amber-800/30">Anthropic API key</span>
-          <span className="text-gray-600">›</span>
-          <span className="px-1.5 py-0.5 rounded bg-gray-800 text-gray-600 border border-gray-700">exe.dev gateway</span>
-          <span className="text-gray-600 ml-0.5">— highest priority first</span>
-        </div>
-      </div>
-
       {/* Main card */}
       <div className="rounded-xl border border-gray-700 bg-gray-900 p-5 flex flex-col gap-5">
         {/* Card header with status */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-[#d97706]/10 flex items-center justify-center text-[#d97706] shrink-0">
-              <ClaudeIcon size={18} />
+            <div className="w-8 h-8 rounded-lg bg-gray-800 flex items-center justify-center shrink-0">
+              <AuthSourceIcon source="claude-subscription" size={20} />
             </div>
             <p className="text-sm font-medium text-gray-200">Claude.ai</p>
           </div>
@@ -180,6 +207,64 @@ export default function CredentialsSettingsClient() {
             </span>
           )}
         </div>
+
+        {isSet && (
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs text-gray-400 font-medium">Stored credentials</span>
+              <div className="flex items-center gap-3">
+                {credRevealed && (
+                  <button
+                    type="button"
+                    data-id="credentials/copy"
+                    onClick={() => void copyCredentials()}
+                    className="flex items-center gap-1 text-xs text-sky-500/70 hover:text-sky-400 transition-colors"
+                    aria-label="Copy credentials"
+                  >
+                    {copiedCredentials ? <Check size={13} strokeWidth={2} aria-hidden="true" /> : <Copy size={13} strokeWidth={2} aria-hidden="true" />}
+                    <span>{copiedCredentials ? "Copied" : "Copy"}</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  data-id="credentials/toggle-visibility"
+                  onClick={() => {
+                    if (credRevealed) {
+                      setCredRevealed(false);
+                      setPasteError(null);
+                    } else if (!isDecrypting) {
+                      decrypt(prettyStoredCredentials);
+                    }
+                  }}
+                  disabled={isDecrypting}
+                  className="flex items-center gap-1 text-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  aria-label={credRevealed ? "Hide credentials" : "Reveal credentials"}
+                >
+                  {credRevealed ? (
+                    <><EyeOff size={13} strokeWidth={2} aria-hidden="true" className="text-gray-500 hover:text-gray-300 transition-colors" /><span className="text-gray-500 hover:text-gray-300 transition-colors">Hide</span></>
+                  ) : (
+                    <><Key size={13} strokeWidth={2} aria-hidden="true" className={isDecrypting ? "text-sky-400 animate-pulse" : "text-sky-500/70 hover:text-sky-400 transition-colors"} /><span className={isDecrypting ? "text-sky-400" : "text-sky-500/70 hover:text-sky-400 transition-colors"}>Reveal</span></>
+                  )}
+                </button>
+              </div>
+            </div>
+            {showStoredCredentials && (
+              <textarea
+                data-id="credentials/json-display"
+                value={storedCredentialsDisplay}
+                readOnly
+                rows={8}
+                className={`w-full bg-gray-800 text-sm border border-gray-700 rounded-lg px-3 py-2 outline-none font-mono resize-y ${
+                  credRevealed
+                    ? "text-gray-100"
+                    : "text-sky-300/40 select-none cursor-default"
+                }`}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            )}
+          </div>
+        )}
 
         {/* OAuth flow */}
         {(step.kind === "idle" || step.kind === "done") && (
@@ -205,6 +290,53 @@ export default function CredentialsSettingsClient() {
             </div>
             {step.kind === "done" && (
               <p className="text-xs text-center text-gray-500">Credentials saved successfully.</p>
+            )}
+          </div>
+        )}
+
+        {(step.kind === "idle" || step.kind === "done") && (
+          <div className="border-t border-gray-800 pt-3 flex flex-col gap-3">
+            <button
+              type="button"
+              data-id="credentials/manual-toggle"
+              onClick={() => setManualOpen((open) => !open)}
+              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-400 transition-colors w-full text-left"
+            >
+              {manualOpen ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronRight size={13} aria-hidden="true" />}
+              <span>Paste credentials file manually</span>
+            </button>
+            {manualOpen && (
+              <div className="flex flex-col gap-3">
+                <p className="text-xs text-gray-500 leading-relaxed">
+                  Paste the contents of <code className="text-sky-400/80 bg-gray-800 px-1 py-0.5 rounded">~/.claude/.credentials.json</code>. On macOS, credentials are stored in the system keychain and can&apos;t be copied directly — this only works if your machine is running Linux.
+                </p>
+                <textarea
+                  data-id="credentials/json-input"
+                  value={pasteValue}
+                  onChange={(e) => {
+                    setPasteValue(e.target.value);
+                    setPasteError(null);
+                    setPasteSaved(false);
+                  }}
+                  placeholder={'{\n  "claudeAiOauth": { ... }\n}'}
+                  rows={5}
+                  className="w-full bg-gray-800 text-sm text-gray-100 placeholder-gray-600 border border-gray-700 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-sky-500/50 focus:border-sky-500/50 font-mono resize-y"
+                  autoComplete="off"
+                  spellCheck={false}
+                  disabled={pasteLoading}
+                />
+                {pasteError && <p className="text-xs text-red-400">{pasteError}</p>}
+                <div className="flex justify-end">
+                  <button
+                    data-id="credentials/save-paste"
+                    onClick={() => void handlePasteSave()}
+                    disabled={!pasteValue.trim() || pasteSaved || pasteLoading}
+                    className="px-4 py-1.5 rounded-lg text-sm font-medium bg-sky-600 hover:bg-sky-500 disabled:bg-sky-900 text-white transition-colors disabled:cursor-not-allowed"
+                  >
+                    {pasteLoading ? "Saving…" : pasteSaved ? "Saved ✓" : "Save"}
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         )}
@@ -278,50 +410,6 @@ export default function CredentialsSettingsClient() {
             </button>
           </div>
         )}
-
-        {/* Manual paste fallback */}
-        <div className="border-t border-gray-800 pt-3 flex flex-col gap-3">
-          <button
-            data-id="credentials/toggle-paste"
-            onClick={() => setShowPaste(!showPaste)}
-            className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-400 transition-colors w-full text-left"
-          >
-            {showPaste ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronRight size={13} aria-hidden="true" />}
-            Paste credentials file manually
-          </button>
-
-          {showPaste && (
-            <div className="flex flex-col gap-3">
-              <p className="text-xs text-gray-500 leading-relaxed">
-                Paste the contents of{" "}
-                <code className="text-sky-400/80 bg-gray-800 px-1 py-0.5 rounded">~/.claude/.credentials.json</code>.{" "}
-                On macOS, credentials are stored in the system keychain and can&apos;t be copied directly — this only works if your machine is running Linux.
-              </p>
-              <textarea
-                data-id="credentials/json-input"
-                value={pasteValue}
-                onChange={(e) => { setPasteValue(e.target.value); setPasteError(null); setPasteSaved(false); }}
-                placeholder={'{\n  "claudeAiOauth": { ... }\n}'}
-                rows={5}
-                className="w-full bg-gray-800 text-sm text-gray-100 placeholder-gray-600 border border-gray-700 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-sky-500/50 focus:border-sky-500/50 font-mono resize-y"
-                autoComplete="off"
-                spellCheck={false}
-                disabled={pasteLoading}
-              />
-              {pasteError && <p className="text-xs text-red-400">{pasteError}</p>}
-              <div className="flex justify-end">
-                <button
-                  data-id="credentials/save-paste"
-                  onClick={() => void handlePasteSave()}
-                  disabled={!pasteValue.trim() || pasteSaved || pasteLoading}
-                  className="px-4 py-1.5 rounded-lg text-sm font-medium bg-sky-600 hover:bg-sky-500 disabled:bg-sky-900 text-white transition-colors disabled:cursor-not-allowed"
-                >
-                  {pasteLoading ? "Saving…" : pasteSaved ? "Saved ✓" : "Save"}
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );

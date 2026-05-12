@@ -5,33 +5,32 @@
 
 "use client";
 
-import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { hasStoredApiKey, hasStoredOpenRouterApiKey } from "@/lib/api-key-client";
-import { hasStoredCredentials } from "@/lib/credentials-client";
+import type { SecretAuthSource } from "@/lib/presets";
 
-type TabId = "api-key" | "claude-ai";
+type TabId = "billing-sources" | "presets";
 
 const tabs: { id: TabId; label: string; href: string }[] = [
-  { id: "api-key", label: "API Keys", href: "/settings" },
-  { id: "claude-ai", label: "Claude.ai Subscription", href: "/settings/claude-ai" },
+  { id: "billing-sources", label: "Billing sources", href: "/settings" },
+  { id: "presets", label: "Presets", href: "/settings/presets" },
 ];
 
-export default function SettingsSubNav({ currentTab }: { currentTab: TabId }) {
+export default function SettingsSubNav({
+  currentTab,
+  initialSecretSources = [],
+}: {
+  currentTab: TabId;
+  initialSecretSources?: SecretAuthSource[];
+}) {
   const router = useRouter();
   const currentHref = tabs.find((t) => t.id === currentTab)?.href ?? "/settings";
-  const [apiKeyActive, setApiKeyActive] = useState(false);
-  const [credentialsActive, setCredentialsActive] = useState(false);
-
-  useEffect(() => {
-    setApiKeyActive(hasStoredApiKey() || hasStoredOpenRouterApiKey());
-    setCredentialsActive(hasStoredCredentials());
-  }, []);
+  const apiKeyActive = initialSecretSources.includes('anthropic-api-key') || initialSecretSources.includes('openrouter-api-key');
+  const credentialsActive = initialSecretSources.includes('claude-subscription') || initialSecretSources.includes('chatgpt-subscription');
 
   function isActive(tabId: TabId) {
-    if (tabId === "api-key") return apiKeyActive;
-    if (tabId === "claude-ai") return credentialsActive;
+    if (tabId === "billing-sources") return apiKeyActive || credentialsActive;
+    if (tabId === "presets") return true;
     return false;
   }
 

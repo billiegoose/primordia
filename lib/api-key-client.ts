@@ -5,37 +5,30 @@
 // New code should import directly from secrets-client.
 
 import {
-  hasSecret,
   setSecret,
   clearSecret,
   encryptSecretForTransmission,
+  encryptChatGptSubscriptionForTransmission,
   bustPublicKeyCache,
+  type HybridEncryptedSecret,
 } from './secrets-client';
 
-export { bustPublicKeyCache };
-
-export function hasStoredApiKey(): boolean {
-  return hasSecret('ANTHROPIC_API_KEY');
-}
+export { bustPublicKeyCache, encryptChatGptSubscriptionForTransmission };
 
 export async function setStoredApiKey(key: string | null): Promise<void> {
-  if (key === null || key === '') return clearSecret('ANTHROPIC_API_KEY');
-  return setSecret('ANTHROPIC_API_KEY', key);
+  if (key === null || key === '') return clearSecret('anthropic-api-key');
+  return setSecret('anthropic-api-key', key);
 }
 
-export async function encryptStoredApiKey(): Promise<string | null> {
-  return encryptSecretForTransmission('ANTHROPIC_API_KEY');
-}
-
-export function hasStoredOpenRouterApiKey(): boolean {
-  return hasSecret('OPENROUTER_API_KEY');
+export async function encryptStoredApiKey(): Promise<HybridEncryptedSecret | null> {
+  return encryptSecretForTransmission('anthropic-api-key');
 }
 
 export async function setStoredOpenRouterApiKey(key: string | null): Promise<void> {
-  if (key === null || key === '') return clearSecret('OPENROUTER_API_KEY');
-  return setSecret('OPENROUTER_API_KEY', key);
+  if (key === null || key === '') return clearSecret('openrouter-api-key');
+  return setSecret('openrouter-api-key', key);
 }
 
-export async function encryptStoredOpenRouterApiKey(): Promise<string | null> {
-  return encryptSecretForTransmission('OPENROUTER_API_KEY');
+export async function encryptStoredOpenRouterApiKey(): Promise<HybridEncryptedSecret | null> {
+  return encryptSecretForTransmission('openrouter-api-key');
 }

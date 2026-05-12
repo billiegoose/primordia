@@ -3,6 +3,10 @@
 // TypeScript needs these declarations to avoid TS2307 errors; the actual
 // implementation is provided by Bun itself at runtime (never bundled by webpack).
 
+declare module "minimatch" {
+  export function minimatch(target: string, pattern: string, options?: Record<string, unknown>): boolean;
+}
+
 declare module "bun:sqlite" {
   export class Database {
     constructor(filename: string, options?: { create?: boolean; readonly?: boolean });

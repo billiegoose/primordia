@@ -3,7 +3,9 @@
 import { createContext, useCallback, useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { Onborda, OnbordaProvider, useOnborda } from "onborda";
-import type { Tour } from "onborda";
+import type { OnbordaProps } from "onborda";
+
+type Tour = OnbordaProps["steps"][number];
 import { TourCard } from "./TourCard";
 import { withBasePath } from "@/lib/base-path";
 import type { SessionUser } from "@/lib/hooks";
@@ -89,57 +91,53 @@ const sharedSteps: Tour["steps"] = [
     nextRoute: "/settings",
   },
   {
-    // Step 4 — Priority cascade (on /settings)
+    // Step 4 — Billing sources overview (on /settings)
     icon: "⚡",
-    title: "The credential cascade",
+    title: "Billing sources",
     content: (
       <span>
-        Primordia uses a <strong className="text-white">cascade</strong> (highest priority first):{" "}
-        <span className="text-sky-400">Claude.ai</span> ›{" "}
-        <span className="text-amber-400">Anthropic API key</span> ›{" "}
-        <span className="text-gray-400">exe.dev gateway</span>.
+        Billing sources are the credentials Evolve presets can use: Anthropic API keys,
+        OpenRouter keys, Claude.ai subscriptions, ChatGPT subscriptions, or the built-in gateway.
         <br /><br />
-        You only need to configure one. The exe.dev gateway is your automatic no-config fallback.
+        You only need to add the sources you actually want to use.
       </span>
     ),
-    selector: "#onborda-priority-badge",
+    selector: "#onborda-billing-sources",
     side: "bottom",
     showControls: true,
     pointerPadding: 8,
     pointerRadius: 8,
   },
   {
-    // Step 5 — OpenRouter card (navigate to /settings/claude-ai on Next)
+    // Step 5 — Built-in gateway card
     icon: "🆓",
-    title: "Free option: OpenRouter",
+    title: "Zero-config gateway",
     content: (
       <span>
-        OpenRouter has a free tier with capable open-source coding models — no credit card needed.
-        Get a key at <strong className="text-white">openrouter.ai/keys</strong> (the &quot;Get a key&quot; link
-        is right on the card), paste it in, and hit <strong className="text-white">Save key</strong>.
+        The <strong className="text-white">exe.dev LLM gateway</strong> is available immediately,
+        so you can start with no credential setup when a preset selects the gateway.
       </span>
     ),
-    selector: "#onborda-openrouter-card",
+    selector: "#onborda-gateway-card",
     side: "top",
     showControls: true,
     pointerPadding: 8,
     pointerRadius: 12,
-    nextRoute: "/settings/claude-ai",
   },
   {
-    // Step 6 — Claude.ai sign in (on /settings/claude-ai)
+    // Step 6 — Add billing source button
     icon: "✨",
-    title: "Claude.ai subscription",
+    title: "Add sources when needed",
     content: (
       <span>
-        Have a Claude.ai Pro or Max plan? Click{" "}
-        <strong className="text-white">Sign in with Claude.ai</strong> to connect it — no separate API bill.
+        Click <strong className="text-white">Add another billing source</strong> whenever you want
+        to connect OpenRouter, Claude.ai, Anthropic, or ChatGPT credentials.
         <br /><br />
-        On Linux, you can also paste <code className="text-sky-400 bg-gray-800 px-1 rounded">~/.claude/.credentials.json</code> directly below the button.
+        Each Evolve preset chooses a billing source explicitly.
       </span>
     ),
-    selector: "#onborda-claude-signin",
-    side: "bottom",
+    selector: "#onborda-add-billing-source",
+    side: "top",
     showControls: true,
     pointerPadding: 8,
     pointerRadius: 8,

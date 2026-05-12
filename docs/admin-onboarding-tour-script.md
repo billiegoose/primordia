@@ -96,49 +96,46 @@ The first user to register is automatically granted both `admin` and `can_evolve
 > step. The user doesn't need to configure anything right now — the goal is awareness.
 >
 > **Navigation:** close the hamburger, then open ☰ → "Account Settings" (navigates to `/settings`).
-> The page has two tabs in the sidebar: **API Keys** (`/settings`) and **Claude.ai Subscription** (`/settings/claude-ai`).
-> Steps 6–8 live on the API Keys tab; Step 9 switches to the Claude.ai tab.
+> The settings sidebar has two tabs: **Billing sources** (`/settings`) and **Presets** (`/settings/presets`).
+> Steps 6–9 stay on Billing sources and explain the built-in gateway plus the "Add another billing source" flow.
 
-### Step 6 — Account Settings / priority cascade
+### Step 6 — Account Settings / billing sources
 
-- **Anchor:** `/settings` — highlight the priority badge near the top of the page: **Claude.ai › Anthropic API key › exe.dev gateway**
+- **Anchor:** `/settings` — highlight the Billing sources page header
 - **[TOOLTIP]:**
-  > This is **Account Settings** — where you tell Primordia which AI service to use.
+  > This is **Account Settings** — where you save AI credentials that can power Evolve.
   >
-  > It works as a cascade (highest priority first):
-  > 1. **Claude.ai** subscription — if signed in
-  > 2. **Anthropic API key** — if entered
-  > 3. **exe.dev gateway** — the built-in fallback
+  > Credentials are not ordered globally. Each Evolve preset chooses one billing source explicitly: Claude.ai, an API key, ChatGPT, OpenRouter, or the exe.dev gateway.
   >
-  > You only need to configure one. Pick whichever fits you best.
+  > You only need to configure the sources you want to use in presets.
 - **[ADVANCE]:** "Next" button
 
 ### Step 7 — Option 1: exe.dev gateway (zero-config)
 
-- **Anchor:** `/settings` — highlight the "exe.dev gateway" portion of the priority badge
+- **Anchor:** `/settings` — highlight the built-in exe.dev LLM gateway billing source card
   - `[SKIP IF: instance is not hosted on exe.dev]`
 - **[TOOLTIP]:**
   > **Already set up — nothing to do.**
   >
-  > Because you're on exe.dev, the gateway is your automatic fallback. Your Shelley tokens are used whenever no other credential is configured.
+  > Because you're on exe.dev, you can pick an exe.dev gateway preset without storing a credential. Your Shelley tokens are used only when that preset is selected.
   >
   > _(Future: show remaining Shelley token balance here once the exe.dev API exposes it.)_
 - **[ADVANCE]:** "Next" button
 
 ### Step 8 — Option 2: OpenRouter (free tier)
 
-- **Anchor:** `/settings` — highlight the **OpenRouter** card (violet, monogram "OR")
+- **Anchor:** `/settings` — highlight **Add another billing source**; optionally open the chooser and highlight **OpenRouter API key**
 - **[TOOLTIP]:**
   > **Free option: OpenRouter.**
   >
   > OpenRouter has a free tier with capable open-source coding models — no credit card needed. Get a key at **openrouter.ai/keys** (the "Get a key" link is right on the card), paste it in, and hit **Save key**.
   >
-  > Your key starts with `sk-or-v1-`. It overrides the exe.dev gateway when set.
+  > Your key starts with `sk-or-v1-`. Use it by selecting an OpenRouter preset in Evolve.
 - **[ADVANCE]:** "Next" button
 
 ### Step 9 — Option 3: Claude.ai subscription
 
-- **Anchor:** `/settings/claude-ai` — switch to the Claude.ai tab; highlight the **"Sign in with Claude.ai"** button (sky blue, full-width)
+- **Anchor:** `/settings` — highlight **Add another billing source**; optionally open the chooser and highlight **Claude.ai subscription**
 - **[TOOLTIP]:**
   > **Have a Claude.ai Pro or Max plan?**
   >
@@ -151,9 +148,9 @@ The first user to register is automatically granted both `admin` and `can_evolve
 
 ### Step 10 — Credentials wrap-up / segue
 
-- **Anchor:** `/settings/claude-ai` — no highlight
+- **Anchor:** `/settings` — no highlight
 - **[TOOLTIP]:**
-  > That's it for credentials. Come back to Account Settings any time from the ☰ menu to update or change your choice.
+  > That's it for credentials. Come back to Account Settings any time from the ☰ menu to update saved sources, then choose among them with Evolve presets.
   >
   > Now let's see what you can actually do with it.
 - **[ADVANCE]:** "Next" button; navigate back to `/`
@@ -309,7 +306,7 @@ If the user clicks "Skip" at any step:
 | 1 | **Tooltip library?** | Shepherd.js, Intro.js, or custom? Custom keeps dependencies minimal. |
 | 2 | **Highlight style?** | Spotlight (darken surround) vs. outline ring vs. arrow pointer bubble? |
 | 3 | **Shelley token balance** — can we fetch remaining exe.dev Shelley tokens and display them in Step 7? | Check exe.dev API docs; add to Step 7 once supported. |
-| 4 | **Credentials navigation** — tour navigates to `/settings` then `/settings/claude-ai`; confirm the sidebar tab switch can be triggered programmatically (or just navigate via URL). | |
+| 4 | **Credentials navigation** — tour navigates to `/settings`; confirm the Billing sources anchors are present and the tour no longer depends on removed `/settings/claude-ai` tab routes. | |
 | 5 | **Step 16 branching** — admin vs. non-admin path needs a runtime role check at that point; simplest is to embed `isAdmin` in the tour config rendered server-side. | |
 | 6 | **exe.dev detection for Step 7** — detect via `NEXT_PUBLIC_BASE_PATH`, env var, or a runtime flag? | Prefer an env flag set by the installer. |
 | 7 | **Steps 11–15 (evolve flow)** — tour talks about the form without submitting; consider whether a short looping GIF or screenshot would make Step 15 (session page) clearer since the user hasn't seen it yet. | |

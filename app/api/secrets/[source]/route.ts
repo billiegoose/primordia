@@ -1,70 +1,50 @@
-// app/api/secrets/[type]/route.ts
+// app/api/secrets/[source]/route.ts
 // Unified storage for all user secrets (API keys and credentials).
-// Each secret type is stored as an AES-GCM encrypted blob in user_preferences.
+// Each secret source is stored as an AES-GCM encrypted blob in encrypted_credentials.
 // The server never sees the AES key — only the ciphertext.
 //
 // GET  → { ciphertext: string | null }
 //   Returns the stored JSON payload { iv, ciphertext } or null if none is set.
 //
 // POST body: { iv: string, ciphertext: string }
-//   Stores the encrypted payload in user_preferences.
+//   Stores the encrypted payload in encrypted_credentials.
 //
 // DELETE
-//   Removes the stored ciphertext from user_preferences.
+//   Removes the stored ciphertext from encrypted_credentials.
 //
 // Auth required for all methods.
 
 import { getSessionUser } from '@/lib/auth';
 import { getDb } from '@/lib/db';
+import { isSecretAuthSource, type SecretAuthSource } from '@/lib/presets';
 
-type SecretType =
-  | 'ANTHROPIC_API_KEY'
-  | 'OPENROUTER_API_KEY'
-  | 'OPENAI_API_KEY'
-  | 'GEMINI_API_KEY'
-  | 'CLAUDE_CODE_CREDENTIALS_JSON';
-
-// Maps secret types to server-side user_preferences keys.
-// These names are backward-compatible with the old per-type route files.
-const SERVER_PREF_KEYS: Record<SecretType, string> = {
-  ANTHROPIC_API_KEY: 'encrypted_api_key',
-  OPENROUTER_API_KEY: 'encrypted_openrouter_api_key',
-  OPENAI_API_KEY: 'encrypted_openai_api_key',
-  GEMINI_API_KEY: 'encrypted_gemini_api_key',
-  CLAUDE_CODE_CREDENTIALS_JSON: 'encrypted_credentials',
-};
-
-const VALID_TYPES = new Set<string>(Object.keys(SERVER_PREF_KEYS));
-
-function resolveType(params: { type: string }): SecretType | null {
-  return VALID_TYPES.has(params.type) ? (params.type as SecretType) : null;
+function resolveSource(params: { source: string }): SecretAuthSource | null {
+  return isSecretAuthSource(params.source) ? params.source : null;
 }
 
 /**
  * Get stored encrypted secret
- * @description Returns the stored AES-GCM encrypted ciphertext for the given secret type, or `null` if none is set.
+ * @description Returns the stored AES-GCM encrypted ciphertext for the given secret source, or `null` if none is set.
  * @tag Secrets
  */
 export async function GET(
   _req: Request,
-  { params }: { params: Promise<{ type: string }> },
+  { params }: { params: Promise<{ source: string }> },
 ) {
   const user = await getSessionUser();
   if (!user) return Response.json({ error: 'Authentication required' }, { status: 401 });
 
-  const type = resolveType(await params);
-  if (!type) return Response.json({ error: 'Unknown secret type' }, { status: 400 });
+  const source = resolveSource(await params);
+  if (!source) return Response.json({ error: 'Unknown secret source' }, { status: 400 });
 
   const db = await getDb();
-  const prefKey = SERVER_PREF_KEYS[type];
-  const prefs = await db.getUserPreferences(user.id, [prefKey]);
-  const stored = prefs[prefKey];
+  const stored = await db.getEncryptedCredential(user.id, source);
   const ciphertext = stored && stored.length > 0 ? stored : null;
 
   return Response.json({ ciphertext });
 }
 
-/** JSON body for POST /api/secrets/[type] */
+/** JSON body for POST /api/secrets/[source] */
 export interface StoreSecretBody {
   iv: string; // Base64-encoded AES-GCM initialisation vector.
   ciphertext: string; // Base64-encoded AES-GCM ciphertext.
@@ -78,13 +58,13 @@ export interface StoreSecretBody {
  */
 export async function POST(
   req: Request,
-  { params }: { params: Promise<{ type: string }> },
+  { params }: { params: Promise<{ source: string }> },
 ) {
   const user = await getSessionUser();
   if (!user) return Response.json({ error: 'Authentication required' }, { status: 401 });
 
-  const type = resolveType(await params);
-  if (!type) return Response.json({ error: 'Unknown secret type' }, { status: 400 });
+  const source = resolveSource(await params);
+  if (!source) return Response.json({ error: 'Unknown secret source' }, { status: 400 });
 
   let body: unknown;
   try {
@@ -105,9 +85,7 @@ export async function POST(
   const { iv, ciphertext } = body as { iv: string; ciphertext: string };
 
   const db = await getDb();
-  await db.setUserPreferences(user.id, {
-    [SERVER_PREF_KEYS[type]]: JSON.stringify({ iv, ciphertext }),
-  });
+  await db.setEncryptedCredential(user.id, source, JSON.stringify({ iv, ciphertext }));
 
   return Response.json({ ok: true });
 }
@@ -119,16 +97,16 @@ export async function POST(
  */
 export async function DELETE(
   _req: Request,
-  { params }: { params: Promise<{ type: string }> },
+  { params }: { params: Promise<{ source: string }> },
 ) {
   const user = await getSessionUser();
   if (!user) return Response.json({ error: 'Authentication required' }, { status: 401 });
 
-  const type = resolveType(await params);
-  if (!type) return Response.json({ error: 'Unknown secret type' }, { status: 400 });
+  const source = resolveSource(await params);
+  if (!source) return Response.json({ error: 'Unknown secret source' }, { status: 400 });
 
   const db = await getDb();
-  await db.setUserPreferences(user.id, { [SERVER_PREF_KEYS[type]]: '' });
+  await db.deleteEncryptedCredential(user.id, source);
 
   return Response.json({ ok: true });
 }

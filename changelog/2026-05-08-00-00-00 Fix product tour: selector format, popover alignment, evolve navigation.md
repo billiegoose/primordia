@@ -22,3 +22,6 @@ Steps 7–10 (the evolve walkthrough) previously pointed at the hamburger button
 
 ### useEffect stability fix (`components/ProductTour.tsx`)
 `startOnborda` from `useOnborda()` gets a new reference on every render, causing the trigger effect to re-run and race. Fixed using a ref to hold the latest `startOnborda`, with the effect only depending on `[pathname]`. Added a 300 ms delay before calling `startOnborda` to let Onborda finish its own mount cycle.
+
+### Billing sources settings merge update (`components/ProductTour.tsx`, `app/settings/BillingSourcesSettingsClient.tsx`, `docs/admin-onboarding-tour-script.md`)
+After merging the newer settings UI, the tour no longer targets the removed API-key priority badge or `/settings/claude-ai` tab. It now highlights the consolidated Billing sources page, built-in gateway card, and Add another billing source control, with stable anchor IDs added to the new settings layout.

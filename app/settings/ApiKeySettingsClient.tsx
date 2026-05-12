@@ -1,58 +1,74 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Eye, EyeOff, ExternalLink } from "lucide-react";
+import { Check, Copy, Key, EyeOff, ExternalLink } from "lucide-react";
 import {
-  hasStoredApiKey, setStoredApiKey,
-  hasStoredOpenRouterApiKey, setStoredOpenRouterApiKey,
+  setStoredApiKey,
+  setStoredOpenRouterApiKey,
 } from "@/lib/api-key-client";
+import { decryptStoredSecretPayload } from "@/lib/secrets-client";
 import { trackEvent } from "@/lib/events-client";
+import { useDecryptEffect } from "@/lib/use-decrypt-effect";
+import { AuthSourceIcon } from "@/components/AgentIdentity";
 
-function ComingSoonCard({ monogram, monogramClass, name, description }: {
-  monogram: string;
-  monogramClass: string;
-  name: string;
-  description: string;
+type ApiKeyProvider = "anthropic" | "openrouter";
+
+export default function ApiKeySettingsClient({
+  provider,
+  initialCiphertext,
+}: {
+  provider: ApiKeyProvider;
+  initialCiphertext?: string | null;
 }) {
-  return (
-    <div className="rounded-xl border border-gray-800 bg-gray-900/40 p-5 opacity-50 select-none">
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-3">
-          <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold ${monogramClass}`}>
-            {monogram}
-          </div>
-          <span className="text-sm font-medium text-gray-300">{name}</span>
-        </div>
-        <span className="text-xs px-2 py-0.5 rounded-full bg-gray-800 text-gray-500 border border-gray-700">
-          Coming soon
-        </span>
-      </div>
-      <p className="text-xs text-gray-500 ml-11">{description}</p>
-    </div>
-  );
-}
-
-export default function ApiKeySettingsClient() {
   // Anthropic key state
-  const [isKeySet, setIsKeySet] = useState(false);
+  const [isKeySet, setIsKeySet] = useState(provider === "anthropic" && Boolean(initialCiphertext));
   const [inputValue, setInputValue] = useState("");
+  const [keyDirty, setKeyDirty] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copiedKey, setCopiedKey] = useState(false);
 
   // OpenRouter key state
-  const [isOrKeySet, setIsOrKeySet] = useState(false);
+  const [isOrKeySet, setIsOrKeySet] = useState(provider === "openrouter" && Boolean(initialCiphertext));
   const [orInputValue, setOrInputValue] = useState("");
+  const [orKeyDirty, setOrKeyDirty] = useState(false);
   const [orShowKey, setOrShowKey] = useState(false);
   const [orSaved, setOrSaved] = useState(false);
   const [orLoading, setOrLoading] = useState(false);
   const [orError, setOrError] = useState<string | null>(null);
+  const [orCopiedKey, setOrCopiedKey] = useState(false);
+
+  const { displayValue: decryptDisplay, isDecrypting, decrypt } = useDecryptEffect({
+    duration: 1000,
+    onComplete: () => setShowKey(true),
+  });
+  const { displayValue: orDecryptDisplay, isDecrypting: orIsDecrypting, decrypt: orDecrypt } = useDecryptEffect({
+    duration: 1000,
+    onComplete: () => setOrShowKey(true),
+  });
 
   useEffect(() => {
-    setIsKeySet(hasStoredApiKey());
-    setIsOrKeySet(hasStoredOpenRouterApiKey());
-  }, []);
+    let cancelled = false;
+
+    async function decryptInitialValue() {
+      const val = await decryptStoredSecretPayload(initialCiphertext);
+      if (cancelled || !val) return;
+      if (provider === "anthropic") {
+        setInputValue(val);
+        setKeyDirty(false);
+      } else {
+        setOrInputValue(val);
+        setOrKeyDirty(false);
+      }
+    }
+
+    void decryptInitialValue();
+    return () => {
+      cancelled = true;
+    };
+  }, [initialCiphertext, provider]);
 
   async function handleSave() {
     const trimmed = inputValue.trim();
@@ -67,7 +83,8 @@ export default function ApiKeySettingsClient() {
       await setStoredApiKey(trimmed);
       trackEvent("settings/api-key-saved/v1", {});
       setIsKeySet(true);
-      setInputValue("");
+      setKeyDirty(false);
+      setShowKey(false);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch {
@@ -77,6 +94,14 @@ export default function ApiKeySettingsClient() {
     }
   }
 
+  async function copyKey(value: string, setter: (copied: boolean) => void) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setter(true);
+      setTimeout(() => setter(false), 2000);
+    } catch {}
+  }
+
   async function handleClear() {
     setLoading(true);
     try {
@@ -84,6 +109,8 @@ export default function ApiKeySettingsClient() {
       trackEvent("settings/api-key-cleared/v1", {});
       setIsKeySet(false);
       setInputValue("");
+      setKeyDirty(false);
+      setShowKey(false);
       setError(null);
     } catch {
       setError("Failed to clear key. Please try again.");
@@ -105,7 +132,8 @@ export default function ApiKeySettingsClient() {
       await setStoredOpenRouterApiKey(trimmed);
       trackEvent("settings/openrouter-key-saved/v1", {});
       setIsOrKeySet(true);
-      setOrInputValue("");
+      setOrKeyDirty(false);
+      setOrShowKey(false);
       setOrSaved(true);
       setTimeout(() => setOrSaved(false), 2000);
     } catch {
@@ -122,6 +150,8 @@ export default function ApiKeySettingsClient() {
       trackEvent("settings/openrouter-key-cleared/v1", {});
       setIsOrKeySet(false);
       setOrInputValue("");
+      setOrKeyDirty(false);
+      setOrShowKey(false);
       setOrError(null);
     } catch {
       setOrError("Failed to clear key. Please try again.");
@@ -130,36 +160,21 @@ export default function ApiKeySettingsClient() {
     }
   }
 
+  const showKeyInput = !isKeySet || showKey || isDecrypting;
+  const showOrKeyInput = !isOrKeySet || orShowKey || orIsDecrypting;
+
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-3">
-        <div>
-          <h2 className="text-base font-medium text-gray-200 mb-1">API Keys</h2>
-          <p className="text-sm text-gray-400 leading-relaxed">
-            Connect your own AI provider keys to use them for evolve requests.
-            Keys are encrypted in your browser and never stored in plaintext.
-          </p>
-        </div>
-        <div id="onborda-priority-badge" className="flex items-center gap-1.5 flex-wrap text-xs">
-          <span className="px-1.5 py-0.5 rounded bg-sky-900/30 text-sky-400 border border-sky-800/40">Claude.ai</span>
-          <span className="text-gray-600">›</span>
-          <span className="px-1.5 py-0.5 rounded bg-amber-900/20 text-amber-500/80 border border-amber-800/30 font-medium">Anthropic API key</span>
-          <span className="text-gray-600">›</span>
-          <span className="px-1.5 py-0.5 rounded bg-gray-800 text-gray-500 border border-gray-700">exe.dev gateway</span>
-          <span className="text-gray-600 ml-0.5">— highest priority first (Claude models)</span>
-        </div>
-      </div>
-
-      {/* Anthropic — fully functional */}
+      {provider === "anthropic" && (
       <div className="rounded-xl border border-gray-700 bg-gray-900 p-5 flex flex-col gap-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-amber-400/10 flex items-center justify-center text-sm font-bold text-amber-400 shrink-0">
-              A
+            <div className="w-8 h-8 rounded-lg bg-gray-800 flex items-center justify-center shrink-0">
+              <AuthSourceIcon source="anthropic-api-key" size={20} />
             </div>
             <div>
               <p className="text-sm font-medium text-gray-200">Anthropic</p>
-              <p className="text-xs text-gray-500 mt-0.5">Claude models — overrides the default exe.dev gateway</p>
+              <p className="text-xs text-gray-500 mt-0.5">Claude models — selectable from Evolve presets</p>
             </div>
           </div>
           {isKeySet && (
@@ -170,47 +185,78 @@ export default function ApiKeySettingsClient() {
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <label className="text-xs text-gray-400 font-medium">
-              {isKeySet ? "Replace key" : "API key"}
+              {isKeySet ? "Stored API key" : "API key"}
             </label>
-            <a
-              href="https://console.anthropic.com/settings/keys"
-              target="_blank"
-              rel="noopener noreferrer"
-              data-id="api-key/anthropic-console"
-              className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-0.5 transition-colors"
-            >
-              Get a key
-              <ExternalLink size={10} strokeWidth={2} aria-hidden="true" />
-            </a>
+            <div className="flex items-center gap-3">
+              {showKey && (
+                <button
+                  type="button"
+                  data-id="api-key/copy-key"
+                  onClick={() => void copyKey(inputValue, setCopiedKey)}
+                  className="flex items-center gap-1 text-xs text-amber-500/70 hover:text-amber-400 transition-colors"
+                  aria-label="Copy API key"
+                >
+                  {copiedKey ? <Check size={13} strokeWidth={2} aria-hidden="true" /> : <Copy size={13} strokeWidth={2} aria-hidden="true" />}
+                  <span>{copiedKey ? "Copied" : "Copy"}</span>
+                </button>
+              )}
+              {isKeySet && (
+                <button
+                  type="button"
+                  data-id="api-key/toggle-visibility"
+                  onClick={() => {
+                    if (showKey) {
+                      setShowKey(false);
+                    } else if (!isDecrypting) {
+                      decrypt(inputValue);
+                    }
+                  }}
+                  disabled={isDecrypting}
+                  className="flex items-center gap-1 text-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  aria-label={showKey ? "Hide key" : "Reveal key"}
+                >
+                  {showKey ? (
+                    <><EyeOff size={13} strokeWidth={2} aria-hidden="true" className="text-gray-500 hover:text-gray-300 transition-colors" /><span className="text-gray-500 hover:text-gray-300 transition-colors">Hide</span></>
+                  ) : (
+                    <><Key size={13} strokeWidth={2} aria-hidden="true" className={isDecrypting ? "text-amber-400 animate-pulse" : "text-amber-500/70 hover:text-amber-400 transition-colors"} /><span className={isDecrypting ? "text-amber-400" : "text-amber-500/70 hover:text-amber-400 transition-colors"}>Reveal</span></>
+                  )}
+                </button>
+              )}
+              {!isKeySet && (
+                <a
+                  href="https://console.anthropic.com/settings/keys"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-id="api-key/anthropic-console"
+                  className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-0.5 transition-colors"
+                >
+                  Get a key
+                  <ExternalLink size={10} strokeWidth={2} aria-hidden="true" />
+                </a>
+              )}
+            </div>
           </div>
-          <div className="relative">
+          {showKeyInput && (
             <input
               data-id="api-key/key-input"
-              type={showKey ? "text" : "password"}
-              value={inputValue}
-              onChange={(e) => { setInputValue(e.target.value); setError(null); setSaved(false); }}
+              type={showKey || isDecrypting ? "text" : "password"}
+              value={isDecrypting ? decryptDisplay : inputValue}
+              readOnly={isDecrypting}
+              onChange={(e) => { setInputValue(e.target.value); setKeyDirty(true); setError(null); setSaved(false); }}
               onKeyDown={(e) => { if (e.key === "Enter") void handleSave(); }}
               placeholder="sk-ant-api03-…"
-              className="w-full bg-gray-800 text-sm text-gray-100 placeholder-gray-500 border border-gray-700 rounded-lg px-3 py-2 pr-9 outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50 font-mono"
+              className={`w-full sm:w-96 max-w-full bg-gray-800 text-sm placeholder-gray-500 border border-gray-700 rounded-lg px-3 py-2 outline-none font-mono ${
+                isDecrypting
+                  ? "text-amber-300/50 select-none cursor-default"
+                  : "text-gray-100 focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50"
+              }`}
               autoComplete="off"
               spellCheck={false}
               disabled={loading}
             />
-            <button
-              type="button"
-              data-id="api-key/toggle-visibility"
-              onClick={() => setShowKey((v) => !v)}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
-              aria-label={showKey ? "Hide key" : "Show key"}
-            >
-              {showKey
-                ? <EyeOff size={15} strokeWidth={2} aria-hidden="true" />
-                : <Eye size={15} strokeWidth={2} aria-hidden="true" />
-              }
-            </button>
-          </div>
+          )}
           {error && <p className="text-xs text-red-400">{error}</p>}
         </div>
 
@@ -230,20 +276,21 @@ export default function ApiKeySettingsClient() {
           <button
             data-id="api-key/save-key"
             onClick={() => void handleSave()}
-            disabled={!inputValue.trim() || saved || loading}
+            disabled={!inputValue.trim() || !keyDirty || saved || loading}
             className="px-4 py-1.5 rounded-lg text-sm font-medium bg-amber-600 hover:bg-amber-500 disabled:bg-amber-900 text-white transition-colors disabled:cursor-not-allowed"
           >
             {loading ? "Saving…" : saved ? "Saved ✓" : "Save key"}
           </button>
         </div>
       </div>
+      )}
 
-      {/* OpenRouter — fully functional */}
+      {provider === "openrouter" && (
       <div id="onborda-openrouter-card" className="rounded-xl border border-gray-700 bg-gray-900 p-5 flex flex-col gap-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-violet-400/10 flex items-center justify-center text-sm font-bold text-violet-400 shrink-0">
-              OR
+            <div className="w-8 h-8 rounded-lg bg-gray-800 flex items-center justify-center shrink-0">
+              <AuthSourceIcon source="openrouter-api-key" size={20} />
             </div>
             <div>
               <p className="text-sm font-medium text-gray-200">OpenRouter</p>
@@ -258,47 +305,78 @@ export default function ApiKeySettingsClient() {
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <label className="text-xs text-gray-400 font-medium">
-              {isOrKeySet ? "Replace key" : "API key"}
+              {isOrKeySet ? "Stored API key" : "API key"}
             </label>
-            <a
-              href="https://openrouter.ai/keys"
-              target="_blank"
-              rel="noopener noreferrer"
-              data-id="api-key/openrouter-console"
-              className="text-xs text-violet-400 hover:text-violet-300 flex items-center gap-0.5 transition-colors"
-            >
-              Get a key
-              <ExternalLink size={10} strokeWidth={2} aria-hidden="true" />
-            </a>
+            <div className="flex items-center gap-3">
+              {orShowKey && (
+                <button
+                  type="button"
+                  data-id="api-key/openrouter-copy-key"
+                  onClick={() => void copyKey(orInputValue, setOrCopiedKey)}
+                  className="flex items-center gap-1 text-xs text-violet-500/70 hover:text-violet-400 transition-colors"
+                  aria-label="Copy OpenRouter API key"
+                >
+                  {orCopiedKey ? <Check size={13} strokeWidth={2} aria-hidden="true" /> : <Copy size={13} strokeWidth={2} aria-hidden="true" />}
+                  <span>{orCopiedKey ? "Copied" : "Copy"}</span>
+                </button>
+              )}
+              {isOrKeySet && (
+                <button
+                  type="button"
+                  data-id="api-key/openrouter-toggle-visibility"
+                  onClick={() => {
+                    if (orShowKey) {
+                      setOrShowKey(false);
+                    } else if (!orIsDecrypting) {
+                      orDecrypt(orInputValue);
+                    }
+                  }}
+                  disabled={orIsDecrypting}
+                  className="flex items-center gap-1 text-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  aria-label={orShowKey ? "Hide key" : "Reveal key"}
+                >
+                  {orShowKey ? (
+                    <><EyeOff size={13} strokeWidth={2} aria-hidden="true" className="text-gray-500 hover:text-gray-300 transition-colors" /><span className="text-gray-500 hover:text-gray-300 transition-colors">Hide</span></>
+                  ) : (
+                    <><Key size={13} strokeWidth={2} aria-hidden="true" className={orIsDecrypting ? "text-violet-400 animate-pulse" : "text-violet-500/70 hover:text-violet-400 transition-colors"} /><span className={orIsDecrypting ? "text-violet-400" : "text-violet-500/70 hover:text-violet-400 transition-colors"}>Reveal</span></>
+                  )}
+                </button>
+              )}
+              {!isOrKeySet && (
+                <a
+                  href="https://openrouter.ai/keys"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-id="api-key/openrouter-console"
+                  className="text-xs text-violet-400 hover:text-violet-300 flex items-center gap-0.5 transition-colors"
+                >
+                  Get a key
+                  <ExternalLink size={10} strokeWidth={2} aria-hidden="true" />
+                </a>
+              )}
+            </div>
           </div>
-          <div className="relative">
+          {showOrKeyInput && (
             <input
               data-id="api-key/openrouter-key-input"
-              type={orShowKey ? "text" : "password"}
-              value={orInputValue}
-              onChange={(e) => { setOrInputValue(e.target.value); setOrError(null); setOrSaved(false); }}
+              type={orShowKey || orIsDecrypting ? "text" : "password"}
+              value={orIsDecrypting ? orDecryptDisplay : orInputValue}
+              readOnly={orIsDecrypting}
+              onChange={(e) => { setOrInputValue(e.target.value); setOrKeyDirty(true); setOrError(null); setOrSaved(false); }}
               onKeyDown={(e) => { if (e.key === "Enter") void handleOrSave(); }}
               placeholder="sk-or-v1-…"
-              className="w-full bg-gray-800 text-sm text-gray-100 placeholder-gray-500 border border-gray-700 rounded-lg px-3 py-2 pr-9 outline-none focus:ring-2 focus:ring-violet-500/50 focus:border-violet-500/50 font-mono"
+              className={`w-full sm:w-96 max-w-full bg-gray-800 text-sm placeholder-gray-500 border border-gray-700 rounded-lg px-3 py-2 outline-none font-mono ${
+                orIsDecrypting
+                  ? "text-violet-300/50 select-none cursor-default"
+                  : "text-gray-100 focus:ring-2 focus:ring-violet-500/50 focus:border-violet-500/50"
+              }`}
               autoComplete="off"
               spellCheck={false}
               disabled={orLoading}
             />
-            <button
-              type="button"
-              data-id="api-key/openrouter-toggle-visibility"
-              onClick={() => setOrShowKey((v) => !v)}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
-              aria-label={orShowKey ? "Hide key" : "Show key"}
-            >
-              {orShowKey
-                ? <EyeOff size={15} strokeWidth={2} aria-hidden="true" />
-                : <Eye size={15} strokeWidth={2} aria-hidden="true" />
-              }
-            </button>
-          </div>
+          )}
           {orError && <p className="text-xs text-red-400">{orError}</p>}
         </div>
 
@@ -318,29 +396,14 @@ export default function ApiKeySettingsClient() {
           <button
             data-id="api-key/openrouter-save-key"
             onClick={() => void handleOrSave()}
-            disabled={!orInputValue.trim() || orSaved || orLoading}
+            disabled={!orInputValue.trim() || !orKeyDirty || orSaved || orLoading}
             className="px-4 py-1.5 rounded-lg text-sm font-medium bg-violet-700 hover:bg-violet-600 disabled:bg-violet-900 text-white transition-colors disabled:cursor-not-allowed"
           >
             {orLoading ? "Saving…" : orSaved ? "Saved ✓" : "Save key"}
           </button>
         </div>
       </div>
-
-      {/* Coming-soon providers */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <ComingSoonCard
-          monogram="O"
-          monogramClass="bg-emerald-400/10 text-emerald-400"
-          name="OpenAI"
-          description="GPT-4o and other OpenAI models."
-        />
-        <ComingSoonCard
-          monogram="G"
-          monogramClass="bg-blue-400/10 text-blue-400"
-          name="Google Gemini"
-          description="Gemini 2.0 Flash, Pro, and Ultra."
-        />
-      </div>
+      )}
     </div>
   );
 }
