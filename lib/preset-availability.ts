@@ -17,7 +17,7 @@ export const SECRET_AUTH_SOURCES: PresetAuthSource[] = [
   'openai-api-key',
 ];
 
-export const MISSING_BILLING_SOURCE_MESSAGE = 'Missing billing source';
+export const MISSING_BILLING_SOURCE_MESSAGE = 'Billing source not configured';
 
 export function isExeDevGatewayAvailable(): boolean {
   // Gateway needs no user secret. In exe.dev prod it exists; local dev may still

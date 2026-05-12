@@ -575,27 +575,26 @@ export function EvolveRequestForm({
                     data-id="evolve/preset-select"
                     value={selectedPreset.id}
                     onChange={(e) => {
-                      const preset = presets.find((p) => p.id === e.target.value);
+                      const preset = availablePresets.find((p) => p.id === e.target.value);
                       setSelectedPresetId(e.target.value);
                       if (preset) trackEvent("evolve-form/preset-changed/v1", { presetId: preset.id, harness: preset.harness, model: preset.model, authSource: preset.authSource });
                     }}
-                    disabled={isLoading || presets.length === 0}
+                    disabled={isLoading || availablePresets.length === 0}
                     className="flex-1 text-xs bg-gray-800 text-gray-200 border border-gray-700 rounded px-2 py-1.5 focus:outline-none focus:border-gray-500 disabled:opacity-50"
                   >
                     {presets.length === 0 ? (
                       <option value={selectedPreset.id}>No presets</option>
                     ) : availablePresets.length === 0 ? (
                       <option value={selectedPreset.id}>No available presets</option>
-                    ) : presets.map((preset) => (
-                      <option key={preset.id} value={preset.id} disabled={!preset.available}>
-                        {preset.available ? preset.name : `${preset.name} — ${preset.unavailableReason ?? 'unavailable'}`}
-                      </option>
+                    ) : availablePresets.map((preset) => (
+                      <option key={preset.id} value={preset.id}>{preset.name}</option>
                     ))}
                   </select>
                 </div>
                 <p className="text-[10px] text-gray-500 pl-[4.25rem]">
                   {selectedPreset.harness} · {selectedPreset.model} · {PRESET_AUTH_SOURCE_LABELS[selectedPreset.authSource]}
-                  {' '}<a href={withBasePath('/settings/presets')} className="underline hover:text-gray-300">Manage presets</a>
+                  {' '}<a href={withBasePath('/settings')} className="underline hover:text-gray-300">Connect more providers</a>
+                  {' · '}<a href={withBasePath('/settings/presets')} className="underline hover:text-gray-300">Manage presets</a>
                 </p>
               </div>
               <div className="border-t border-gray-800 pt-2">
