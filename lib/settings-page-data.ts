@@ -2,15 +2,30 @@ import 'server-only';
 
 import { getDb } from './db';
 import {
+  BUILT_IN_PRESETS,
+  PREF_CUSTOM_PRESETS,
+  PREF_DISABLED_BUILT_IN_PRESETS,
   SECRET_AUTH_SOURCES,
   isSecretAuthSource,
+  parseCustomPresets,
+  parseDisabledBuiltInPresetIds,
   type SecretCiphertexts,
   type SecretAuthSource,
 } from './presets';
+import { MODEL_OPTIONS, type ModelOption } from './agent-config';
+import { withPresetAvailability, type EvolvePresetWithAvailability } from './preset-availability';
 
 export interface SettingsPageData {
   secretSources: SecretAuthSource[];
   secretCiphertexts: SecretCiphertexts;
+}
+
+export interface PresetsSettingsPageData {
+  secretSources: SecretAuthSource[];
+  builtInPresets: EvolvePresetWithAvailability[];
+  customPresets: EvolvePresetWithAvailability[];
+  disabledBuiltInPresetIds: string[];
+  modelOptionsByHarness: Record<string, ModelOption[]>;
 }
 
 export async function listUserSecretSources(userId: string): Promise<SecretAuthSource[]> {
@@ -34,5 +49,22 @@ export async function getSettingsPageData(userId: string): Promise<SettingsPageD
   return {
     secretSources,
     secretCiphertexts: Object.fromEntries(ciphertextEntries) as SecretCiphertexts,
+  };
+}
+
+export async function getPresetsSettingsPageData(userId: string): Promise<PresetsSettingsPageData> {
+  const db = await getDb();
+  const [prefs, secretSources] = await Promise.all([
+    db.getUserPreferences(userId, [PREF_CUSTOM_PRESETS, PREF_DISABLED_BUILT_IN_PRESETS]),
+    listUserSecretSources(userId),
+  ]);
+  const storedAuthSources = new Set<string>(secretSources);
+
+  return {
+    secretSources,
+    builtInPresets: BUILT_IN_PRESETS.map((preset) => withPresetAvailability(preset, storedAuthSources)),
+    customPresets: parseCustomPresets(prefs[PREF_CUSTOM_PRESETS]).map((preset) => withPresetAvailability(preset, storedAuthSources)),
+    disabledBuiltInPresetIds: parseDisabledBuiltInPresetIds(prefs[PREF_DISABLED_BUILT_IN_PRESETS]),
+    modelOptionsByHarness: MODEL_OPTIONS,
   };
 }
