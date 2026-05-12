@@ -431,6 +431,8 @@ export function WebPreviewPanel({
   const inspectorActiveRef = useRef(false);
   useEffect(() => { inspectorActiveRef.current = inspectorActive; }, [inspectorActive]);
 
+  const browserButtonClass = "p-1.5 rounded text-gray-400 transition-colors flex-shrink-0 enabled:hover:bg-gray-800 enabled:hover:text-gray-200 disabled:opacity-40 disabled:cursor-not-allowed";
+
   const injectInspector = useCallback(() => {
     try {
       const doc = iframeRef.current?.contentDocument;
@@ -451,6 +453,13 @@ export function WebPreviewPanel({
       iframeRef.current?.contentWindow?.postMessage({ type: 'primordia-inspector-cancel' }, '*');
     } catch { /* cross-origin */ }
   }, []);
+
+  useEffect(() => {
+    if (serverRunning) return;
+    setIsLoading(false);
+    setInspectorActive(false);
+    cancelInspector();
+  }, [serverRunning, cancelInspector]);
 
   /** Called whenever the iframe finishes loading a page. */
   const handleLoad = useCallback(() => {
@@ -480,11 +489,13 @@ export function WebPreviewPanel({
 
   const handleUrlSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!serverRunning) return;
     trackEvent("preview/url-navigated/v1", { sessionId, url: urlBarValue });
     navigate(urlBarValue);
   };
 
   const handleBack = () => {
+    if (!serverRunning) return;
     trackEvent("preview/back-clicked/v1", { sessionId });
     try {
       iframeRef.current?.contentWindow?.history.back();
@@ -492,6 +503,7 @@ export function WebPreviewPanel({
   };
 
   const handleForward = () => {
+    if (!serverRunning) return;
     trackEvent("preview/forward-clicked/v1", { sessionId });
     try {
       iframeRef.current?.contentWindow?.history.forward();
@@ -499,6 +511,7 @@ export function WebPreviewPanel({
   };
 
   const handleRefresh = () => {
+    if (!serverRunning) return;
     trackEvent("preview/refresh-clicked/v1", { sessionId });
     try {
       iframeRef.current?.contentWindow?.location.reload();
@@ -512,6 +525,7 @@ export function WebPreviewPanel({
   };
 
   const toggleInspector = useCallback(() => {
+    if (!serverRunning) return;
     setInspectorActive((prev) => {
       const next = !prev;
       trackEvent("preview/inspector-toggled/v1", { sessionId, active: next });
@@ -522,7 +536,7 @@ export function WebPreviewPanel({
       }
       return next;
     });
-  }, [injectInspector, cancelInspector, sessionId]);
+  }, [injectInspector, cancelInspector, serverRunning, sessionId]);
 
   // Listen for element selections and inspector-done messages from the iframe.
   useEffect(() => {
@@ -563,8 +577,9 @@ export function WebPreviewPanel({
           data-id="preview/back"
           type="button"
           onClick={handleBack}
-          className="p-1.5 rounded hover:bg-gray-800 text-gray-400 hover:text-gray-200 transition-colors flex-shrink-0"
-          title="Back"
+          disabled={!serverRunning}
+          className={browserButtonClass}
+          title={serverRunning ? "Back" : "Preview server is not running"}
         >
           <ArrowLeft size={14} />
         </button>
@@ -572,8 +587,9 @@ export function WebPreviewPanel({
           data-id="preview/forward"
           type="button"
           onClick={handleForward}
-          className="p-1.5 rounded hover:bg-gray-800 text-gray-400 hover:text-gray-200 transition-colors flex-shrink-0"
-          title="Forward"
+          disabled={!serverRunning}
+          className={browserButtonClass}
+          title={serverRunning ? "Forward" : "Preview server is not running"}
         >
           <ArrowRight size={14} />
         </button>
@@ -581,8 +597,9 @@ export function WebPreviewPanel({
           data-id="preview/refresh"
           type="button"
           onClick={handleRefresh}
-          className={`p-1.5 hover:bg-gray-800 text-gray-400 hover:text-gray-200 transition-colors flex-shrink-0 ${isLoading ? "animate-spin rounded-full" : "rounded"}`}
-          title="Refresh"
+          disabled={!serverRunning}
+          className={`${browserButtonClass} ${serverRunning && isLoading ? "animate-spin rounded-full" : ""}`}
+          title={serverRunning ? "Refresh" : "Preview server is not running"}
         >
           <RotateCw size={14} />
         </button>
@@ -608,12 +625,13 @@ export function WebPreviewPanel({
             data-id="preview/inspector-toggle"
             type="button"
             onClick={toggleInspector}
-            className={`p-1.5 rounded transition-colors flex-shrink-0 ${
+            disabled={!serverRunning}
+            className={`p-1.5 rounded transition-colors flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed ${
               inspectorActive
-                ? "bg-blue-600 text-white hover:bg-blue-500"
-                : "hover:bg-gray-800 text-gray-400 hover:text-gray-200"
+                ? "bg-blue-600 text-white enabled:hover:bg-blue-500"
+                : "text-gray-400 enabled:hover:bg-gray-800 enabled:hover:text-gray-200"
             }`}
-            title={inspectorActive ? "Cancel element selection (Esc)" : "Pick an element to inspect"}
+            title={!serverRunning ? "Preview server is not running" : inspectorActive ? "Cancel element selection (Esc)" : "Pick an element to inspect"}
           >
             <Crosshair size={14} />
           </button>
