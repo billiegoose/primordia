@@ -6,7 +6,6 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { generateUuid7 } from "@/lib/uuid7";
 
 // Basic uuid7 format check (8-4-4-4-12 hex, version nibble = 7).
 function isValidUuid7(v: unknown): v is string {

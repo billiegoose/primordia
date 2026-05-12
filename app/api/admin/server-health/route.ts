@@ -6,7 +6,6 @@
 
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
-import * as path from 'path';
 import { getSessionUser, isAdmin } from '@/lib/auth';
 
 interface WorktreeInfo {
@@ -81,7 +80,6 @@ function getMemoryInfo(): MemoryInfo | null {
       return match ? parseInt(match[1], 10) : 0;
     };
     const totalKB = get('MemTotal');
-    const freeKB = get('MemFree');
     const availableKB = get('MemAvailable');
     if (totalKB === 0) return null;
     const totalMB = Math.round(totalKB / 1024);

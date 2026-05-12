@@ -4,7 +4,6 @@
 // The "submit a request" page for Primordia's evolve pipeline.
 // Rendered at /evolve — a dedicated page, separate from the main chat interface.
 
-import { useState } from "react";
 import { NavHeader } from "@/components/NavHeader";
 import { HamburgerMenu, buildStandardMenuItems } from "@/components/HamburgerMenu";
 import { useSessionUser } from "@/lib/hooks";

@@ -12,7 +12,6 @@
 //
 // Exit code: 0 = all passed, 1 = any failure.
 
-import * as http from 'node:http';
 import * as net from 'node:net';
 import { createHash } from 'node:crypto';
 
@@ -35,7 +34,7 @@ function fail(label: string, detail?: unknown) {
 }
 
 function assert(cond: boolean, label: string, detail?: string) {
-  cond ? pass(label) : fail(label, detail);
+  if (cond) pass(label); else fail(label, detail);
 }
 
 function timeout<T>(ms: number, label: string, p: Promise<T>): Promise<T> {
@@ -132,7 +131,7 @@ function mockUpstreamServer(
     });
     server.listen(0, '127.0.0.1', () => {
       const addr = server.address() as net.AddressInfo;
-      addr ? resolve({ server, port: addr.port }) : reject(new Error('no address'));
+      if (addr) resolve({ server, port: addr.port }); else reject(new Error('no address'));
     });
   });
 }
@@ -224,7 +223,7 @@ function createProxyServer(
   return new Promise((resolve, reject) => {
     server.listen(0, '127.0.0.1', () => {
       const addr = server.address() as net.AddressInfo;
-      addr ? resolve({ server, port: addr.port }) : reject(new Error('no address'));
+      if (addr) resolve({ server, port: addr.port }); else reject(new Error('no address'));
     });
   });
 }
@@ -284,27 +283,6 @@ function nextChunk(socket: net.Socket, ms = 2000): Promise<Buffer> {
     }, ms);
     const handler = (chunk: Buffer) => { clearTimeout(t); resolve(chunk); };
     socket.once('data', handler);
-  });
-}
-
-/** Accumulate data from a socket until `predicate` returns a result. */
-function accumulate<T>(
-  socket: net.Socket,
-  predicate: (buf: Buffer) => T | null,
-  ms = 2000,
-): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => {
-      socket.off('data', onData);
-      reject(new Error(`accumulate timeout after ${ms} ms`));
-    }, ms);
-    let acc = Buffer.alloc(0);
-    const onData = (chunk: Buffer) => {
-      acc = Buffer.concat([acc, chunk]);
-      const result = predicate(acc);
-      if (result !== null) { clearTimeout(t); socket.off('data', onData); resolve(result); }
-    };
-    socket.on('data', onData);
   });
 }
 

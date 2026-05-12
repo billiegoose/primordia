@@ -22,7 +22,7 @@ import {
   DEFAULT_CAVEMAN_INTENSITY,
   type CavemanIntensity,
 } from "../lib/agent-config";
-import { type EvolvePreset, type PresetAuthSource } from "../lib/presets";
+import { type PresetAuthSource } from "../lib/presets";
 import type { EvolvePresetWithAvailability } from "../lib/preset-availability";
 import { PageElementInspector, PageElementInfo, captureElementFiles } from "./PageElementInspector";
 import { useSounds } from "@/lib/sounds";
@@ -53,6 +53,7 @@ const ImagePreview = memo(function ImagePreview({ file }: { file: File }) {
     return () => URL.revokeObjectURL(u);
   }, [file]);
   if (!url) return null;
+  // eslint-disable-next-line @next/next/no-img-element
   return <img src={url} alt="" className="h-4 w-4 rounded object-cover flex-shrink-0" />;
 });
 
@@ -415,7 +416,6 @@ export function EvolveRequestForm({
           placeholder={placeholder}
           rows={compact ? undefined : 4}
           disabled={isLoading}
-          // eslint-disable-next-line jsx-a11y/no-autofocus
           autoFocus={autoFocus}
           className={`w-full resize-none bg-gray-800 text-sm text-gray-100 placeholder-gray-500 border border-gray-700 rounded-lg px-3 py-2 leading-relaxed outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50${compact ? " flex-1 min-h-0" : " max-h-64"}`}
         />

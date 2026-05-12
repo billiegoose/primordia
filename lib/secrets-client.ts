@@ -40,7 +40,6 @@ export type HybridEncryptedSecret = {
 
 // Module-level cache for the user's local AES key — reset on page load / module re-import.
 let cachedAesKey: CryptoKey | null = null;
-let cachedPublicKey: CryptoKey | null = null;
 
 // ── AES-GCM key management ──────────────────────────────────────────────────
 
@@ -82,10 +81,8 @@ async function getOrCreateAesKey(): Promise<CryptoKey> {
 
 // ── RSA-OAEP public key ─────────────────────────────────────────────────────
 
-/** Invalidates the cached RSA public key so it is re-fetched on next use. */
-export function bustPublicKeyCache(): void {
-  cachedPublicKey = null;
-}
+/** No-op: kept for backward compatibility. The public key is always fetched fresh. */
+export function bustPublicKeyCache(): void {}
 
 async function fetchPublicKey(): Promise<CryptoKey> {
   // Fetch on every transmission instead of reusing a module-level RSA key.
@@ -101,7 +98,6 @@ async function fetchPublicKey(): Promise<CryptoKey> {
     false,
     ['encrypt'],
   );
-  cachedPublicKey = key;
   return key;
 }
 

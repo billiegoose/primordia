@@ -8,7 +8,7 @@
  * first run against a fresh DB).
  */
 
-import { chromium, type FullConfig } from "@playwright/test";
+import { chromium } from "@playwright/test";
 import path from "path";
 import fs from "fs";
 
@@ -17,7 +17,7 @@ const TEST_EMAIL = "playwright-test@example.com";
 const AUTH_DIR = path.join(__dirname, ".auth");
 const AUTH_FILE = path.join(AUTH_DIR, "session.json");
 
-export default async function globalSetup(config: FullConfig) {
+export default async function globalSetup() {
   fs.mkdirSync(AUTH_DIR, { recursive: true });
 
   const browser = await chromium.launch();

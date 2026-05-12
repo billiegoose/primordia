@@ -126,7 +126,7 @@ export function HamburgerMenu({ sessionUser, onLogout, items, containerRef }: Ha
     if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
       setMenuOpen(false);
     }
-  }, []);
+  }, [menuRef]);
 
   useEffect(() => {
     if (!menuOpen) return;

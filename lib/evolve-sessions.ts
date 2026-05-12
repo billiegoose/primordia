@@ -743,6 +743,7 @@ export async function startLocalEvolve(
   taskRequest: string,
   repoRoot: string,
   /** @deprecated No longer used — preview URLs are derived from the session ID. */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _publicOrigin: string = "http://localhost",
   /** Temporary file paths for user-uploaded attachments. Copied into worktree/attachments/ and deleted from /tmp. */
   attachmentPaths: string[] = [],
@@ -1162,6 +1163,7 @@ export async function runFollowupInWorktree(
 export async function restartDevServerInWorktree(
   session: LocalSession,
   _repoRoot: string,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _publicHostname: string = "localhost",
 ): Promise<void> {
   const proxyPort = process.env.REVERSE_PROXY_PORT!;

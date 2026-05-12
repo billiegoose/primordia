@@ -797,7 +797,6 @@ async function handleProdSpawn(
   try {
     // Snapshot the old upstream port before we change anything.
     const oldPort = upstreamPort;
-    const oldEntry = prodServerEntry;
 
     _step('Starting server…');
     await killPortOwner(port);

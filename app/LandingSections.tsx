@@ -10,7 +10,6 @@ import Link from "next/link";
 import { RefreshCw, GitBranch, ChevronDown } from "lucide-react";
 import { ChangelogNewsticker } from "./ChangelogNewsticker";
 import InstallBlock from "./InstallBlock";
-import { createNameId } from "mnemonic-id";
 
 // ── Feature card data ────────────────────────────────────────────────────────
 

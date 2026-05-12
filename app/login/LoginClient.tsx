@@ -49,6 +49,7 @@ export default function LoginClient({ initialUser, plugins }: LoginClientProps) 
 
   const showLoggedInBanner = initialUser !== null && !ignoringSession;
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   function handleSuccess(_username: string) {
     router.push(nextUrl);
     router.refresh();

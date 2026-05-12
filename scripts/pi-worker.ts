@@ -22,7 +22,6 @@ import {
   ModelRegistry,
   SessionManager,
   DefaultResourceLoader,
-  createCodingTools,
   getAgentDir,
   type ExtensionFactory,
 } from '@mariozechner/pi-coding-agent';

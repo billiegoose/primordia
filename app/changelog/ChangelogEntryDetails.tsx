@@ -17,7 +17,7 @@ interface Props {
   title: string;
 }
 
-export function ChangelogEntryDetails({ filename, date, title }: Props) {
+export function ChangelogEntryDetails({ filename, title }: Props) {
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const fetchedRef = useRef(false);

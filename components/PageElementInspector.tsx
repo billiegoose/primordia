@@ -599,7 +599,6 @@ export function PageElementInspector({
       if (!el) { onCancel(); return; }
       onSelect(buildInfo(el));
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [getElementAt, onSelect, onCancel],
   );
 
@@ -630,7 +629,6 @@ export function PageElementInspector({
         if (hoveredRef.current) onSelect(buildInfo(hoveredRef.current));
       }, LONG_PRESS_MS);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [getElementAt, onSelect],
   );
 
@@ -652,7 +650,6 @@ export function PageElementInspector({
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
     e.preventDefault();
     cancelLongPress();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Render ────────────────────────────────────────────────────────────────

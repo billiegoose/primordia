@@ -35,7 +35,7 @@ function ReceivePageInner() {
     tokenId ? "loading" : "error"
   );
   const [username, setUsername] = useState<string | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(() =>
+  const [errorMsg] = useState<string | null>(() =>
     tokenId ? null : "No token found in URL. This QR code may be invalid."
   );
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);

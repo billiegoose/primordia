@@ -9,7 +9,7 @@
  * Run: bunx playwright test tests/evolve-demo.spec.ts --headed
  */
 
-import { test, expect, type Page, type BrowserContext } from "@playwright/test";
+import { test, expect } from "@playwright/test";
 import path from "path";
 import fs from "fs";
 
@@ -40,27 +40,6 @@ const T = {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** Wait for an event to appear in the /api/events stream (admin-visible). */
-async function waitForEvent(
-  page: Page,
-  eventType: string,
-  timeoutMs = 30_000
-): Promise<void> {
-  await expect
-    .poll(
-      async () => {
-        const resp = await page.request.get(
-          `${BASE_URL}/api/events?type=${encodeURIComponent(eventType)}&limit=1`
-        );
-        if (!resp.ok()) return false;
-        const json = await resp.json();
-        return Array.isArray(json.events) && json.events.length > 0;
-      },
-      { timeout: timeoutMs, intervals: [500] }
-    )
-    .toBe(true);
-}
 
 /** Tiny mock image file for attach-files tests. */
 function createTempImages(): string[] {

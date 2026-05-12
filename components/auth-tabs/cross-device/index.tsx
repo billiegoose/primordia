@@ -49,7 +49,6 @@ export default function CrossDeviceTab({ onSuccess }: AuthTabProps) {
       });
 
     return stopPolling;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Start the QR flow once the public key is ready.
@@ -65,6 +64,7 @@ export default function CrossDeviceTab({ onSuccess }: AuthTabProps) {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const startQrFlow = useCallback(async (pk: string | null) => {
     stopPolling();
     setPhase("loading");
@@ -129,7 +129,6 @@ export default function CrossDeviceTab({ onSuccess }: AuthTabProps) {
       setPhase("error");
       setQrError("Network error. Please try again.");
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onSuccess]);
 
   function handleRefresh() {

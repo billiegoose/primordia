@@ -404,7 +404,7 @@ function RunningAgentSection({ events, label, isTypeFixSection, isAutoCommitSect
 }
 
 /** Render a completed agent/type-fix/auto-commit section with tool calls collapsed. */
-function DoneAgentSection({ events, label, isTypeFixSection, isAutoCommitSection, worktreePath, harness, model, authSource, auth, startTs }: {
+function DoneAgentSection({ events, isTypeFixSection, isAutoCommitSection, worktreePath, harness, model, authSource, auth, startTs }: {
   events: SessionEvent[];
   label: string;
   isTypeFixSection: boolean;
@@ -1073,7 +1073,7 @@ export default function EvolveSessionView({
       if (isProduction) sounds.deploy();
       else sounds.merge();
     }
-  }, [status, sounds, isProduction]);
+  }, [status, sounds, isProduction, sessionId]);
 
   // Show the "Stuck?" button if no new NDJSON events have arrived for 30 seconds
   // while the session is in a long-running pipeline state.
