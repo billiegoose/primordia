@@ -201,10 +201,6 @@ export default function CredentialsSettingsClient() {
     : credScrambled;
   const showStoredCredentials = isDecrypting || credRevealed;
 
-  useEffect(() => {
-    if (!isSet) setManualOpen(true);
-  }, [isSet]);
-
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-3">
