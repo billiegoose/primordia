@@ -81,14 +81,14 @@ export function AgentIdentityLine({
   const hLabel = harnessLabel(harness);
   return (
     <span className={`inline-flex min-w-0 items-center gap-1.5 ${className}`}>
-      <span className="inline-flex items-center gap-1 min-w-0">
+      <span className="inline-flex items-center gap-1 min-w-0" title={authLabel}>
         <AuthSourceIcon source={resolvedAuth} size={iconSize} />
-        <span className="truncate">{authLabel}</span>
+        <span className="hidden truncate sm:inline">{authLabel}</span>
       </span>
       <span className="text-gray-600">/</span>
-      <span className="inline-flex items-center gap-1 min-w-0">
+      <span className="inline-flex items-center gap-1 min-w-0" title={hLabel}>
         <HarnessIcon harness={harness} size={iconSize} />
-        <span className="truncate">{hLabel}</span>
+        <span className="hidden truncate sm:inline">{hLabel}</span>
       </span>
       {model && (
         <>
