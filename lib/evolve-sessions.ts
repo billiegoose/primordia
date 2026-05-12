@@ -223,7 +223,7 @@ function resolveAgentAuth(
       resolvedChatGptOAuth: undefined,
     };
   }
-  if (chatGptOAuth && harnessId === 'pi' && modelId?.startsWith('openai-codex:')) {
+  if (chatGptOAuth && (harnessId === 'pi' || harnessId === 'codex') && modelId?.startsWith('openai-codex:')) {
     return {
       auth: { source: 'chatgpt-subscription' },
       resolvedCredentials: undefined,
@@ -775,9 +775,11 @@ export async function startLocalEvolve(
       `2. Commit all changes with a descriptive message.\n` +
       `3. In your final message, mention the path of the most relevant page to open in the preview, e.g. "Preview \`/admin\`." Skip this step only if all changes are purely server-side or no single page is more relevant than the landing page.`;
 
-    const workerScript = (harnessId === 'pi')
+    const workerScript = harnessId === 'pi'
       ? path.join(repoRoot, 'scripts/pi-worker.ts')
-      : path.join(repoRoot, 'scripts/claude-worker.ts');
+      : harnessId === 'codex'
+        ? path.join(repoRoot, 'scripts/codex-worker.ts')
+        : path.join(repoRoot, 'scripts/claude-worker.ts');
 
     await spawnAgentWorker(
       {
@@ -935,9 +937,11 @@ export async function runFollowupInWorktree(
       `${followupRequest}${attachmentSection}\n\n` +
       `${changelogInstruction} Commit all changes with a descriptive message.${previewPathInstruction}`;
 
-    const fuWorkerScript = (fuHarnessId === 'pi')
+    const fuWorkerScript = fuHarnessId === 'pi'
       ? path.join(repoRoot, 'scripts/pi-worker.ts')
-      : path.join(repoRoot, 'scripts/claude-worker.ts');
+      : fuHarnessId === 'codex'
+        ? path.join(repoRoot, 'scripts/codex-worker.ts')
+        : path.join(repoRoot, 'scripts/claude-worker.ts');
 
     await spawnAgentWorker(
       {
@@ -1051,9 +1055,11 @@ export async function resolveConflictsWithAgent(
   }
 
   const harnessId = sessionContext.harness ?? DEFAULT_HARNESS;
-  const workerScript = (harnessId === 'pi')
+  const workerScript = harnessId === 'pi'
     ? path.join(root, 'scripts/pi-worker.ts')
-    : path.join(root, 'scripts/claude-worker.ts');
+    : harnessId === 'codex'
+      ? path.join(root, 'scripts/codex-worker.ts')
+      : path.join(root, 'scripts/claude-worker.ts');
 
   try {
     await spawnAgentWorker(
