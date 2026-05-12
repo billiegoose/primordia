@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { Edit3, Loader, Plus, ToggleLeft, ToggleRight, Trash2 } from "lucide-react";
+import { Check, ChevronDown, Edit3, Loader, Plus, ToggleLeft, ToggleRight, Trash2 } from "lucide-react";
 import { withBasePath } from "@/lib/base-path";
 import { PRESET_AUTH_SOURCE_LABELS, type EvolvePreset, type PresetAuthSource } from "@/lib/presets";
 import type { EvolvePresetWithAvailability } from "@/lib/preset-availability";
 import { firstModelForAuthSource, getHarnessesForAuthSource, filterModelsForAuthSource } from "@/lib/preset-options";
 import type { ModelOption } from "@/lib/agent-config";
 import { ModelPicker } from "@/components/ModelPicker";
+import { AgentIdentityLine, AuthSourceIcon, HarnessIcon } from "@/components/AgentIdentity";
 import { trackEvent } from "@/lib/events-client";
 
 const AUTH_SOURCES = Object.keys(PRESET_AUTH_SOURCE_LABELS) as PresetAuthSource[];
@@ -26,16 +27,75 @@ function emptyPreset(): EvolvePreset {
   };
 }
 
+interface NiceSelectOption {
+  value: string;
+  label: string;
+  icon: ReactNode;
+}
+
+function NiceSelect({
+  value,
+  options,
+  onChange,
+}: {
+  value: string;
+  options: NiceSelectOption[];
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find((option) => option.value === value) ?? options[0];
+  return (
+    <div className="relative" onBlur={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+    }}>
+      <button
+        type="button"
+        onClick={() => setOpen((next) => !next)}
+        className="flex w-full items-center gap-2 rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-left text-sm text-gray-100 outline-none transition-colors hover:border-gray-600 focus:border-blue-500"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center text-gray-300">{selected?.icon}</span>
+        <span className="min-w-0 flex-1 truncate">{selected?.label ?? "Select"}</span>
+        <ChevronDown size={14} className={`shrink-0 text-gray-500 transition-transform${open ? " rotate-180" : ""}`} aria-hidden="true" />
+      </button>
+      {open && (
+        <div className="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border border-gray-700 bg-gray-950 p-1 shadow-2xl" role="listbox">
+          {options.map((option) => {
+            const active = option.value === value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="option"
+                aria-selected={active}
+                onClick={() => { onChange(option.value); setOpen(false); }}
+                className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${active ? "bg-blue-600/20 text-blue-100" : "text-gray-200 hover:bg-gray-800"}`}
+              >
+                <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">{option.icon}</span>
+                <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                {active && <Check size={14} className="shrink-0 text-blue-300" aria-hidden="true" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PresetCard({
   preset,
   disabled = false,
   showDisabledPill = disabled,
   right,
+  modelLabel,
 }: {
   preset: EvolvePresetWithAvailability | EvolvePreset;
   disabled?: boolean;
   showDisabledPill?: boolean;
   right?: ReactNode;
+  modelLabel?: string;
 }) {
   const unavailable = 'available' in preset && !preset.available;
   return (
@@ -58,8 +118,8 @@ function PresetCard({
               <span className="text-xs px-1.5 py-0.5 rounded bg-gray-700 text-gray-500">disabled</span>
             )}
           </div>
-          <p className="text-xs text-gray-500 mt-0.5 truncate">
-            {PRESET_AUTH_SOURCE_LABELS[preset.authSource]} · {preset.harness} · {preset.model}
+          <p className="text-xs text-gray-500 mt-1 truncate">
+            <AgentIdentityLine authSource={preset.authSource} harness={preset.harness} model={modelLabel ?? preset.model} iconSize={12} />
           </p>
         </div>
         {right && <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">{right}</div>}
@@ -125,6 +185,10 @@ export default function PresetsSettingsClient() {
     updatePreset(preset.id, { harness, model });
   }
 
+  function modelLabelFor(harness: string, model: string): string {
+    return modelOptionsByHarness[harness]?.find((m) => m.id === model)?.label ?? model;
+  }
+
   function normalizedPresets(source = custom): EvolvePreset[] {
     return source.map((p) => {
       const harnesses = getHarnessesForAuthSource(p.authSource);
@@ -182,9 +246,7 @@ export default function PresetsSettingsClient() {
         <p className="text-sm text-gray-400 mt-1">Pick billing source + harness + model once, then switch by name in Evolve.</p>
       </div>
 
-      <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4 space-y-3">
-        <h2 className="text-sm font-semibold text-gray-200">Presets</h2>
-
+      <div className="space-y-3">
         <div className="grid gap-2">
           {builtIn.map((p) => {
             const disabled = disabledBuiltInIds.includes(p.id);
@@ -194,6 +256,7 @@ export default function PresetsSettingsClient() {
                 preset={p}
                 disabled={disabled}
                 showDisabledPill={disabled}
+                modelLabel={modelLabelFor(p.harness, p.model)}
                 right={
                   <button
                     type="button"
@@ -217,6 +280,16 @@ export default function PresetsSettingsClient() {
             const isEditing = editingIds.has(p.id);
             const harnesses = getHarnessesForAuthSource(p.authSource);
             const selectedHarness = harnesses.some((h) => h.id === p.harness) ? p.harness : (harnesses[0]?.id ?? p.harness);
+            const authSourceOptions: NiceSelectOption[] = AUTH_SOURCES.map((source) => ({
+              value: source,
+              label: PRESET_AUTH_SOURCE_LABELS[source],
+              icon: <AuthSourceIcon source={source} size={16} />,
+            }));
+            const harnessOptions: NiceSelectOption[] = harnesses.map((h) => ({
+              value: h.id,
+              label: h.label,
+              icon: <HarnessIcon harness={h.id} size={16} />,
+            }));
             const selectableModels = filterModelsForAuthSource(modelOptionsByHarness[selectedHarness] ?? [], p.authSource, selectedHarness);
             const selectedModel = selectableModels.some((m) => m.id === p.model) ? p.model : (selectableModels[0]?.id ?? p.model);
 
@@ -225,6 +298,7 @@ export default function PresetsSettingsClient() {
                 <PresetCard
                   key={p.id}
                   preset={{ ...p, harness: selectedHarness, model: selectedModel }}
+                  modelLabel={modelLabelFor(selectedHarness, selectedModel)}
                   right={
                     <>
                       <button type="button" title="Edit preset" onClick={() => editPreset(p.id, true)} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-200 hover:bg-gray-700 transition-colors">
@@ -248,18 +322,14 @@ export default function PresetsSettingsClient() {
                 </label>
 
                 <div className="grid gap-3 md:grid-cols-3">
-                  <label className="flex flex-col gap-1 text-xs text-gray-400">
-                    1. Billing source
-                    <select value={p.authSource} onChange={(e) => changeAuthSource(p, e.target.value as PresetAuthSource)} className="rounded-lg bg-gray-900 border border-gray-700 px-3 py-2 text-sm text-gray-100 outline-none focus:border-blue-500 transition-colors">
-                      {AUTH_SOURCES.map((source) => <option key={source} value={source}>{PRESET_AUTH_SOURCE_LABELS[source]}</option>)}
-                    </select>
-                  </label>
-                  <label className="flex flex-col gap-1 text-xs text-gray-400">
-                    2. Harness
-                    <select value={selectedHarness} onChange={(e) => changeHarness(p, e.target.value)} className="rounded-lg bg-gray-900 border border-gray-700 px-3 py-2 text-sm text-gray-100 outline-none focus:border-blue-500 transition-colors">
-                      {harnesses.map((h) => <option key={h.id} value={h.id}>{h.label}</option>)}
-                    </select>
-                  </label>
+                  <div className="flex flex-col gap-1 text-xs text-gray-400">
+                    <span>1. Billing source</span>
+                    <NiceSelect value={p.authSource} options={authSourceOptions} onChange={(value) => changeAuthSource(p, value as PresetAuthSource)} />
+                  </div>
+                  <div className="flex flex-col gap-1 text-xs text-gray-400">
+                    <span>2. Harness</span>
+                    <NiceSelect value={selectedHarness} options={harnessOptions} onChange={(value) => changeHarness(p, value)} />
+                  </div>
                   <div className="flex flex-col gap-1 text-xs text-gray-400">
                     3. Model
                     <ModelPicker
