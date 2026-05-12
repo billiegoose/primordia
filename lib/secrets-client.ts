@@ -6,9 +6,9 @@
 //
 // Architecture:
 //   - ONE AES-256-GCM key per user stored in localStorage ('primordia_aes_key').
-//     All secret types share this key — simplifies cross-device AES key sync.
-//   - Each secret type is stored server-side in encrypted_credentials by
-//     authSource (see /api/secrets/[type]) using AES-GCM with a per-save random IV.
+//     All secret sources share this key — simplifies cross-device AES key sync.
+//   - Each secret source is stored server-side in encrypted_credentials by
+//     authSource (see /api/secrets/[source]) using AES-GCM with a per-save random IV.
 //   - No local presence index — always ask the server whether a secret is set.
 //   - For transmission, every secret uses the same hybrid envelope:
 //     ephemeral AES-256-GCM encrypts the secret, RSA-OAEP wraps that AES key.
@@ -19,14 +19,9 @@
 // Key that never leaves the server process: the RSA-OAEP private key.
 
 import { withBasePath } from './base-path';
+import type { SecretAuthSource } from './presets';
 
-export type SecretType =
-  | 'ANTHROPIC_API_KEY'
-  | 'OPENROUTER_API_KEY'
-  | 'OPENAI_API_KEY'
-  | 'GEMINI_API_KEY'
-  | 'CLAUDE_CODE_CREDENTIALS_JSON'
-  | 'CHATGPT_SUBSCRIPTION_OAUTH';
+export type { SecretAuthSource } from './presets';
 
 const AES_KEY_STORAGE = 'primordia_aes_key';
 const LEGACY_CREDENTIALS_AES_KEY_STORAGE = 'primordia_credentials_aes_key';
@@ -116,7 +111,7 @@ async function fetchPublicKey(): Promise<CryptoKey> {
  * Encrypts and stores a secret server-side.
  * Generates the shared AES key if this is the first secret set on this device.
  */
-export async function setSecret(type: SecretType, value: string): Promise<void> {
+export async function setSecret(source: SecretAuthSource, value: string): Promise<void> {
   if (typeof window === 'undefined') return;
 
   const aesKey = await getOrCreateAesKey();
@@ -130,13 +125,13 @@ export async function setSecret(type: SecretType, value: string): Promise<void> 
   const ivB64 = btoa(String.fromCharCode(...iv));
   const ctB64 = btoa(String.fromCharCode(...new Uint8Array(ciphertext)));
 
-  const res = await fetch(withBasePath(`/api/secrets/${type}`), {
+  const res = await fetch(withBasePath(`/api/secrets/${source}`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ iv: ivB64, ciphertext: ctB64 }),
   });
   if (!res.ok) {
-    throw new Error(`Failed to store ${type} on server: ${res.statusText}`);
+    throw new Error(`Failed to store ${source} on server: ${res.statusText}`);
   }
 }
 
@@ -146,9 +141,9 @@ export async function setSecret(type: SecretType, value: string): Promise<void> 
  * must remain stable so other browser contexts can still decrypt.
  * Falls back to setSecret() if no AES key exists yet.
  */
-export async function updateSecret(type: SecretType, value: string): Promise<void> {
+export async function updateSecret(source: SecretAuthSource, value: string): Promise<void> {
   const aesKey = await loadAesKey();
-  if (!aesKey) return setSecret(type, value);
+  if (!aesKey) return setSecret(source, value);
 
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ciphertext = await crypto.subtle.encrypt(
@@ -160,23 +155,23 @@ export async function updateSecret(type: SecretType, value: string): Promise<voi
   const ivB64 = btoa(String.fromCharCode(...iv));
   const ctB64 = btoa(String.fromCharCode(...new Uint8Array(ciphertext)));
 
-  const res = await fetch(withBasePath(`/api/secrets/${type}`), {
+  const res = await fetch(withBasePath(`/api/secrets/${source}`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ iv: ivB64, ciphertext: ctB64 }),
   });
-  if (!res.ok) throw new Error(`Failed to update ${type} on server: ${res.statusText}`);
+  if (!res.ok) throw new Error(`Failed to update ${source} on server: ${res.statusText}`);
 }
 
 /**
  * Removes a secret from the server. If this was the last secret stored for
  * this user, also removes the shared AES key from localStorage.
  */
-export async function clearSecret(type: SecretType): Promise<void> {
+export async function clearSecret(source: SecretAuthSource): Promise<void> {
   if (typeof window === 'undefined') return;
 
   try {
-    await fetch(withBasePath(`/api/secrets/${type}`), { method: 'DELETE' });
+    await fetch(withBasePath(`/api/secrets/${source}`), { method: 'DELETE' });
   } catch {
     // Best-effort — continue to check remaining secrets
   }
@@ -185,8 +180,8 @@ export async function clearSecret(type: SecretType): Promise<void> {
   try {
     const res = await fetch(withBasePath('/api/secrets'));
     if (res.ok) {
-      const data = (await res.json()) as { types: SecretType[] };
-      if (data.types.length === 0) {
+      const data = (await res.json()) as { sources: SecretAuthSource[] };
+      if (data.sources.length === 0) {
         cachedAesKey = null;
         localStorage.removeItem(AES_KEY_STORAGE);
         clearLegacyAesKey();
@@ -260,19 +255,19 @@ export async function adoptNewAesKey(newKeyJwkStr: string): Promise<void> {
     return;
   }
 
-  // Ask the server which types have ciphertext so we know what to migrate.
-  let types: SecretType[] = [];
+  // Ask the server which sources have ciphertext so we know what to migrate.
+  let sources: SecretAuthSource[] = [];
   try {
     const listRes = await fetch(withBasePath('/api/secrets'));
     if (listRes.ok) {
-      const data = (await listRes.json()) as { types: SecretType[] };
-      types = data.types;
+      const data = (await listRes.json()) as { sources: SecretAuthSource[] };
+      sources = data.sources;
     }
   } catch {}
 
-  for (const type of types) {
+  for (const source of sources) {
     try {
-      const res = await fetch(withBasePath(`/api/secrets/${type}`));
+      const res = await fetch(withBasePath(`/api/secrets/${source}`));
       if (!res.ok) continue;
       const data = (await res.json()) as { ciphertext: string | null };
       if (!data.ciphertext) continue;
@@ -290,7 +285,7 @@ export async function adoptNewAesKey(newKeyJwkStr: string): Promise<void> {
       const newIvB64 = btoa(String.fromCharCode(...newIv));
       const newCtB64 = btoa(String.fromCharCode(...new Uint8Array(newCt)));
 
-      await fetch(withBasePath(`/api/secrets/${type}`), {
+      await fetch(withBasePath(`/api/secrets/${source}`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ iv: newIvB64, ciphertext: newCtB64 }),
@@ -310,18 +305,40 @@ export async function adoptNewAesKey(newKeyJwkStr: string): Promise<void> {
  * Returns null if no AES key is in localStorage, the type has no ciphertext
  * on the server, or decryption fails for any reason.
  */
-export async function getSecret(type: SecretType): Promise<string | null> {
+export async function getSecret(source: SecretAuthSource): Promise<string | null> {
   try {
     const aesKey = await loadAesKey();
     if (!aesKey) return null;
 
-    const res = await fetch(withBasePath(`/api/secrets/${type}`));
+    const res = await fetch(withBasePath(`/api/secrets/${source}`));
     if (!res.ok) return null;
 
     const data = (await res.json()) as { ciphertext: string | null };
     if (!data.ciphertext) return null;
 
     const { iv: ivB64, ciphertext: ctB64 } = JSON.parse(data.ciphertext) as {
+      iv: string;
+      ciphertext: string;
+    };
+
+    const iv = Uint8Array.from(atob(ivB64), (c) => c.charCodeAt(0));
+    const ct = Uint8Array.from(atob(ctB64), (c) => c.charCodeAt(0));
+    const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, ct);
+
+    return new TextDecoder().decode(plaintext);
+  } catch {
+    return null;
+  }
+}
+
+export async function decryptStoredSecretPayload(ciphertextPayload: string | null | undefined): Promise<string | null> {
+  try {
+    if (!ciphertextPayload) return null;
+
+    const aesKey = await loadAesKey();
+    if (!aesKey) return null;
+
+    const { iv: ivB64, ciphertext: ctB64 } = JSON.parse(ciphertextPayload) as {
       iv: string;
       ciphertext: string;
     };
@@ -351,12 +368,12 @@ export async function getSecret(type: SecretType): Promise<string | null> {
  * The server decrypts wrappedKey with its RSA private key to recover the
  * ephemeral AES key, then uses it to decrypt the ciphertext.
  */
-export async function encryptSecretForTransmission(type: SecretType): Promise<HybridEncryptedSecret | null> {
+export async function encryptSecretForTransmission(source: SecretAuthSource): Promise<HybridEncryptedSecret | null> {
   try {
     const aesKey = await loadAesKey();
     if (!aesKey) return null;
 
-    const res = await fetch(withBasePath(`/api/secrets/${type}`));
+    const res = await fetch(withBasePath(`/api/secrets/${source}`));
     if (!res.ok) return null;
 
     const data = (await res.json()) as { ciphertext: string | null };
@@ -397,15 +414,15 @@ export async function encryptSecretForTransmission(type: SecretType): Promise<Hy
       ciphertext: btoa(String.fromCharCode(...new Uint8Array(encryptedPayload))),
     };
   } catch (err) {
-    console.error(`[secrets-client] Failed to encrypt ${type} for transmission:`, err);
+    console.error(`[secrets-client] Failed to encrypt ${source} for transmission:`, err);
     return null;
   }
 }
 
 export async function encryptCredentialsForTransmission(): Promise<HybridEncryptedSecret | null> {
-  return encryptSecretForTransmission('CLAUDE_CODE_CREDENTIALS_JSON');
+  return encryptSecretForTransmission('claude-subscription');
 }
 
 export async function encryptChatGptSubscriptionForTransmission(): Promise<HybridEncryptedSecret | null> {
-  return encryptSecretForTransmission('CHATGPT_SUBSCRIPTION_OAUTH');
+  return encryptSecretForTransmission('chatgpt-subscription');
 }

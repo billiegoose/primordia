@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Check, ChevronDown, Edit3, Loader, Plus, ToggleLeft, ToggleRight, Trash2 } from "lucide-react";
 import { withBasePath } from "@/lib/base-path";
 import { PRESET_AUTH_SOURCE_LABELS, type EvolvePreset, type PresetAuthSource } from "@/lib/presets";
@@ -12,6 +12,13 @@ import { AgentIdentityLine, AuthSourceIcon, HarnessIcon } from "@/components/Age
 import { trackEvent } from "@/lib/events-client";
 
 const AUTH_SOURCES = Object.keys(PRESET_AUTH_SOURCE_LABELS) as PresetAuthSource[];
+
+interface PresetsSettingsInitialData {
+  builtInPresets: EvolvePresetWithAvailability[];
+  customPresets: EvolvePresetWithAvailability[];
+  disabledBuiltInPresetIds: string[];
+  modelOptionsByHarness: Record<string, ModelOption[]>;
+}
 
 function markAvailable(preset: EvolvePreset): EvolvePresetWithAvailability {
   return { ...preset, available: true };
@@ -128,29 +135,14 @@ function PresetCard({
   );
 }
 
-export default function PresetsSettingsClient() {
-  const [builtIn, setBuiltIn] = useState<EvolvePresetWithAvailability[]>([]);
-  const [disabledBuiltInIds, setDisabledBuiltInIds] = useState<string[]>([]);
-  const [custom, setCustom] = useState<EvolvePresetWithAvailability[]>([]);
+export default function PresetsSettingsClient({ initialData }: { initialData: PresetsSettingsInitialData }) {
+  const [builtIn] = useState<EvolvePresetWithAvailability[]>(initialData.builtInPresets);
+  const [disabledBuiltInIds, setDisabledBuiltInIds] = useState<string[]>(initialData.disabledBuiltInPresetIds);
+  const [custom, setCustom] = useState<EvolvePresetWithAvailability[]>(initialData.customPresets);
   const [editingIds, setEditingIds] = useState<Set<string>>(new Set());
-  const [modelOptionsByHarness, setModelOptionsByHarness] = useState<Record<string, ModelOption[]>>({});
+  const [modelOptionsByHarness] = useState<Record<string, ModelOption[]>>(initialData.modelOptionsByHarness);
   const [savingTarget, setSavingTarget] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetch(withBasePath('/api/settings/presets'))
-      .then((r) => r.json())
-      .then((data: { builtInPresets?: EvolvePresetWithAvailability[]; customPresets?: EvolvePresetWithAvailability[]; disabledBuiltInPresetIds?: string[] }) => {
-        setBuiltIn(data.builtInPresets ?? []);
-        setCustom(data.customPresets ?? []);
-        setDisabledBuiltInIds(data.disabledBuiltInPresetIds ?? []);
-      })
-      .catch(() => setMessage('Could not load presets.'));
-    fetch(withBasePath('/api/evolve/models'))
-      .then((r) => r.json())
-      .then((data: Record<string, ModelOption[]>) => setModelOptionsByHarness(data))
-      .catch(() => { /* keep text fallback */ });
-  }, []);
 
   function updatePreset(id: string, patch: Partial<EvolvePreset>) {
     setCustom((prev) => prev.map((p) => p.id === id ? { ...p, ...patch } : p));

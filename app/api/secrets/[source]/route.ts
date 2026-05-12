@@ -1,6 +1,6 @@
-// app/api/secrets/[type]/route.ts
+// app/api/secrets/[source]/route.ts
 // Unified storage for all user secrets (API keys and credentials).
-// Each secret type is stored as an AES-GCM encrypted blob in encrypted_credentials.
+// Each secret source is stored as an AES-GCM encrypted blob in encrypted_credentials.
 // The server never sees the AES key — only the ciphertext.
 //
 // GET  → { ciphertext: string | null }
@@ -16,61 +16,35 @@
 
 import { getSessionUser } from '@/lib/auth';
 import { getDb } from '@/lib/db';
+import { isSecretAuthSource, type SecretAuthSource } from '@/lib/presets';
 
-type SecretType =
-  | 'ANTHROPIC_API_KEY'
-  | 'OPENROUTER_API_KEY'
-  | 'OPENAI_API_KEY'
-  | 'GEMINI_API_KEY'
-  | 'CLAUDE_CODE_CREDENTIALS_JSON'
-  | 'CHATGPT_SUBSCRIPTION_OAUTH';
-
-type AuthSource =
-  | 'anthropic-api-key'
-  | 'openrouter-api-key'
-  | 'openai-api-key'
-  | 'gemini-api-key'
-  | 'claude-subscription'
-  | 'chatgpt-subscription';
-
-const AUTH_SOURCES: Record<SecretType, AuthSource> = {
-  ANTHROPIC_API_KEY: 'anthropic-api-key',
-  OPENROUTER_API_KEY: 'openrouter-api-key',
-  OPENAI_API_KEY: 'openai-api-key',
-  GEMINI_API_KEY: 'gemini-api-key',
-  CLAUDE_CODE_CREDENTIALS_JSON: 'claude-subscription',
-  CHATGPT_SUBSCRIPTION_OAUTH: 'chatgpt-subscription',
-};
-
-const VALID_TYPES = new Set<string>(Object.keys(AUTH_SOURCES));
-
-function resolveType(params: { type: string }): SecretType | null {
-  return VALID_TYPES.has(params.type) ? (params.type as SecretType) : null;
+function resolveSource(params: { source: string }): SecretAuthSource | null {
+  return isSecretAuthSource(params.source) ? params.source : null;
 }
 
 /**
  * Get stored encrypted secret
- * @description Returns the stored AES-GCM encrypted ciphertext for the given secret type, or `null` if none is set.
+ * @description Returns the stored AES-GCM encrypted ciphertext for the given secret source, or `null` if none is set.
  * @tag Secrets
  */
 export async function GET(
   _req: Request,
-  { params }: { params: Promise<{ type: string }> },
+  { params }: { params: Promise<{ source: string }> },
 ) {
   const user = await getSessionUser();
   if (!user) return Response.json({ error: 'Authentication required' }, { status: 401 });
 
-  const type = resolveType(await params);
-  if (!type) return Response.json({ error: 'Unknown secret type' }, { status: 400 });
+  const source = resolveSource(await params);
+  if (!source) return Response.json({ error: 'Unknown secret source' }, { status: 400 });
 
   const db = await getDb();
-  const stored = await db.getEncryptedCredential(user.id, AUTH_SOURCES[type]);
+  const stored = await db.getEncryptedCredential(user.id, source);
   const ciphertext = stored && stored.length > 0 ? stored : null;
 
   return Response.json({ ciphertext });
 }
 
-/** JSON body for POST /api/secrets/[type] */
+/** JSON body for POST /api/secrets/[source] */
 export interface StoreSecretBody {
   iv: string; // Base64-encoded AES-GCM initialisation vector.
   ciphertext: string; // Base64-encoded AES-GCM ciphertext.
@@ -84,13 +58,13 @@ export interface StoreSecretBody {
  */
 export async function POST(
   req: Request,
-  { params }: { params: Promise<{ type: string }> },
+  { params }: { params: Promise<{ source: string }> },
 ) {
   const user = await getSessionUser();
   if (!user) return Response.json({ error: 'Authentication required' }, { status: 401 });
 
-  const type = resolveType(await params);
-  if (!type) return Response.json({ error: 'Unknown secret type' }, { status: 400 });
+  const source = resolveSource(await params);
+  if (!source) return Response.json({ error: 'Unknown secret source' }, { status: 400 });
 
   let body: unknown;
   try {
@@ -111,7 +85,7 @@ export async function POST(
   const { iv, ciphertext } = body as { iv: string; ciphertext: string };
 
   const db = await getDb();
-  await db.setEncryptedCredential(user.id, AUTH_SOURCES[type], JSON.stringify({ iv, ciphertext }));
+  await db.setEncryptedCredential(user.id, source, JSON.stringify({ iv, ciphertext }));
 
   return Response.json({ ok: true });
 }
@@ -123,16 +97,16 @@ export async function POST(
  */
 export async function DELETE(
   _req: Request,
-  { params }: { params: Promise<{ type: string }> },
+  { params }: { params: Promise<{ source: string }> },
 ) {
   const user = await getSessionUser();
   if (!user) return Response.json({ error: 'Authentication required' }, { status: 401 });
 
-  const type = resolveType(await params);
-  if (!type) return Response.json({ error: 'Unknown secret type' }, { status: 400 });
+  const source = resolveSource(await params);
+  if (!source) return Response.json({ error: 'Unknown secret source' }, { status: 400 });
 
   const db = await getDb();
-  await db.deleteEncryptedCredential(user.id, AUTH_SOURCES[type]);
+  await db.deleteEncryptedCredential(user.id, source);
 
   return Response.json({ ok: true });
 }
