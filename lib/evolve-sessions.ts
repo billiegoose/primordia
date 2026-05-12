@@ -549,27 +549,59 @@ export interface CopyProductionDbResult {
   error?: string;
 }
 
-async function vacuumCopySqliteDb(sourcePath: string, destinationPath: string): Promise<void> {
-  const tempDestination = `${destinationPath}.tmp-${process.pid}-${Date.now()}`;
+async function vacuumSnapshotSqliteDb(sourcePath: string, snapshotPath: string): Promise<void> {
+  try { fs.unlinkSync(snapshotPath); } catch { /* absent */ }
   try {
     const { Database } = await import('bun:sqlite');
     const srcDbHandle = new Database(sourcePath);
     try {
-      srcDbHandle.prepare('VACUUM INTO ?').run(tempDestination);
+      srcDbHandle.prepare('VACUUM INTO ?').run(snapshotPath);
     } finally {
       srcDbHandle.close();
     }
+  } catch (err) {
+    try { fs.unlinkSync(snapshotPath); } catch { /* absent */ }
+    throw err;
+  }
+}
 
-    // Remove WAL sidecars before swapping the main DB file so the destination
-    // worktree opens a clean, self-contained snapshot from production.
-    for (const sidecar of [destinationPath, `${destinationPath}-wal`, `${destinationPath}-shm`]) {
-      try { fs.unlinkSync(sidecar); } catch { /* absent or in use: best effort */ }
-    }
-    fs.renameSync(tempDestination, destinationPath);
+function replaceSqliteDbWithSnapshot(snapshotPath: string, destinationPath: string): void {
+  // Remove WAL sidecars before swapping the main DB file so the destination
+  // worktree opens a clean, self-contained snapshot from production.
+  for (const sidecar of [destinationPath, `${destinationPath}-wal`, `${destinationPath}-shm`]) {
+    try { fs.unlinkSync(sidecar); } catch { /* absent or in use: best effort */ }
+  }
+  fs.renameSync(snapshotPath, destinationPath);
+}
+
+async function vacuumCopySqliteDb(sourcePath: string, destinationPath: string): Promise<void> {
+  const tempDestination = `${destinationPath}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    await vacuumSnapshotSqliteDb(sourcePath, tempDestination);
+    replaceSqliteDbWithSnapshot(tempDestination, destinationPath);
   } catch (err) {
     try { fs.unlinkSync(tempDestination); } catch { /* absent */ }
     throw err;
   }
+}
+
+async function findProductionDbPath(repoRoot: string, dbName: string): Promise<string | null> {
+  const productionBranchResult = await runGit(['config', '--get', 'primordia.productionBranch'], repoRoot);
+  const productionBranch = productionBranchResult.stdout.trim();
+  if (productionBranch) {
+    const worktreeList = await runGit(['worktree', 'list', '--porcelain'], repoRoot);
+    const productionWorktreePath = parseWorktreePathForBranch(worktreeList.stdout, productionBranch);
+    if (productionWorktreePath) {
+      const candidate = path.join(productionWorktreePath, dbName);
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  }
+
+  // In local development, or before primordia.productionBranch has been set,
+  // the server's current working directory is the best available prod source.
+  const candidate = path.join(repoRoot, dbName);
+  if (fs.existsSync(candidate)) return candidate;
+  return null;
 }
 
 /**
@@ -584,25 +616,7 @@ export async function copyProductionDbToWorktree(
 ): Promise<CopyProductionDbResult> {
   const dbName = '.primordia-auth.db';
   const destinationPath = path.join(destinationWorktreePath, dbName);
-  let sourcePath: string | null = null;
-
-  const productionBranchResult = await runGit(['config', '--get', 'primordia.productionBranch'], repoRoot);
-  const productionBranch = productionBranchResult.stdout.trim();
-  if (productionBranch) {
-    const worktreeList = await runGit(['worktree', 'list', '--porcelain'], repoRoot);
-    const productionWorktreePath = parseWorktreePathForBranch(worktreeList.stdout, productionBranch);
-    if (productionWorktreePath) {
-      const candidate = path.join(productionWorktreePath, dbName);
-      if (fs.existsSync(candidate)) sourcePath = candidate;
-    }
-  }
-
-  // In local development, or before primordia.productionBranch has been set,
-  // the server's current working directory is the best available prod source.
-  if (!sourcePath) {
-    const candidate = path.join(repoRoot, dbName);
-    if (fs.existsSync(candidate)) sourcePath = candidate;
-  }
+  const sourcePath = await findProductionDbPath(repoRoot, dbName);
 
   if (!sourcePath) {
     return { copied: false, sourcePath: null, destinationPath, error: 'production DB not found' };
@@ -618,6 +632,62 @@ export async function copyProductionDbToWorktree(
     await vacuumCopySqliteDb(sourcePath, destinationPath);
     return { copied: true, sourcePath, destinationPath };
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { copied: false, sourcePath, destinationPath, error: message };
+  }
+}
+
+export async function hotswapProductionDbIntoWorktree(
+  repoRoot: string,
+  destinationWorktreePath: string,
+  devServerPort: number | null | undefined,
+): Promise<CopyProductionDbResult> {
+  const dbName = '.primordia-auth.db';
+  const destinationPath = path.join(destinationWorktreePath, dbName);
+  const sourcePath = await findProductionDbPath(repoRoot, dbName);
+
+  if (!sourcePath) {
+    return { copied: false, sourcePath: null, destinationPath, error: 'production DB not found' };
+  }
+
+  try {
+    if (fs.existsSync(destinationPath) && fs.realpathSync(sourcePath) === fs.realpathSync(destinationPath)) {
+      return { copied: false, sourcePath, destinationPath, error: 'source and destination DB are the same file' };
+    }
+  } catch { /* continue */ }
+
+  const snapshotFilename = `${dbName}.hotswap-${process.pid}-${Date.now()}`;
+  const snapshotPath = path.join(destinationWorktreePath, snapshotFilename);
+  try {
+    await vacuumSnapshotSqliteDb(sourcePath, snapshotPath);
+
+    if (devServerPort) {
+      try {
+        const response = await fetch(`http://127.0.0.1:${devServerPort}/api/evolve/hotswap-db`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ snapshotFilename }),
+        });
+        if (response.ok) {
+          return { copied: true, sourcePath, destinationPath };
+        }
+        const text = await response.text().catch(() => '');
+        throw new Error(`preview server hotswap failed (${response.status}): ${text}`);
+      } catch (err) {
+        // If the preview server is not running, no process has the DB open and
+        // a direct swap is safe. Any other response means the server was alive
+        // but could not close its DB cleanly, so do not overwrite underneath it.
+        const message = err instanceof Error ? err.message : String(err);
+        if (!message.includes('fetch failed') && !message.includes('ECONNREFUSED')) {
+          throw err;
+        }
+      }
+    }
+
+    replaceSqliteDbWithSnapshot(snapshotPath, destinationPath);
+    return { copied: true, sourcePath, destinationPath };
+  } catch (err) {
+    try { fs.unlinkSync(snapshotPath); } catch { /* already consumed */ }
     const message = err instanceof Error ? err.message : String(err);
     return { copied: false, sourcePath, destinationPath, error: message };
   }
