@@ -61,7 +61,7 @@ const PROVIDER_META: Record<string, { label: string; shortLabel: string }> = {
 /** Maps provider id → public path for a favicon asset (base-path-prefixed at use time). */
 const PROVIDER_FAVICON: Record<string, string> = {
   "openai-native":  "/brand-icons/openai-icon.png",
-  "openai-codex":   "/brand-icons/codex-favicon.svg",
+  "openai-codex":   "/brand-icons/openai-icon.png",
   openai:           "/brand-icons/openai-icon.png",
   google:           "/brand-icons/google-gemini-icon.png",
   deepseek:         "/brand-icons/deepseek-icon.png",
