@@ -29,11 +29,11 @@ function isOpenRouterModel(id: string): boolean {
 export function getHarnessesForAuthSource(authSource: PresetAuthSource): HarnessOption[] {
   const allowed = new Set<string>();
   if (authSource === 'claude-subscription') allowed.add('claude-code');
-  if (authSource === 'chatgpt-subscription') allowed.add('pi');
-  if (authSource === 'exe-dev-gateway') { allowed.add('claude-code'); allowed.add('pi'); }
+  if (authSource === 'chatgpt-subscription') { allowed.add('pi'); allowed.add('codex'); }
+  if (authSource === 'exe-dev-gateway') { allowed.add('claude-code'); allowed.add('pi'); allowed.add('codex'); }
   if (authSource === 'openrouter-api-key') allowed.add('pi');
   if (authSource === 'anthropic-api-key') { allowed.add('claude-code'); allowed.add('pi'); }
-  if (authSource === 'openai-api-key') allowed.add('pi');
+  if (authSource === 'openai-api-key') { allowed.add('pi'); allowed.add('codex'); }
   return HARNESS_OPTIONS.filter((h) => allowed.has(h.id));
 }
 
@@ -45,6 +45,11 @@ export function filterModelsForAuthSource(
   if (!authSource) return models;
   if (harness === 'claude-code') {
     return models.filter((m) => isAnthropicModel(m.id));
+  }
+  if (harness === 'codex') {
+    if (authSource === 'chatgpt-subscription') return models.filter((m) => isChatGptSubscriptionModel(m.id));
+    if (authSource === 'openai-api-key' || authSource === 'exe-dev-gateway') return models.filter((m) => isOpenAiModel(m.id));
+    return [];
   }
   if (authSource === 'chatgpt-subscription') return models.filter((m) => isChatGptSubscriptionModel(m.id));
   if (authSource === 'openrouter-api-key') return models.filter((m) => isOpenRouterModel(m.id));

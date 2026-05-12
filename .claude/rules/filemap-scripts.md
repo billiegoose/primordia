@@ -13,6 +13,7 @@ scripts/
 ├── install.sh                ← Primordia setup script; supports two invocation methods; idempotent
 ├── claude-worker.ts          ← Standalone Claude Code worker process that handles LLM calls via exe.dev gateway
 ├── pi-worker.ts              ← Standalone pi coding agent worker process; spawned as detached child surviving restarts
+├── codex-worker.ts           ← Standalone OpenAI Codex CLI worker process; configures gateway/API-key/ChatGPT auth and streams JSONL progress
 ├── regenerate-model-registry.ts ← Reads the pi ModelRegistry and rewrites lib/models.generated.json; run with `bun run regenerate:model-registry` after updating @mariozechner/pi-coding-agent
 └── test-hmr-proxy.ts         ← Integration tests for reverse proxy WebSocket/HMR tunnel
 ```

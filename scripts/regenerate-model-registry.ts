@@ -16,6 +16,7 @@ import type { ModelOption } from '../lib/agent-config';
 const HARNESS_PROVIDERS: Record<string, string[]> = {
   'claude-code': ['anthropic'],
   'pi': ['anthropic', 'openai-codex', 'openai', 'openrouter'],
+  'codex': ['openai-codex', 'openai'],
 };
 
 const PROVIDER_LABELS: Record<string, string> = {

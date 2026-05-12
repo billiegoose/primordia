@@ -32,6 +32,11 @@ export const HARNESS_OPTIONS: HarnessOption[] = [
     label: 'Pi',
     description: "Mario Zechner's pi coding agent",
   },
+  {
+    id: 'codex',
+    label: 'Codex',
+    description: "OpenAI's Codex CLI coding agent",
+  },
 ];
 
 export const DEFAULT_HARNESS = 'pi';
