@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { ExternalLink, Loader2, Key, EyeOff } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, ExternalLink, Loader2, Key, EyeOff } from "lucide-react";
 import { AuthSourceIcon } from "@/components/AgentIdentity";
 import { setStoredCredentials } from "@/lib/credentials-client";
 import { getSecret } from "@/lib/secrets-client";
@@ -29,6 +29,8 @@ export default function CredentialsSettingsClient() {
   const [pasteError, setPasteError] = useState<string | null>(null);
   const [pasteSaved, setPasteSaved] = useState(false);
   const [pasteLoading, setPasteLoading] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [copiedCredentials, setCopiedCredentials] = useState(false);
   const sessionIdRef = useRef<string | null>(null);
 
   const { displayValue: decryptDisplay, isDecrypting, decrypt } = useDecryptEffect({
@@ -139,6 +141,14 @@ export default function CredentialsSettingsClient() {
     setCode("");
   }
 
+  async function copyCredentials() {
+    try {
+      await navigator.clipboard.writeText(prettyCredentials());
+      setCopiedCredentials(true);
+      setTimeout(() => setCopiedCredentials(false), 2000);
+    } catch {}
+  }
+
   async function clearCredentials() {
     try {
       await setStoredCredentials(null);
@@ -184,19 +194,16 @@ export default function CredentialsSettingsClient() {
     }
   }
 
-  // What the textarea displays
-  const textareaValue = !isSet
-    ? pasteValue
-    : credsDirty
-    ? pasteValue
-    : isDecrypting
+  const storedCredentialsDisplay = isDecrypting
     ? decryptDisplay
     : credRevealed
     ? prettyCredentials()
     : credScrambled;
+  const showStoredCredentials = isDecrypting || credRevealed;
 
-  const textareaReadOnly = isDecrypting || (isSet && !credRevealed && !credsDirty);
-  const showCredentialsTextarea = !isSet || credsDirty || isDecrypting || credRevealed;
+  useEffect(() => {
+    if (!isSet) setManualOpen(true);
+  }, [isSet]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -230,94 +237,67 @@ export default function CredentialsSettingsClient() {
           )}
         </div>
 
-        {/* Unified credentials textarea */}
-        <div className="flex flex-col gap-1.5">
-          {isSet && (
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-gray-400 font-medium">
-                {credsDirty ? "New credentials" : "Stored credentials"}
-              </span>
-              <button
-                type="button"
-                data-id="credentials/toggle-visibility"
-                onClick={() => {
-                  if (credRevealed || credsDirty) {
-                    setCredRevealed(false);
-                    setCredsDirty(false);
-                    setPasteValue("");
-                    setPasteError(null);
-                    if (storedValue) {
-                      const pretty = (() => { try { return JSON.stringify(JSON.parse(storedValue), null, 2); } catch { return storedValue; } })();
-                      setCredScrambled(generateScramble(pretty));
-                    }
-                  } else if (!isDecrypting) {
-                    decrypt(prettyCredentials());
-                  }
-                }}
-                disabled={isDecrypting}
-                className="flex items-center gap-1 text-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                aria-label={credRevealed ? "Hide credentials" : "Reveal credentials"}
-              >
-                {credRevealed || credsDirty ? (
-                  <><EyeOff size={13} strokeWidth={2} aria-hidden="true" className="text-gray-500 hover:text-gray-300 transition-colors" /><span className="text-gray-500 hover:text-gray-300 transition-colors">Hide</span></>
-                ) : (
-                  <><Key size={13} strokeWidth={2} aria-hidden="true" className={isDecrypting ? "text-sky-400 animate-pulse" : "text-sky-500/70 hover:text-sky-400 transition-colors"} /><span className={isDecrypting ? "text-sky-400" : "text-sky-500/70 hover:text-sky-400 transition-colors"}>Reveal</span></>
+        {isSet && (
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs text-gray-400 font-medium">Stored credentials</span>
+              <div className="flex items-center gap-3">
+                {credRevealed && (
+                  <button
+                    type="button"
+                    data-id="credentials/copy"
+                    onClick={() => void copyCredentials()}
+                    className="flex items-center gap-1 text-xs text-sky-500/70 hover:text-sky-400 transition-colors"
+                    aria-label="Copy credentials"
+                  >
+                    {copiedCredentials ? <Check size={13} strokeWidth={2} aria-hidden="true" /> : <Copy size={13} strokeWidth={2} aria-hidden="true" />}
+                    <span>{copiedCredentials ? "Copied" : "Copy"}</span>
+                  </button>
                 )}
-              </button>
+                <button
+                  type="button"
+                  data-id="credentials/toggle-visibility"
+                  onClick={() => {
+                    if (credRevealed) {
+                      setCredRevealed(false);
+                      setPasteError(null);
+                      if (storedValue) {
+                        const pretty = (() => { try { return JSON.stringify(JSON.parse(storedValue), null, 2); } catch { return storedValue; } })();
+                        setCredScrambled(generateScramble(pretty));
+                      }
+                    } else if (!isDecrypting) {
+                      decrypt(prettyCredentials());
+                    }
+                  }}
+                  disabled={isDecrypting}
+                  className="flex items-center gap-1 text-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  aria-label={credRevealed ? "Hide credentials" : "Reveal credentials"}
+                >
+                  {credRevealed ? (
+                    <><EyeOff size={13} strokeWidth={2} aria-hidden="true" className="text-gray-500 hover:text-gray-300 transition-colors" /><span className="text-gray-500 hover:text-gray-300 transition-colors">Hide</span></>
+                  ) : (
+                    <><Key size={13} strokeWidth={2} aria-hidden="true" className={isDecrypting ? "text-sky-400 animate-pulse" : "text-sky-500/70 hover:text-sky-400 transition-colors"} /><span className={isDecrypting ? "text-sky-400" : "text-sky-500/70 hover:text-sky-400 transition-colors"}>Reveal</span></>
+                  )}
+                </button>
+              </div>
             </div>
-          )}
-          {showCredentialsTextarea && (
-            <div className="relative">
+            {showStoredCredentials && (
               <textarea
-                data-id="credentials/json-input"
-                value={textareaValue}
-                readOnly={textareaReadOnly}
-                onChange={(e) => {
-                  if (textareaReadOnly) return;
-                  setPasteValue(e.target.value);
-                  if (isSet) setCredsDirty(true);
-                  setPasteError(null);
-                  setPasteSaved(false);
-                }}
-                placeholder={isSet ? undefined : '{\n  "claudeAiOauth": { ... }\n}'}
-                rows={isSet ? 8 : 5}
+                data-id="credentials/json-display"
+                value={storedCredentialsDisplay}
+                readOnly
+                rows={8}
                 className={`w-full bg-gray-800 text-sm border border-gray-700 rounded-lg px-3 py-2 outline-none font-mono resize-y ${
-                  textareaReadOnly
-                    ? "text-sky-300/40 select-none cursor-default"
-                    : "text-gray-100 placeholder-gray-600 focus:ring-2 focus:ring-sky-500/50 focus:border-sky-500/50"
+                  credRevealed
+                    ? "text-gray-100"
+                    : "text-sky-300/40 select-none cursor-default"
                 }`}
                 autoComplete="off"
                 spellCheck={false}
-                disabled={pasteLoading}
               />
-            </div>
-          )}
-          {pasteError && <p className="text-xs text-red-400">{pasteError}</p>}
-          {credsDirty && (
-            <div className="flex justify-end">
-              <button
-                data-id="credentials/save-paste"
-                onClick={() => void handlePasteSave()}
-                disabled={!pasteValue.trim() || pasteSaved || pasteLoading}
-                className="px-4 py-1.5 rounded-lg text-sm font-medium bg-sky-600 hover:bg-sky-500 disabled:bg-sky-900 text-white transition-colors disabled:cursor-not-allowed"
-              >
-                {pasteLoading ? "Saving…" : pasteSaved ? "Saved ✓" : "Save"}
-              </button>
-            </div>
-          )}
-          {!isSet && (
-            <div className="flex justify-end">
-              <button
-                data-id="credentials/save-paste"
-                onClick={() => void handlePasteSave()}
-                disabled={!pasteValue.trim() || pasteSaved || pasteLoading}
-                className="px-4 py-1.5 rounded-lg text-sm font-medium bg-sky-600 hover:bg-sky-500 disabled:bg-sky-900 text-white transition-colors disabled:cursor-not-allowed"
-              >
-                {pasteLoading ? "Saving…" : pasteSaved ? "Saved ✓" : "Save"}
-              </button>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
 
         {/* OAuth flow */}
         {(step.kind === "idle" || step.kind === "done") && (
@@ -342,6 +322,54 @@ export default function CredentialsSettingsClient() {
             </div>
             {step.kind === "done" && (
               <p className="text-xs text-center text-gray-500">Credentials saved successfully.</p>
+            )}
+          </div>
+        )}
+
+        {(step.kind === "idle" || step.kind === "done") && (
+          <div className="border-t border-gray-800 pt-4">
+            <button
+              type="button"
+              data-id="credentials/manual-toggle"
+              onClick={() => setManualOpen((open) => !open)}
+              className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200 transition-colors"
+            >
+              {manualOpen ? <ChevronDown size={16} aria-hidden="true" /> : <ChevronRight size={16} aria-hidden="true" />}
+              <span>Paste credentials file manually</span>
+            </button>
+            {manualOpen && (
+              <div className="mt-4 flex flex-col gap-3">
+                <p className="text-sm text-gray-400 leading-relaxed">
+                  Paste the contents of <code className="rounded bg-gray-800 px-1.5 py-0.5 font-mono text-sky-300">~/.claude/.credentials.json</code>. On macOS, credentials are stored in the system keychain and cannot be copied directly — this only works if your machine is running Linux.
+                </p>
+                <textarea
+                  data-id="credentials/json-input"
+                  value={pasteValue}
+                  onChange={(e) => {
+                    setPasteValue(e.target.value);
+                    setCredsDirty(true);
+                    setPasteError(null);
+                    setPasteSaved(false);
+                  }}
+                  placeholder={'{\n  "claudeAiOauth": { ... }\n}'}
+                  rows={5}
+                  className="w-full bg-gray-800 text-sm text-gray-100 placeholder-gray-600 border border-gray-700 rounded-lg px-3 py-2 outline-none font-mono resize-y focus:ring-2 focus:ring-sky-500/50 focus:border-sky-500/50"
+                  autoComplete="off"
+                  spellCheck={false}
+                  disabled={pasteLoading}
+                />
+                {pasteError && <p className="text-xs text-red-400">{pasteError}</p>}
+                <div className="flex justify-end">
+                  <button
+                    data-id="credentials/save-paste"
+                    onClick={() => void handlePasteSave()}
+                    disabled={!pasteValue.trim() || pasteSaved || pasteLoading}
+                    className="px-4 py-1.5 rounded-lg text-sm font-medium bg-sky-600 hover:bg-sky-500 disabled:bg-sky-900 text-white transition-colors disabled:cursor-not-allowed"
+                  >
+                    {pasteLoading ? "Saving…" : pasteSaved ? "Saved ✓" : "Save"}
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         )}

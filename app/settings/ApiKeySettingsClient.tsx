@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Key, EyeOff, ExternalLink } from "lucide-react";
+import { Check, Copy, Key, EyeOff, ExternalLink } from "lucide-react";
 import {
   setStoredApiKey,
   setStoredOpenRouterApiKey,
@@ -44,6 +44,7 @@ export default function ApiKeySettingsClient() {
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copiedKey, setCopiedKey] = useState(false);
 
   // OpenRouter key state
   const [isOrKeySet, setIsOrKeySet] = useState(false);
@@ -53,6 +54,7 @@ export default function ApiKeySettingsClient() {
   const [orSaved, setOrSaved] = useState(false);
   const [orLoading, setOrLoading] = useState(false);
   const [orError, setOrError] = useState<string | null>(null);
+  const [orCopiedKey, setOrCopiedKey] = useState(false);
 
   const { displayValue: decryptDisplay, isDecrypting, decrypt } = useDecryptEffect({
     duration: 1000,
@@ -106,6 +108,14 @@ export default function ApiKeySettingsClient() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function copyKey(value: string, setter: (copied: boolean) => void) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setter(true);
+      setTimeout(() => setter(false), 2000);
+    } catch {}
   }
 
   async function handleClear() {
@@ -211,6 +221,18 @@ export default function ApiKeySettingsClient() {
               {isKeySet ? "Stored API key" : "API key"}
             </label>
             <div className="flex items-center gap-3">
+              {showKey && (
+                <button
+                  type="button"
+                  data-id="api-key/copy-key"
+                  onClick={() => void copyKey(inputValue, setCopiedKey)}
+                  className="flex items-center gap-1 text-xs text-amber-500/70 hover:text-amber-400 transition-colors"
+                  aria-label="Copy API key"
+                >
+                  {copiedKey ? <Check size={13} strokeWidth={2} aria-hidden="true" /> : <Copy size={13} strokeWidth={2} aria-hidden="true" />}
+                  <span>{copiedKey ? "Copied" : "Copy"}</span>
+                </button>
+              )}
               {isKeySet && (
                 <button
                   type="button"
@@ -320,6 +342,18 @@ export default function ApiKeySettingsClient() {
               {isOrKeySet ? "Stored API key" : "API key"}
             </label>
             <div className="flex items-center gap-3">
+              {orShowKey && (
+                <button
+                  type="button"
+                  data-id="api-key/openrouter-copy-key"
+                  onClick={() => void copyKey(orInputValue, setOrCopiedKey)}
+                  className="flex items-center gap-1 text-xs text-violet-500/70 hover:text-violet-400 transition-colors"
+                  aria-label="Copy OpenRouter API key"
+                >
+                  {orCopiedKey ? <Check size={13} strokeWidth={2} aria-hidden="true" /> : <Copy size={13} strokeWidth={2} aria-hidden="true" />}
+                  <span>{orCopiedKey ? "Copied" : "Copy"}</span>
+                </button>
+              )}
               {isOrKeySet && (
                 <button
                   type="button"

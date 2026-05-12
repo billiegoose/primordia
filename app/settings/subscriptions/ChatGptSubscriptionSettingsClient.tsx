@@ -48,6 +48,7 @@ export default function ChatGptSubscriptionSettingsClient() {
   const [error, setError] = useState<string | null>(null);
   const [deviceFlow, setDeviceFlow] = useState<DeviceFlowState | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
+  const [credentialsCopied, setCredentialsCopied] = useState(false);
   const pollTimer = useRef<number | null>(null);
 
   const prettyCredentials = useMemo(() => {
@@ -145,6 +146,16 @@ export default function ChatGptSubscriptionSettingsClient() {
     }
   }
 
+  async function copyCredentials() {
+    try {
+      await navigator.clipboard.writeText(prettyCredentials);
+      setCredentialsCopied(true);
+      window.setTimeout(() => setCredentialsCopied(false), 2000);
+    } catch {
+      setError("Could not copy the credentials. Please copy them manually.");
+    }
+  }
+
   async function copyUserCode() {
     if (!deviceFlow) return;
     try {
@@ -204,9 +215,22 @@ export default function ChatGptSubscriptionSettingsClient() {
             <span className="text-xs text-gray-400 font-medium">
               Stored credentials
             </span>
-            <button
-              type="button"
-              data-id="chatgpt-subscription/toggle-visibility"
+            <div className="flex items-center gap-3">
+              {credentialsRevealed && (
+                <button
+                  type="button"
+                  data-id="chatgpt-subscription/copy-credentials"
+                  onClick={() => void copyCredentials()}
+                  className="flex items-center gap-1.5 text-xs text-emerald-500/70 hover:text-emerald-400 transition-colors"
+                  aria-label="Copy stored ChatGPT credentials"
+                >
+                  {credentialsCopied ? <Check size={13} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}
+                  <span>{credentialsCopied ? "Copied" : "Copy"}</span>
+                </button>
+              )}
+              <button
+                type="button"
+                data-id="chatgpt-subscription/toggle-visibility"
               onClick={() => {
                 if (credentialsRevealed) {
                   setCredentialsRevealed(false);
@@ -230,7 +254,8 @@ export default function ChatGptSubscriptionSettingsClient() {
                   <span className={isDecrypting ? "text-emerald-400" : "text-emerald-500/70 hover:text-emerald-400 transition-colors"}>Reveal</span>
                 </>
               )}
-            </button>
+              </button>
+            </div>
           </div>
           {showCredentialsBlock && (
             <pre className={`text-xs font-mono bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap break-all ${credentialsRevealed ? "text-gray-300" : "text-emerald-300/40 select-none"}`}>
