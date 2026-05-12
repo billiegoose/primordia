@@ -1,12 +1,12 @@
 import 'server-only';
 
-import { getDb } from './db';
+import { getDb } from '@/lib/db';
 import {
   SECRET_AUTH_SOURCES,
   isSecretAuthSource,
   type SecretCiphertexts,
   type SecretAuthSource,
-} from './presets';
+} from '@/lib/presets';
 
 export interface SettingsPageData {
   secretSources: SecretAuthSource[];
