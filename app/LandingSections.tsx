@@ -7,7 +7,7 @@
 // passes it down as a prop.
 
 import Link from "next/link";
-import { RefreshCw, GitBranch, ChevronDown, KeyRound, Users, LayoutDashboard, History, Eye, RefreshCcw, ShieldCheck, Layers } from "lucide-react";
+import { RefreshCw, GitBranch, ChevronDown, KeyRound, Users, LayoutDashboard, History, Eye, RefreshCcw, ShieldCheck, Layers, Sparkles } from "lucide-react";
 import { ChangelogNewsticker } from "./ChangelogNewsticker";
 import InstallBlock from "./InstallBlock";
 import SimpleCurlBlock from "./SimpleCurlBlock";
@@ -31,7 +31,7 @@ const FEATURES = [
     bg: "bg-fuchsia-500/5",
     title: "Open Source",
     description:
-      "Fork the repo, deploy to exe.dev in minutes, and own your instance entirely. Every change is tracked and versioned — full history, full control.",
+      "Open source and self-hosted. Deploy to exe.dev in minutes, customize the source code however you need, and own every piece of your instance — full history, full control.",
   },
 ];
 
@@ -226,7 +226,16 @@ const BOX_FEATURES = [
     bg: "bg-sky-500/5",
     title: "Decisions Already Made",
     description:
-      "Framework, database, auth, AI integration, deployment — choices that typically take weeks are already made for you. Fork and build immediately.",
+      "Framework, database, auth, AI integration, deployment — choices that typically take weeks are already made for you. Get started immediately.",
+  },
+  {
+    icon: <Sparkles size={22} strokeWidth={1.5} aria-hidden="true" />,
+    accent: "text-yellow-400",
+    ring: "ring-yellow-500/20",
+    bg: "bg-yellow-500/5",
+    title: "Your AI, Your Way",
+    description:
+      "Connect your existing Claude or ChatGPT subscription, paste an API key, or use free models via the built-in gateway. No AI costs baked in.",
   },
 ];
 
@@ -288,7 +297,7 @@ export function HowItWorksSection() {
           <h2 className="font-mono font-bold text-3xl sm:text-4xl text-white mb-4">
             How it works
           </h2>
-          <p className="text-gray-400">Four steps from idea to live change.</p>
+          <p className="text-gray-400">Three steps from idea to live change.</p>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">

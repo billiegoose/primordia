@@ -41,7 +41,7 @@ export default function UnderTheHoodPage() {
           But how does it work, really?
         </h1>
         <p className="text-gray-400 leading-relaxed mb-16">
-          The landing page was keeping secrets. Here&apos;s the full technical picture for the curious.
+          Curious how Primordia works under the hood? Here&apos;s the technical explanation.
         </p>
 
         <div className="space-y-12">
@@ -79,20 +79,27 @@ export default function UnderTheHoodPage() {
             </p>
           </Section>
 
-          <Section title="The AI agent runs Claude Code in a git worktree">
+          <Section title="AI agents run in isolated version-controlled workspaces">
             <p>
-              When you submit a change proposal, Primordia forks the current codebase into a
-              git worktree — a lightweight checkout that shares object storage with the main
-              repo but has its own working directory and HEAD. This means the agent can modify
-              and build the app in isolation without touching production.
+              When you submit a change proposal, Primordia creates a git worktree — a
+              lightweight checkout that shares object storage with the main codebase but has
+              its own working directory and HEAD. The AI agent works entirely inside that
+              isolated workspace, so it can modify and build the app without touching
+              production.
             </p>
             <p>
-              Claude Code runs inside that worktree via{" "}
-              <InlineCode>@anthropic-ai/claude-agent-sdk</InlineCode>. It edits files, runs
-              builds, and commits the result. A dev server boots from the worktree — that&apos;s
-              your live preview. If you accept the change, the worktree branch is merged to{" "}
-              <InlineCode>main</InlineCode> and a new production build starts. If you reject it,
-              the worktree is deleted and nothing changes in production.
+              Primordia supports multiple AI agent harnesses. The default is Claude Code (via{" "}
+              <InlineCode>@anthropic-ai/claude-agent-sdk</InlineCode>), but you can also use
+              OpenAI Codex or the &ldquo;pi&rdquo; harness. Each harness edits files, runs
+              builds, and commits the result. A dev server boots from the worktree —
+              that&apos;s your live preview.
+            </p>
+            <p>
+              If you accept the change, the worktree branch is merged to{" "}
+              <InlineCode>main</InlineCode> and a new production build starts. If you reject
+              it, the worktree is deleted and nothing changes in production. You can also chain
+              multiple agent passes on the same branch with follow-up requests before
+              accepting.
             </p>
           </Section>
 
