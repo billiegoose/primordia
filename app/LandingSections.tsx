@@ -7,7 +7,7 @@
 // passes it down as a prop.
 
 import Link from "next/link";
-import { RefreshCw, GitBranch, ChevronDown } from "lucide-react";
+import { RefreshCw, GitBranch, ChevronDown, KeyRound, Users, LayoutDashboard, History, Eye, Zap } from "lucide-react";
 import { ChangelogNewsticker } from "./ChangelogNewsticker";
 import InstallBlock from "./InstallBlock";
 
@@ -117,7 +117,7 @@ export function FeaturesSection() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
         {FEATURES.map((f) => (
           <FeatureCard key={f.title} {...f} />
         ))}
@@ -147,6 +147,115 @@ function FeatureCard({
     >
       <div className={`mb-4 ${accent}`}>{icon}</div>
       <h3 className="font-mono font-semibold text-lg text-white mb-2">{title}</h3>
+      <p className="text-sm text-gray-400 leading-relaxed">{description}</p>
+    </div>
+  );
+}
+
+// ── Out-of-the-box feature tiles ────────────────────────────────────────────
+
+const BOX_FEATURES = [
+  {
+    icon: <KeyRound size={22} strokeWidth={1.5} aria-hidden="true" />,
+    accent: "text-blue-400",
+    ring: "ring-blue-500/20",
+    bg: "bg-blue-500/5",
+    title: "Passkey Authentication",
+    description:
+      "WebAuthn passkeys built in. No passwords, no password-reset flows, no third-party auth service to configure.",
+  },
+  {
+    icon: <Users size={22} strokeWidth={1.5} aria-hidden="true" />,
+    accent: "text-emerald-400",
+    ring: "ring-emerald-500/20",
+    bg: "bg-emerald-500/5",
+    title: "Role-Based Access",
+    description:
+      "Admin and evolver roles from day one. The first user gets admin automatically. Grant or revoke access from the admin panel.",
+  },
+  {
+    icon: <LayoutDashboard size={22} strokeWidth={1.5} aria-hidden="true" />,
+    accent: "text-amber-400",
+    ring: "ring-amber-500/20",
+    bg: "bg-amber-500/5",
+    title: "Admin Dashboard",
+    description:
+      "Live server logs, memory and disk health, deep rollbacks, git mirror, and upstream update management — all included.",
+  },
+  {
+    icon: <History size={22} strokeWidth={1.5} aria-hidden="true" />,
+    accent: "text-violet-400",
+    ring: "ring-violet-500/20",
+    bg: "bg-violet-500/5",
+    title: "Full Git History",
+    description:
+      "Every change is a real git commit. Roll back to any previous production version with one click from the rollback page.",
+  },
+  {
+    icon: <Eye size={22} strokeWidth={1.5} aria-hidden="true" />,
+    accent: "text-fuchsia-400",
+    ring: "ring-fuchsia-500/20",
+    bg: "bg-fuchsia-500/5",
+    title: "Live AI Previews",
+    description:
+      "Before any AI change goes live, inspect it in a real browser preview. Accept or reject — you stay in full control.",
+  },
+  {
+    icon: <Zap size={22} strokeWidth={1.5} aria-hidden="true" />,
+    accent: "text-cyan-400",
+    ring: "ring-cyan-500/20",
+    bg: "bg-cyan-500/5",
+    title: "One-Command Deploy",
+    description:
+      "Two shell commands spin up a VM and install Primordia end-to-end. Zero manual configuration required.",
+  },
+];
+
+export function OutOfTheBoxSection() {
+  return (
+    <section className="relative px-6 py-24 border-t border-white/5">
+      <div className="max-w-5xl mx-auto">
+        <div className="text-center mb-16">
+          <h2 className="font-mono font-bold text-3xl sm:text-4xl text-white mb-4">
+            Everything you need, out of the box
+          </h2>
+          <p className="text-gray-400 max-w-2xl mx-auto leading-relaxed">
+            Primordia ships as a complete foundation — not a starter kit that
+            leaves the hard parts to you.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          {BOX_FEATURES.map((f) => (
+            <BoxFeatureCard key={f.title} {...f} />
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function BoxFeatureCard({
+  icon,
+  accent,
+  ring,
+  bg,
+  title,
+  description,
+}: {
+  icon: React.ReactNode;
+  accent: string;
+  ring: string;
+  bg: string;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div
+      className={`rounded-xl p-5 border border-white/5 ${bg} ring-1 ${ring} hover:border-white/10 transition-all`}
+    >
+      <div className={`mb-3 ${accent}`}>{icon}</div>
+      <h3 className="font-mono font-semibold text-base text-white mb-1.5">{title}</h3>
       <p className="text-sm text-gray-400 leading-relaxed">{description}</p>
     </div>
   );

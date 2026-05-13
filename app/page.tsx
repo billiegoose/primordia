@@ -11,6 +11,7 @@ import { LandingNav } from "./LandingNav";
 import {
   HeroSection,
   FeaturesSection,
+  OutOfTheBoxSection,
   HowItWorksSection,
   CTABannerSection,
   LandingFooter,
@@ -47,6 +48,7 @@ export default async function LandingPage() {
       <LandingNav />
       <HeroSection installUrl={installUrl} defaultVmName={defaultVmName} installBranch={branch} />
       <FeaturesSection />
+      <OutOfTheBoxSection />
       <HowItWorksSection />
       <CTABannerSection installUrl={installUrl} defaultVmName={defaultVmName} installBranch={branch} />
       <LandingFooter />
