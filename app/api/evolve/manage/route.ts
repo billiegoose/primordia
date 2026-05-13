@@ -76,14 +76,11 @@ const INSTALL_EXIT_TYPECHECK = 2;
  * Runs install.sh in the session worktree and resolves with the exit code.
  * Streams all stdout/stderr to the session log as it arrives.
  *
- * NOTE: We resolve on 'exit' (not 'close') and immediately destroy the I/O
- * streams afterwards. install.sh spawns a spinner sub-process with `&` and
- * `disown` that inherits the stdout/stderr pipe write-ends. When install.sh
- * exits the spinner keeps running and holds those FDs open, so 'close' would
- * never fire — the promise would hang forever and the session would stay stuck
- * in 'accepting'. Using 'exit' fires as soon as the main bash process exits,
- * and destroying the streams closes the read-ends of the pipes, which causes
- * the spinner sub-process to get SIGPIPE and die on its next write.
+ * NOTE: We wait briefly after 'exit' for stdout/stderr to drain, then destroy
+ * the streams if 'close' has not arrived. install.sh's ERR trap prints the
+ * useful failure diagnostics right before bash exits, but install.sh can also
+ * leave a disowned spinner holding the pipe open. Waiting only for 'close'
+ * could hang forever; destroying immediately on 'exit' can drop diagnostics.
  */
 /** Well-known filename used to track the PID of a running install.sh process. */
 export const INSTALL_SH_PID_FILE = '.primordia-installsh.pid';
@@ -110,17 +107,41 @@ function runInstallSh(
     const forward = (data: Buffer) => { void appendLogLine(sessionId, data.toString()); };
     proc.stdout.on('data', forward);
     proc.stderr.on('data', forward);
-    proc.on('exit', (code) => {
-      // Destroy the streams so the spinner sub-process (which still holds the
-      // pipe write FDs) gets SIGPIPE and terminates. Without this the streams
-      // stay open and keep delivering spinner noise to the session log.
+    let settled = false;
+    let exitCode: number | null = null;
+    let drainTimer: NodeJS.Timeout | null = null;
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (drainTimer) clearTimeout(drainTimer);
+      // Destroy the streams so any spinner sub-process (which may still hold
+      // the pipe write FDs) gets SIGPIPE and terminates. We only do this after
+      // giving Node a short chance to drain buffered stderr/stdout: install.sh's
+      // ERR trap prints the useful failure diagnostics immediately before bash
+      // exits, and destroying the streams on the 'exit' event can drop those
+      // final bytes from the deploy log.
       proc.stdout.destroy();
       proc.stderr.destroy();
       // Clean up PID file now that the process has exited normally.
       try { fs.unlinkSync(path.join(worktreePath, INSTALL_SH_PID_FILE)); } catch { /* already gone */ }
-      resolve(code ?? 1);
+      resolve(exitCode ?? 1);
+    };
+
+    proc.on('exit', (code) => {
+      exitCode = code ?? 1;
+      // Prefer 'close' so all buffered output reaches the session log. Fall
+      // back after a short grace period because install.sh can leave a disowned
+      // spinner holding the pipe open, which means 'close' may never arrive.
+      drainTimer = setTimeout(finish, 1500);
     });
-    proc.on('error', (err) => reject(new Error(`install.sh spawn failed: ${err.message}`)));
+    proc.on('close', finish);
+    proc.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      if (drainTimer) clearTimeout(drainTimer);
+      reject(new Error(`install.sh spawn failed: ${err.message}`));
+    });
   });
 }
 
