@@ -344,7 +344,7 @@ export function CTABannerSection({ installUrl, installBranch }: { installUrl: st
             Ready to deploy?
           </h2>
           <p className="text-gray-400 max-w-md mx-auto mb-8 leading-relaxed">
-            Run this on your exe.dev VM and Primordia installs itself.
+            Run this on your VM to install Primordia.
           </p>
           <SimpleCurlBlock command={curlCmd} />
         </div>
