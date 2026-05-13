@@ -300,7 +300,7 @@ export function HowItWorksSection() {
           <p className="text-gray-400">Three steps from idea to live change.</p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-8">
           {STEPS.map((s, i) => (
             <HowItWorksStep key={s.n} step={s} isLast={i === STEPS.length - 1} />
           ))}
