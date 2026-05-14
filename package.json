@@ -2,21 +2,21 @@
   "name": "primordia",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "bun@1.2.0",
+  "packageManager": "pnpm@10.11.0",
   "scripts": {
-    "dev": "bun run --bun next dev --turbopack",
-    "build": "bun run --bun next build",
-    "start": "bun run --bun next start",
+    "dev": "bun --bun next dev --turbopack",
+    "build": "bun --bun next build",
+    "start": "bun --bun next start",
     "lint": "eslint .",
     "typecheck": "next typegen && tsc --noEmit",
     "deploy-to-exe.dev": "bash scripts/deploy-to-exe-dev.sh",
     "rollback": "bun scripts/rollback.ts",
     "proxy": "bun scripts/reverse-proxy.ts",
     "generate-api-docs": "next-openapi-gen generate --config openapi-gen.config.json",
-    "regenerate:model-registry": "bun run scripts/regenerate-model-registry.ts",
+    "regenerate:model-registry": "bun scripts/regenerate-model-registry.ts",
     "test:unit": "bun test tests/secrets-client.test.ts",
-    "test:e2e": "bunx playwright test",
-    "test:e2e:headed": "bunx playwright test --headed"
+    "test:e2e": "pnpm exec playwright test",
+    "test:e2e:headed": "pnpm exec playwright test --headed"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.76",

@@ -272,15 +272,16 @@ else
   success "Using bun $("$HOME/.bun/bin/bun" --version)"
 fi
 
-# ── Install sfw shim ──────────────────────────────────────────────────────────
-# bun/bunx shims are installed that route package-downloading commands through
-# sfw (Socket Firewall Free) for network traffic filtering during package
-# installs, while non-downloading commands run the real bun directly.
+# ── Install sfw, pnpm, and guarded bun shims ──────────────────────────────────
+# Primordia uses pnpm for dependency management. Package-downloading commands
+# should be run explicitly through sfw, e.g. `sfw pnpm install` or `sfw pnx ...`.
+# bun remains the JavaScript runtime, but bun's package-manager commands are
+# blocked so agents do not accidentally bypass pnpm's supply-chain protections.
 # A bun-real symlink points to the actual bun binary at ~/.bun/bin/bun.
 # The shims live in /usr/local/bin, which is writable on macOS and available to
 # systemd services on Linux.
 
-_CURRENT_STEP="install sfw shim"
+_CURRENT_STEP="install dependency tools"
 
 # /usr/local/bin works on both macOS and Linux:
 # - macOS: /bin is SIP-protected and read-only even with sudo; /usr/local/bin is writable
@@ -296,11 +297,43 @@ else
   success "Using sfw"
 fi
 
+# Install pnpm globally. Prefer Corepack when available; otherwise bootstrap it
+# with bun under sfw. This is the only bun-based package install path and it is
+# used solely to get pnpm onto machines that do not already have it.
+if ! command -v pnpm >/dev/null 2>&1; then
+  _step "Installing pnpm..."
+  if command -v corepack >/dev/null 2>&1; then
+    corepack enable >/dev/null 2>&1
+    corepack prepare pnpm@10.11.0 --activate >/dev/null 2>&1
+  else
+    "$HOME/.bun/bin/bun" --bun "$HOME/.bun/bin/sfw" "$HOME/.bun/bin/bun" install -g pnpm@10.11.0 >/dev/null 2>&1
+  fi
+  _done "Installed pnpm $(pnpm --version)"
+else
+  success "Using pnpm $(pnpm --version)"
+fi
+
 # Ensure the shim directory exists (it always should, but be safe)
 # Only use sudo if the directory doesn't exist — avoids prompting for a sudo
 # password on machines where the shim is already fully installed.
 if [[ ! -d "${SHIM_DIR}" ]]; then
   sudo mkdir -p "${SHIM_DIR}"
+fi
+
+# Expose dependency tools to systemd-managed processes whose PATH does not include ~/.bun/bin.
+if [[ "$(readlink "${SHIM_DIR}/sfw" 2>/dev/null)" != "$HOME/.bun/bin/sfw" ]]; then
+  sudo ln -sf "$HOME/.bun/bin/sfw" "${SHIM_DIR}/sfw"
+  success "Created ${SHIM_DIR}/sfw symlink"
+else
+  success "Using ${SHIM_DIR}/sfw"
+fi
+
+PNPM_BIN="$(command -v pnpm)"
+if [[ "${PNPM_BIN}" != "${SHIM_DIR}/pnpm" ]] && [[ "$(readlink "${SHIM_DIR}/pnpm" 2>/dev/null)" != "${PNPM_BIN}" ]]; then
+  sudo ln -sf "${PNPM_BIN}" "${SHIM_DIR}/pnpm"
+  success "Created ${SHIM_DIR}/pnpm symlink"
+else
+  success "Using ${SHIM_DIR}/pnpm"
 fi
 
 # Create bun-real symlink → actual bun binary
@@ -311,23 +344,25 @@ else
   success "Using ${SHIM_DIR}/bun-real"
 fi
 
-# Write the bun/bunx shims (idempotent). Only commands that can download npm
-# packages are wrapped by sfw; everything else bypasses sfw automatically.
+# Write the bun/bunx shims (idempotent). bun can still be used as the runtime,
+# but package-manager commands fail fast with pnpm guidance.
 SHIM_CONTENT="#!/usr/bin/env bash
 set -euo pipefail
 
 REAL_BUN=\"${SHIM_DIR}/bun-real\"
-SFW=\"\$HOME/.bun/bin/sfw\"
 INVOKED_AS=\"\$(basename \"\$0\")\"
 COMMAND=\"\${1:-}\"
 
 if [[ \"\$INVOKED_AS\" == \"bunx\" ]]; then
-  exec \"\$REAL_BUN\" --bun \"\$SFW\" \"\$REAL_BUN\" x \"\$@\"
+  echo \"error: bunx is disabled in Primordia. Use 'sfw pnx <package> [args...]' instead.\" >&2
+  exit 1
 fi
 
 case \"\$COMMAND\" in
   add|install|update|x|create|dlx)
-    exec \"\$REAL_BUN\" --bun \"\$SFW\" \"\$REAL_BUN\" \"\$@\"
+    echo \"error: 'bun \$COMMAND' is disabled in Primordia. Use pnpm through Socket Firewall instead.\" >&2
+    echo \"       Examples: sfw pnpm install, sfw pnpm add <pkg>, sfw pnx <package> [args...]\" >&2
+    exit 1
     ;;
   *)
     exec \"\$REAL_BUN\" \"\$@\"
@@ -338,30 +373,43 @@ for SHIM_NAME in bun bunx; do
   if [[ ! -f "${SHIM_DIR}/${SHIM_NAME}" ]] || ! diff -q <(printf '%s' "$SHIM_CONTENT") "${SHIM_DIR}/${SHIM_NAME}" >/dev/null 2>&1; then
     printf '%s' "$SHIM_CONTENT" | sudo tee "${SHIM_DIR}/${SHIM_NAME}" >/dev/null
     sudo chmod +x "${SHIM_DIR}/${SHIM_NAME}"
-    success "Installed ${SHIM_DIR}/${SHIM_NAME} conditional sfw shim"
+    success "Installed ${SHIM_DIR}/${SHIM_NAME} guarded runtime shim"
   else
-    success "Using ${SHIM_DIR}/${SHIM_NAME} conditional sfw shim"
+    success "Using ${SHIM_DIR}/${SHIM_NAME} guarded runtime shim"
   fi
 done
 
+# pnx is a tiny pnpm-dlx convenience command intended to be run as `sfw pnx ...`.
+PNX_CONTENT='#!/usr/bin/env bash
+set -euo pipefail
+exec pnpm dlx "$@"
+'
+if [[ ! -f "${SHIM_DIR}/pnx" ]] || ! diff -q <(printf '%s' "$PNX_CONTENT") "${SHIM_DIR}/pnx" >/dev/null 2>&1; then
+  printf '%s' "$PNX_CONTENT" | sudo tee "${SHIM_DIR}/pnx" >/dev/null
+  sudo chmod +x "${SHIM_DIR}/pnx"
+  success "Installed ${SHIM_DIR}/pnx"
+else
+  success "Using ${SHIM_DIR}/pnx"
+fi
+
 # ── Install dependencies ──────────────────────────────────────────────────────
 
-_CURRENT_STEP="bun install"
-_step "bun install..."
+_CURRENT_STEP="pnpm install"
+_step "sfw pnpm install..."
 cd "${INSTALL_DIR}"
-_bun_log=$(mktemp)
-_BUN_OK=false
-if bun install --frozen-lockfile >> "$_bun_log" 2>&1; then
-  _BUN_OK=true;
+_pnpm_log=$(mktemp)
+_PNPM_OK=false
+if sfw pnpm install --frozen-lockfile >> "$_pnpm_log" 2>&1; then
+  _PNPM_OK=true;
 fi
-if [[ "$_BUN_OK" != "true" ]]; then
+if [[ "$_PNPM_OK" != "true" ]]; then
   diag "npm registry: $(curl -fsS --max-time 5 https://registry.npmjs.org/ >/dev/null 2>&1 && echo 'reachable' || echo 'UNREACHABLE')"
-  echo -e "${DIM}  --- bun install output ---${RESET}" >&2
-  tail -60 "$_bun_log" >&2
-  echo -e "${DIM}  --------------------------${RESET}" >&2
-  rm -f "$_bun_log"; exit 1
+  echo -e "${DIM}  --- pnpm install output ---${RESET}" >&2
+  tail -60 "$_pnpm_log" >&2
+  echo -e "${DIM}  ---------------------------${RESET}" >&2
+  rm -f "$_pnpm_log"; exit 1
 fi
-rm -f "$_bun_log"
+rm -f "$_pnpm_log"
 _done "Dependencies installed"
 
 # ── Typecheck (worktree installs only) ───────────────────────────────────────
@@ -371,10 +419,10 @@ _done "Dependencies installed"
 # to compare against and the build already surfaces type errors.
 
 if [[ "${IS_WORKTREE_INSTALL}" == "true" ]]; then
-  _CURRENT_STEP="bun run typecheck"
-  _step "bun run typecheck..."
+  _CURRENT_STEP="pnpm run typecheck"
+  _step "pnpm run typecheck..."
   _typecheck_log=$(mktemp)
-  if ! bun run typecheck > "$_typecheck_log" 2>&1; then
+  if ! pnpm run typecheck > "$_typecheck_log" 2>&1; then
     _spin_kill  # stop spinner so its pipe-holding sub-process exits before we do
     printf "\n"
     echo -e "${DIM}  --- typecheck output ---${RESET}" >&2
@@ -392,10 +440,10 @@ fi
 
 # ── Build production bundle ───────────────────────────────────────────────────
 
-_CURRENT_STEP="bun run build"
-_step "bun run build..."
+_CURRENT_STEP="pnpm run build"
+_step "pnpm run build..."
 _build_log=$(mktemp)
-if ! bun run build > "$_build_log" 2>&1; then
+if ! pnpm run build > "$_build_log" 2>&1; then
   _spin_kill  # stop spinner so its pipe-holding sub-process exits before we do
   printf "\n"
   echo -e "${DIM}  --- build output ---${RESET}" >&2

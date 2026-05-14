@@ -34,12 +34,14 @@ You can attach images or files to any request. Follow-up requests on the same br
 | AI (chat) | Anthropic SDK via SSE |
 | AI (code gen) | Anthropic Agent SDK — `query()` in git worktrees |
 | Database | bun:sqlite — passkey auth + evolve session persistence |
-| Hosting | exe.dev (remote dev server) or local `bun run dev` |
+| Hosting | exe.dev (remote dev server) or local `pnpm run dev` |
 
 ## Setup
 
 ### Prerequisites
 - [Bun](https://bun.sh) runtime
+- [pnpm](https://pnpm.io) package manager
+- [Socket Firewall](https://github.com/SocketDev/sfw-free) (`sfw`) for dependency installs
 - An [exe.dev](https://exe.dev) server (provides the LLM gateway — no API key required)
 
 ### Local Development
@@ -47,8 +49,8 @@ You can attach images or files to any request. Follow-up requests on the same br
 ```bash
 cp .env.example .env.local
 
-bun install
-bun run dev
+sfw pnpm install
+pnpm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
@@ -58,7 +60,7 @@ The first user to register is automatically granted the `admin` role.
 ### Deploy to exe.dev
 
 ```bash
-bun run deploy-to-exe.dev <server-name>
+pnpm run deploy-to-exe.dev <server-name>
 ```
 
 This SSH-deploys to `<server-name>.exe.xyz`, installs dependencies, and starts Primordia as a systemd service. The exe.dev LLM gateway handles all LLM requests — no API key is required.
@@ -69,7 +71,7 @@ This SSH-deploys to `<server-name>.exe.xyz`, installs dependencies, and starts P
 
 | Capability | How Primordia uses it |
 |---|---|
-| Persistent remote dev server | Runs as a `systemd` service (`primordia-proxy`) in production mode (`bun run build && bun run start`); blue/green slot swap on accept |
+| Persistent remote dev server | Runs as a `systemd` service (`primordia-proxy`) in production mode (`pnpm run build && pnpm run start`); blue/green slot swap on accept |
 | Built-in LLM gateway | All LLM requests (chat and evolve) are routed through the exe.dev gateway — no API key needed |
 | SSO login | The proxy injects an `X-ExeDev-Email` header; Primordia finds or creates a user automatically |
 
@@ -80,11 +82,11 @@ This SSH-deploys to `<server-name>.exe.xyz`, installs dependencies, and starts P
 3. **Configure `.env.local`** — copy `.env.example` and fill in `REVERSE_PROXY_PORT`.
 4. **Deploy**:
    ```bash
-   bun run deploy-to-exe.dev <server-name>
+   pnpm run deploy-to-exe.dev <server-name>
    ```
    The script will:
    - Copy your `.env.local` to the server via `scp`
-   - Install `git` and `bun` if missing
+   - Install `git`, `bun`, and `pnpm` if missing
    - Clone your repo and install dependencies
    - Start Primordia as a `systemd` service and wait for it to be ready
 5. **Open** `http://<server-name>.exe.xyz:3000`.

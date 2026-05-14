@@ -15,7 +15,7 @@
 //              3. Write decision event + self-terminate (proxy already switched traffic)
 //
 //            LEGACY (local dev, NODE_ENV !== 'production'):
-//              git checkout → stash → merge → stash-pop → bun install → worktree remove
+//              git checkout → stash → merge → stash-pop → sfw pnpm install → worktree remove
 //
 //   reject — kills the preview dev server, removes the worktree and branch
 //            without merging, updates the session status to "rejected".
@@ -226,7 +226,7 @@ async function retryAcceptAfterFix(
  *      switched traffic to the new slot).
  *
  * Legacy path (local dev, NODE_ENV !== 'production'):
- *   git merge → bun install (unchanged from before).
+ *   git merge → sfw pnpm install.
  */
 async function runAcceptAsync(
   sessionId: string,
@@ -257,7 +257,7 @@ async function runAcceptAsync(
       // ── Kill preview dev server + any background warmup build ─────────────
       // The preview dev server and the background cache-warming `next build`
       // both hold the Next.js build lock. If either is still running when
-      // install.sh runs `bun run build`, Next.js will refuse with
+      // install.sh runs `pnpm run build`, Next.js will refuse with
       // "Another next build process is already running". Kill them first.
       console.log(`[runAcceptAsync] killing preview server for session ${sessionId}`);
       try {
@@ -285,7 +285,7 @@ async function runAcceptAsync(
       await new Promise((resolve) => setTimeout(resolve, 2000));
 
       // ── Production: run install.sh from the session worktree ─────────────
-      // install.sh handles: typecheck (exits 2 on failure), bun install, build,
+      // install.sh handles: typecheck (exits 2 on failure), pnpm install, build,
       // DB copy, sibling reparenting, proxy spawn, main pointer advancement,
       // and mirror push.
       const exitCode = await runInstallSh(sessionId, worktreePath, branch);
@@ -394,10 +394,10 @@ async function runAcceptAsync(
       }
 
       await step('- Installing dependencies…');
-      const installResult = await runCmd('bun', ['install', '--frozen-lockfile'], mergeRoot);
+      const installResult = await runCmd('sfw', ['pnpm', 'install', '--frozen-lockfile'], mergeRoot);
       if (installResult.code !== 0) {
         await failWithError(
-          `❌ Accept failed: \`bun install --frozen-lockfile\` failed after merge.\n` +
+          `❌ Accept failed: \`sfw pnpm install --frozen-lockfile\` failed after merge.\n` +
           `\`\`\`\n${(installResult.stdout + installResult.stderr).trim()}\n\`\`\``,
         );
         return;

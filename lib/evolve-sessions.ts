@@ -695,7 +695,7 @@ export async function hotswapProductionDbIntoWorktree(
 // ─── Background Turbopack cache warming ─────────────────────────────────────
 
 /**
- * Spawns `bun run build` in the given worktree at the lowest possible CPU and
+ * Spawns `pnpm run build` in the given worktree at the lowest possible CPU and
  * I/O priority so Turbopack can warm its persistent file-system cache
  * (.next/cache/turbopack/) in the background while the user reviews the preview.
  *
@@ -712,7 +712,7 @@ function spawnCacheWarmBuild(worktreePath: string): void {
   // Use `sh -c` so we can compose nice + ionice without requiring ionice to exist.
   // `ionice -c 3 ...` sets idle I/O priority; `|| ...` is the fallback when ionice
   // is unavailable (e.g. macOS, older kernels, or missing capability).
-  const cmd = 'ionice -c 3 bun run --bun next build || bun run --bun next build';
+  const cmd = 'ionice -c 3 pnpm run build || pnpm run build';
   const proc = spawn('nice', ['-n', '19', 'sh', '-c', cmd], {
     cwd: worktreePath,
     stdio: 'ignore',
@@ -726,7 +726,7 @@ function spawnCacheWarmBuild(worktreePath: string): void {
   });
   proc.unref();
   // Write the PID to a well-known file so accept can kill the warmup
-  // build before running its own `bun run build` — Next.js refuses to start
+  // build before running its own `pnpm run build` — Next.js refuses to start
   // a second build if one is already in progress.
   if (proc.pid !== undefined) {
     const pidFile = path.join(worktreePath, '.primordia-warmup-build.pid');
@@ -826,23 +826,23 @@ export async function startLocalEvolve(
     // server restarts. Preview and production servers both use this port.
     session.port = getOrAssignBranchPort(session.branch, repoRoot);
 
-    // Step 2 — Run bun install in the worktree.
-    // Bun is fast enough that a full install is preferable to a shared symlink,
-    // which can cause subtle dependency issues when the worktree diverges.
+    // Step 2 — Run pnpm install in the worktree under Socket Firewall.
+    // A full install is preferable to a shared symlink, which can cause subtle
+    // dependency issues when the worktree diverges.
     await new Promise<void>((resolve, reject) => {
-      const proc = spawn('bun', ['install'], {
+      const proc = spawn('sfw', ['pnpm', 'install', '--frozen-lockfile'], {
         cwd: session.worktreePath,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       proc.on('close', (code) => {
         if (code === 0) {
-          appendSessionEvent(ndjsonPath, { type: 'setup_step', label: '`bun install` complete', done: true, ts: Date.now() });
+          appendSessionEvent(ndjsonPath, { type: 'setup_step', label: '`sfw pnpm install --frozen-lockfile` complete', done: true, ts: Date.now() });
           resolve();
         } else {
-          reject(new Error(`bun install failed with exit code ${code}`));
+          reject(new Error(`sfw pnpm install --frozen-lockfile failed with exit code ${code}`));
         }
       });
-      proc.on('error', (err) => reject(new Error(`bun install spawn failed: ${err.message}`)));
+      proc.on('error', (err) => reject(new Error(`sfw pnpm install --frozen-lockfile spawn failed: ${err.message}`)));
     });
 
     // Step 3 — Copy the SQLite database into the worktree so each branch gets
@@ -964,7 +964,7 @@ export async function startLocalEvolve(
     );
     // Worker has exited — 'result' event in the NDJSON log marks completion.
 
-    // Background cache-warming: run `bun run build` at the lowest CPU/IO
+    // Background cache-warming: run `pnpm run build` at the lowest CPU/IO
     // priority so Turbopack populates .next/cache/turbopack/ before the user
     // clicks Accept.  We attempt `ionice -c 3` (idle I/O class) first; if the
     // kernel doesn't support ionice it is silently ignored via the shell `||`.

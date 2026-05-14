@@ -6,7 +6,7 @@
 // This route lets the api-docs page work without any manual build step —
 // the spec is produced automatically the first time /api-docs is opened.
 //
-// next-openapi-gen is run as a child process (same as `bun run generate-api-docs`)
+// next-openapi-gen is run as a child process (same as `pnpm run generate-api-docs`)
 // rather than imported directly, because the package uses `new URL('../../package.json',
 // import.meta.url)` which Next.js's bundler can't resolve at build time.
 
@@ -33,7 +33,7 @@ async function getSpec(): Promise<string> {
     genPromise = (async () => {
       // Run next-openapi-gen as a child process so it isn't bundled by Next.js.
       await execFileAsync(
-        'bun',
+        'pnpm',
         ['run', 'generate-api-docs'],
         { cwd: process.cwd() },
       );

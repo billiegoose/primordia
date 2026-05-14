@@ -5,7 +5,7 @@
 // lib/models.generated.json.  Run whenever the pi SDK is updated and new
 // models need to be reflected in the UI:
 //
-//   bun run regenerate:model-registry
+//   pnpm run regenerate:model-registry
 
 import { writeFileSync } from 'fs';
 import { join } from 'path';

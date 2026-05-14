@@ -211,7 +211,7 @@ export async function POST(req: Request) {
   void (async () => {
     const freePort = await findFreePort();
 
-    const newServer = spawn('bun', ['run', 'start'], {
+    const newServer = spawn('pnpm', ['run', 'start'], {
       cwd: targetPath,
       env: { ...process.env, PORT: String(freePort), HOSTNAME: '0.0.0.0' },
       stdio: 'ignore',

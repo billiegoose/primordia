@@ -5,7 +5,7 @@
 // Equivalent to POST /api/admin/rollback but runs directly via bun — use this when
 // the server itself is broken or unresponsive.
 //
-// Usage: bun run rollback
+// Usage: pnpm run rollback
 //   (no authentication — run via SSH / direct terminal access only)
 
 import { execSync, spawnSync } from 'child_process';

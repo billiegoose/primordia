@@ -3,7 +3,7 @@
 //
 // The model list lives in lib/models.generated.json so both server and client
 // components can import it without pulling in @mariozechner/pi-coding-agent.
-// Regenerate it with: bun run regenerate:model-registry
+// Regenerate it with: pnpm run regenerate:model-registry
 
 export interface HarnessOption {
   id: string;

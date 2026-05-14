@@ -26,9 +26,19 @@ The core idea: **the app becomes whatever its users need it to be**, with no cod
 | Styling | Tailwind CSS | AI models write Tailwind well; no CSS files to manage |
 | Language | TypeScript | Catches mistakes; Claude Code understands it well |
 | AI API | Anthropic SDK (`@anthropic-ai/sdk`) | Routes through exe.dev LLM gateway by default; users may override with their own Anthropic API key or Claude Code credentials.json (stored in localStorage/DB, encrypted in transit via one hybrid AES-GCM + RSA-OAEP envelope for all credential types) |
-| Hosting | exe.dev | Production builds via `bun run build && bun run start`; single systemd service (`primordia-proxy`) manages both proxy and production app; blue/green slot swap on accept |
+| Hosting | exe.dev | Production builds via `pnpm run build && pnpm run start`; single systemd service (`primordia-proxy`) manages both proxy and production app; blue/green slot swap on accept |
 | AI code gen | `@anthropic-ai/claude-agent-sdk` | `query()` runs Claude Code in git worktrees for evolve requests |
 | Database | bun:sqlite | Local SQLite for passkey auth **and evolve session persistence**; same adapter on exe.dev and local dev |
+
+### Dependency Management
+
+Primordia uses **pnpm** for dependency management and **bun** as the JavaScript/TypeScript runtime.
+
+- Install dependencies with `sfw pnpm install`.
+- Add or update packages with `sfw pnpm add ...` / `sfw pnpm update ...`.
+- Run one-off package binaries with `sfw pnx ...` (the installer provides `pnx` as a `pnpm dlx` helper).
+- Do **not** use `bun install`, `bun add`, `bun update`, `bunx`, `bun x`, `bun create`, or `bun dlx`; the installed bun shim rejects those commands so dependency changes go through pnpm's supply-chain protections and Socket Firewall.
+- Use `pnpm run ...` for package scripts. It is still fine to use `bun` as the runtime for scripts and TypeScript files (for example `bun scripts/foo.ts`).
 
 ### File Map
 
@@ -80,10 +90,10 @@ These must be set in:
 
 1. **Clone** this repo.
 2. **Copy** `.env.example` to `.env.local` and fill in `REVERSE_PROXY_PORT`.
-3. **Run** `bun install && bun run dev`.
+3. **Run** `sfw pnpm install && pnpm run dev`.
 4. The app is live at `http://localhost:3000`.
 
-To deploy to exe.dev: `bun run deploy-to-exe.dev <server-name>`
+To deploy to exe.dev: `pnpm run deploy-to-exe.dev <server-name>`
 
 ---
 
@@ -118,7 +128,7 @@ When implementing changes, follow these principles:
 | Git diff summary | ✅ Live | Session page shows a collapsible "Files changed" section (file names + +/- LOC) once the session is ready/accepted/rejected |
 | Session from existing branch | ✅ Live | Branches page shows "+ session" next to branches with no active session; evolvers can attach the full AI preview pipeline to any pre-existing local branch |
 | Upstream updates (/admin/updates) | ✅ Live | Admin-only; pull upstream Primordia changes from configured update sources; auto-scheduled fetches |
-| exe.dev deploy | ✅ Live | One-command SSH deploy via `bun run deploy-to-exe.dev <server-name>` |
+| exe.dev deploy | ✅ Live | One-command SSH deploy via `pnpm run deploy-to-exe.dev <server-name>` |
 | Dark theme | ✅ Live | Default dark UI with Tailwind |
 | Passkey authentication | ✅ Live | WebAuthn passkeys via /login; sessions stored in SQLite |
 | Cross-device QR sign-in | ✅ Live | Laptop shows QR code; authenticated phone scans it and approves; laptop gets a session |

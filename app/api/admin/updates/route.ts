@@ -344,7 +344,7 @@ export async function POST(request: Request) {
       `1. Run: git merge ${source.trackingBranch} --no-edit\n` +
       `2. If there are merge conflicts, resolve them carefully — keep local customisations ` +
       `(env vars, branding, instance-specific features) and incorporate upstream improvements.\n` +
-      `3. Verify the app still builds: run \`bun run typecheck\` and \`bun run build\`.\n` +
+      `3. Verify the app still builds: run \`pnpm run typecheck\` and \`pnpm run build\`.\n` +
       `4. Update CLAUDE.md if the upstream changes include architectural changes that affect the file map, ` +
       `data flow, or feature list.\n\n` +
       `The following new changelog entries are being merged in:\n${changelogSummary}\n\n` +

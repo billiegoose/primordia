@@ -71,7 +71,7 @@
     - `[EVENT: session/page-viewed/v1 {sessionId: "...", status: "starting"}]`
     - Shows "Creating branch…" with setup steps
 
-17. **Watch setup steps complete** (bun install, worktree creation)
+17. **Watch setup steps complete** (sfw pnpm install, worktree creation)
     - No client event — server-side setup, progress via SSE
     - Narrator explains the pipeline
 

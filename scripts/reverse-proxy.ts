@@ -6,13 +6,13 @@
 // the branch stored in git config as primordia.productionBranch.
 //
 // On startup, if the production Next.js server is not already running, the
-// proxy spawns it automatically (bun run start in the production worktree).
+// proxy spawns it automatically (pnpm run start in the production worktree).
 // This makes the proxy the sole systemd service needed — no separate
 // primordia.service required.
 //
 // Preview server management: the proxy owns the lifecycle of all preview dev
 // servers. When a request arrives for /preview/{sessionId} and no server is
-// running for that session, the proxy starts one lazily (bun run dev in the
+// running for that session, the proxy starts one lazily (pnpm run dev in the
 // session's worktree), queuing the first request until it is ready. Preview
 // servers are automatically stopped after 30 minutes of inactivity.
 //
@@ -454,7 +454,7 @@ async function killPortOwner(port: number): Promise<void> {
 // ─── Preview server management ───────────────────────────────────────────────
 
 /**
- * Spawns `bun run dev` in the session's worktree and tracks the process.
+ * Spawns `pnpm run dev` in the session's worktree and tracks the process.
  * Incoming requests are queued in entry.startWaiters until 'Ready' is detected.
  */
 async function startPreviewServer(
@@ -484,7 +484,7 @@ async function startPreviewServer(
     return entry;
   }
 
-  const proc = spawn(process.execPath, ['run', 'dev'], {
+  const proc = spawn('pnpm', ['run', 'dev'], {
     cwd: info.worktreePath,
     env: {
       ...process.env,
@@ -587,7 +587,7 @@ setInterval(() => {
 
 /**
  * On startup, if the production Next.js server is not already running on the
- * upstream port, find the production worktree and spawn `bun run start` there.
+ * upstream port, find the production worktree and spawn `pnpm run start` there.
  * This makes the proxy responsible for the production server lifecycle so no
  * separate primordia.service systemd unit is needed.
  */
@@ -653,7 +653,7 @@ async function startProdServerIfNeeded(): Promise<void> {
 
   console.log(`[proxy] starting production server (${currentProdBranch}) on :${upstreamPort} in ${prodPath}`);
   await killPortOwner(upstreamPort);
-  const server = spawn(process.execPath, ['run', 'start'], {
+  const server = spawn('pnpm', ['run', 'start'], {
     cwd: prodPath,
     env: { ...process.env, PORT: String(upstreamPort), HOSTNAME: '0.0.0.0' },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -802,7 +802,7 @@ async function handleProdSpawn(
     await killPortOwner(port);
 
     // Spawn new prod server — proxy owns this process.
-    const newServer = spawn(process.execPath, ['run', 'start'], {
+    const newServer = spawn('pnpm', ['run', 'start'], {
       cwd: path.resolve(worktreePath),
       env: { ...process.env, PORT: String(port), HOSTNAME: '0.0.0.0' },
       stdio: ['ignore', 'pipe', 'pipe'],

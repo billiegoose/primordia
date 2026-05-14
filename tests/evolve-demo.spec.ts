@@ -6,7 +6,7 @@
  *   - User must be logged in and have the `can_evolve` role
  *   - Set PLAYWRIGHT_BASE_URL env var to override the default
  *
- * Run: bunx playwright test tests/evolve-demo.spec.ts --headed
+ * Run: pnpm exec playwright test tests/evolve-demo.spec.ts --headed
  */
 
 import { test, expect } from "@playwright/test";
@@ -25,7 +25,7 @@ const T = {
   toast: 15_000,
   /** Page navigation after clicking a link */
   nav: 15_000,
-  /** Worktree setup + bun install before Claude starts */
+  /** Worktree setup + sfw pnpm install before Claude starts */
   worktreeSetup: 90_000,
   /** Claude agent running (initial pass) — typical 3-5 min for a real change */
   claudeRun: 8 * 60_000,
@@ -213,7 +213,7 @@ test.describe("Evolve demo script", () => {
     sessionId = page.url().split("/evolve/session/")[1].split("?")[0];
     expect(sessionId).toBeTruthy();
 
-    // Step 17 — Watch setup steps (bun install, worktree creation) — no client event
+    // Step 17 — Watch setup steps (sfw pnpm install, worktree creation) — no client event
     // Just wait for the session to move past "starting"; swallow if already transitioned.
     await expect(page.locator('text="Creating branch"')).toBeVisible({ timeout: T.worktreeSetup }).catch(() => {});
 
@@ -232,7 +232,7 @@ test.describe("Evolve demo script", () => {
     // The preview panel only appears when proxyServerStatus === 'running',
     // which requires the reverse proxy (scripts/reverse-proxy.ts) to be
     // running with REVERSE_PROXY_PORT set. When testing against a plain
-    // `bun run dev` the panel never renders, so this block is best-effort.
+    // `pnpm run dev` the panel never renders, so this block is best-effort.
     // -----------------------------------------------------------------------
 
     // Step 20 — Preview loads in sidebar

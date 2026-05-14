@@ -17,20 +17,20 @@ User types change request on /evolve page
   → server component reads initial state from SQLite, renders EvolveSessionView
   → git worktree add $PRIMORDIA_DIR/worktrees/{branchName} -b {branchName}
        ($PRIMORDIA_DIR is set by the installer — the repo root for fresh installs, two levels above the worktree for worktree-based installs; branches with slashes not supported)
-  → bun install in worktree
+  → sfw pnpm install --frozen-lockfile in worktree
   → copy .primordia-auth.db + symlink .env.local into worktree
   → @anthropic-ai/claude-agent-sdk query() in worktree
       → streams SDKMessage events → formatted progressText appended in memory
       → progressText flushed to SQLite (throttled, ≤1 write/2s per session)
   → assigns ephemeral port to branch in git config (branch.{branch}.port) — idempotent, stable for branch lifetime
-  → spawn: bun run dev in worktree with PORT=branch port and NEXT_BASE_PATH=/preview/{branchName}
+  → spawn: pnpm run dev in worktree with PORT=branch port and NEXT_BASE_PATH=/preview/{branchName}
       → on ready: previewUrl = http://{host}:{REVERSE_PROXY_PORT}/preview/{branchName} (proxy routes by branch name via git config)
   → EvolveSessionView opens SSE stream to /api/evolve/stream?sessionId=... (sessionId = branchName)
       → GET streams delta progressText + state every 500 ms from SQLite until terminal
   → Preview link shown when status becomes "ready"
   → User clicks Accept → POST /api/evolve/manage { action: "accept" }
       → pre-accept gates: (1) ancestor check — auto-merges parent if ahead; (2) clean worktree — auto-commits unstaged changes; (3) concurrent deploy guard — returns 409 if another session is already `accepting`; then runs install.sh which includes typecheck + build
-      → blue/green deploy (production): bun install in worktree → session branch becomes new prod as-is (no merge commit; Gate 1 guarantees it already contains parentBranch)
+      → blue/green deploy (production): sfw pnpm install --frozen-lockfile in worktree → session branch becomes new prod as-is (no merge commit; Gate 1 guarantees it already contains parentBranch)
           → parentBranch ref NOT advanced — old slot stays at pre-accept commit so rollback can match it by branch name
           → sibling sessions whose git config parent = parentBranch are reparented to session branch (so "Apply Updates" picks up new prod)
           → session worktree stays checked out on the session branch; no detached HEAD
@@ -39,7 +39,7 @@ User types change request on /evolve page
           → POST /_proxy/prod/spawn to the reverse proxy (SSE stream): proxy spawns new prod server, health-checks it, sets primordia.productionBranch + productionHistory in git config, and switches traffic; proxy does NOT kill the old prod server
           → old prod server self-terminates (process.exit) after the proxy switches traffic; proxy owns the new server process
           → old slots accumulate indefinitely as registered git worktrees (enables deep rollback via /admin/rollback)
-      → legacy deploy (local dev, NODE_ENV !== 'production'): git merge in production dir → bun install → worktree remove
+      → legacy deploy (local dev, NODE_ENV !== 'production'): git merge in production dir → sfw pnpm install --frozen-lockfile → worktree remove
   → User clicks Reject → POST /api/evolve/manage { action: "reject" }
       → kill dev server, git worktree remove, git branch -D
 ```
@@ -57,7 +57,7 @@ Each evolve session tracks two independent dimensions persisted to SQLite:
 
 | `LocalSessionStatus` | Meaning |
 |---|---|
-| `starting` | Session created; git worktree + `bun install` in progress |
+| `starting` | Session created; git worktree + `sfw pnpm install --frozen-lockfile` in progress |
 | `running-claude` | Claude Agent SDK `query()` is streaming tool calls into the worktree |
 | `fixing-types` | TypeScript or build gate failed on Accept; Claude is auto-fixing compilation errors; session page keeps Available Actions panel visible; server retries Accept when done (client tab does not need to be open) |
 | `ready` | Claude Code finished (or errored); worktree is live and interactive. If an error occurred, the progress log contains an `❌ **Error**:` entry and the Claude Code section heading is styled in red. |
@@ -70,7 +70,7 @@ Each evolve session tracks two independent dimensions persisted to SQLite:
 | `DevServerStatus` | Meaning |
 |---|---|
 | `none` | Dev server not yet started (session is `starting` or `running-claude`) |
-| `starting` | `bun run dev` has been spawned; waiting for Next.js "Ready" signal |
+| `starting` | `pnpm run dev` has been spawned; waiting for Next.js "Ready" signal |
 | `running` | Dev server is up; `previewUrl` is set and the preview is accessible |
 | `disconnected` | Server was running, then exited unexpectedly (branch still exists) |
 

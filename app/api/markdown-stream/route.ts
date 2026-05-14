@@ -191,7 +191,7 @@ Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor i
 1. **Step one** — Install dependencies
 
    \`\`\`bash
-   bun install
+   sfw pnpm install
    \`\`\`
 
 2. **Step two** — Configure environment
@@ -205,7 +205,7 @@ Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor i
 3. **Step three** — Run locally
 
    \`\`\`bash
-   bun run dev
+   pnpm run dev
    \`\`\`
 
    > **Note:** Turbopack is enabled by default for fast refresh.
