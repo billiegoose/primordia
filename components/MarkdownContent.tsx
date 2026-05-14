@@ -6,6 +6,7 @@
 // text-gray-300, etc.).  Used on the evolve session page and in changelog
 // entries.  For the lighter chat-bubble variant see SimpleMarkdown.tsx.
 
+import { useEffect, useMemo, useState } from "react";
 import { Streamdown, type Components } from "streamdown";
 import { withBasePath } from "@/lib/base-path";
 
@@ -29,13 +30,22 @@ function InlineCode({ children, className }: { children?: React.ReactNode; class
   return <code className="bg-gray-700 px-1 rounded text-xs">{children}</code>;
 }
 
-function attachmentImageUrl(src: string | undefined, attachmentSessionId: string | undefined): string | undefined {
+function attachmentImageUrl(src: string | undefined, attachmentSessionId: string | undefined, origin?: string | null): string | undefined {
   if (!src || !attachmentSessionId) return src;
   const normalized = src.replace(/\\/g, "/").replace(/^\.\//, "");
   if (!normalized.startsWith("attachments/")) return src;
   const filename = normalized.slice("attachments/".length);
   if (!filename || filename.includes("/")) return src;
-  return withBasePath(`/api/evolve/attachment/${encodeURIComponent(attachmentSessionId)}?file=${encodeURIComponent(filename)}`);
+  const apiPath = withBasePath(`/api/evolve/attachment/${encodeURIComponent(attachmentSessionId)}?file=${encodeURIComponent(filename)}`);
+  return origin ? new URL(apiPath, origin).toString() : apiPath;
+}
+
+function resolveAttachmentImageMarkdown(text: string, attachmentSessionId: string | undefined, origin: string | null): string {
+  if (!attachmentSessionId || !origin) return text;
+  return text.replace(/(!\[[^\]]*\]\()((?:\.\/)?attachments\/[^)]+)(\))/g, (_match, prefix: string, src: string, suffix: string) => {
+    const resolved = attachmentImageUrl(src, attachmentSessionId, origin);
+    return `${prefix}${resolved ?? src}${suffix}`;
+  });
 }
 
 function createProseComponents(attachmentSessionId?: string): Components {
@@ -91,10 +101,25 @@ function createProseComponents(attachmentSessionId?: string): Components {
 }
 
 export function MarkdownContent({ text, className, attachmentSessionId }: { text: string; className?: string; attachmentSessionId?: string }) {
+  const [origin, setOrigin] = useState<string | null>(null);
+  useEffect(() => {
+    if (attachmentSessionId) setOrigin(window.location.origin);
+  }, [attachmentSessionId]);
+
+  const resolvedText = useMemo(
+    () => resolveAttachmentImageMarkdown(text, attachmentSessionId, origin),
+    [text, attachmentSessionId, origin],
+  );
+
   if (!text) return null;
   return (
-    <Streamdown mode="static" className={className} components={createProseComponents(attachmentSessionId)}>
-      {text}
+    <Streamdown
+      mode="static"
+      className={className}
+      components={createProseComponents(attachmentSessionId)}
+      urlTransform={(url) => attachmentImageUrl(url, attachmentSessionId, origin)}
+    >
+      {resolvedText}
     </Streamdown>
   );
 }
