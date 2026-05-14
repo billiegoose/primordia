@@ -313,11 +313,12 @@ function splitAgentEventsForDisplay(events: SessionEvent[]): {
 }
 
 /** Render a running agent/type-fix/auto-commit section (streaming events live). */
-function RunningAgentSection({ events, label, isTypeFixSection, isAutoCommitSection, worktreePath, harness, model, authSource, auth, startTs }: {
+function RunningAgentSection({ events, label, isTypeFixSection, isAutoCommitSection, sessionId, worktreePath, harness, model, authSource, auth, startTs }: {
   events: SessionEvent[];
   label: string;
   isTypeFixSection: boolean;
   isAutoCommitSection: boolean;
+  sessionId: string;
   worktreePath?: string;
   harness?: string;
   model?: string;
@@ -378,7 +379,7 @@ function RunningAgentSection({ events, label, isTypeFixSection, isAutoCommitSect
             );
           }
           if (event.type === 'text') {
-            return <MarkdownContent key={i} text={event.content} className="[&>*:last-child]:mb-0" />;
+            return <MarkdownContent key={i} text={event.content} className="[&>*:last-child]:mb-0" attachmentSessionId={sessionId} />;
           }
           if (event.type === 'log_line') {
             return <p key={i} className="text-gray-500 text-xs">{event.content}</p>;
@@ -405,11 +406,12 @@ function RunningAgentSection({ events, label, isTypeFixSection, isAutoCommitSect
 }
 
 /** Render a completed agent/type-fix/auto-commit section with tool calls collapsed. */
-function DoneAgentSection({ events, isTypeFixSection, isAutoCommitSection, worktreePath, harness, model, authSource, auth, startTs }: {
+function DoneAgentSection({ events, isTypeFixSection, isAutoCommitSection, sessionId, worktreePath, harness, model, authSource, auth, startTs }: {
   events: SessionEvent[];
   label: string;
   isTypeFixSection: boolean;
   isAutoCommitSection: boolean;
+  sessionId: string;
   worktreePath?: string;
   harness?: string;
   model?: string;
@@ -477,7 +479,7 @@ function DoneAgentSection({ events, isTypeFixSection, isAutoCommitSection, workt
                 );
               }
               if (event.type === 'text') {
-                return <MarkdownContent key={i} text={event.content} className="[&>*:last-child]:mb-0" />;
+                return <MarkdownContent key={i} text={event.content} className="[&>*:last-child]:mb-0" attachmentSessionId={sessionId} />;
               }
               if (event.type === 'thinking') {
                 return <ThinkingBlock key={i} content={event.content} startTs={event.ts} endTs={event.endTs} />;
@@ -494,7 +496,7 @@ function DoneAgentSection({ events, isTypeFixSection, isAutoCommitSection, workt
               return <ThinkingBlock key={i} content={event.content} startTs={event.ts} endTs={event.endTs} />;
             }
             if (event.type === 'text') {
-              return <MarkdownContent key={i} text={event.content} />;
+              return <MarkdownContent key={i} text={event.content} attachmentSessionId={sessionId} />;
             }
             return null;
           })}
@@ -528,8 +530,12 @@ function DoneAgentSection({ events, isTypeFixSection, isAutoCommitSection, workt
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.avif', '.bmp', '.ico']);
 const MARKDOWN_EXTENSIONS = new Set(['.md', '.markdown']);
 
+function getAttachmentUrl(sessionId: string, name: string): string {
+  return withBasePath(`/api/evolve/attachment/${encodeURIComponent(sessionId)}?file=${encodeURIComponent(name)}`);
+}
+
 function AttachmentChip({ name, sessionId }: { name: string; sessionId: string }) {
-  const url = withBasePath(`/api/evolve/attachment/${encodeURIComponent(sessionId)}?file=${encodeURIComponent(name)}`);
+  const url = getAttachmentUrl(sessionId, name);
   const ext = name.includes('.') ? ('.' + name.split('.').pop()!.toLowerCase()) : '';
   const isImage = IMAGE_EXTENSIONS.has(ext);
   const isMarkdown = MARKDOWN_EXTENSIONS.has(ext);
@@ -589,8 +595,8 @@ function StructuredSection({
         )}
         {agentEvents.length > 0 && (
           isActive && !hasResult
-            ? <RunningAgentSection events={agentEvents} label={label} isTypeFixSection={false} isAutoCommitSection={false} worktreePath={worktreePath} harness={harness} model={model} authSource={section.authSource} auth={section.auth} startTs={startTs} />
-            : <DoneAgentSection events={agentEvents} label={label} isTypeFixSection={false} isAutoCommitSection={false} worktreePath={worktreePath} harness={harness} model={model} authSource={section.authSource} auth={section.auth} startTs={startTs} />
+            ? <RunningAgentSection events={agentEvents} label={label} isTypeFixSection={false} isAutoCommitSection={false} sessionId={sessionId} worktreePath={worktreePath} harness={harness} model={model} authSource={section.authSource} auth={section.auth} startTs={startTs} />
+            : <DoneAgentSection events={agentEvents} label={label} isTypeFixSection={false} isAutoCommitSection={false} sessionId={sessionId} worktreePath={worktreePath} harness={harness} model={model} authSource={section.authSource} auth={section.auth} startTs={startTs} />
         )}
       </>
     );
@@ -600,9 +606,9 @@ function StructuredSection({
   if (type === 'agent' || type === 'claude' || type === 'type_fix' || type === 'auto_commit' || type === 'conflict_resolution') {
     const hasResult = events.some((e) => e.type === 'result');
     if (isActive && !hasResult) {
-      return <RunningAgentSection events={events} label={label} isTypeFixSection={type === 'type_fix'} isAutoCommitSection={type === 'auto_commit'} worktreePath={worktreePath} harness={harness} model={model} authSource={section.authSource} auth={section.auth} startTs={startTs} />;
+      return <RunningAgentSection events={events} label={label} isTypeFixSection={type === 'type_fix'} isAutoCommitSection={type === 'auto_commit'} sessionId={sessionId} worktreePath={worktreePath} harness={harness} model={model} authSource={section.authSource} auth={section.auth} startTs={startTs} />;
     }
-    return <DoneAgentSection events={events} label={label} isTypeFixSection={type === 'type_fix'} isAutoCommitSection={type === 'auto_commit'} worktreePath={worktreePath} harness={harness} model={model} authSource={section.authSource} auth={section.auth} startTs={startTs} />;
+    return <DoneAgentSection events={events} label={label} isTypeFixSection={type === 'type_fix'} isAutoCommitSection={type === 'auto_commit'} sessionId={sessionId} worktreePath={worktreePath} harness={harness} model={model} authSource={section.authSource} auth={section.auth} startTs={startTs} />;
   }
 
   // ── Deploy ───────────────────────────────────────────────────────────────
