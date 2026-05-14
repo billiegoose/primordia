@@ -7,6 +7,7 @@
 // entries.  For the lighter chat-bubble variant see SimpleMarkdown.tsx.
 
 import { Streamdown, type Components } from "streamdown";
+import { withBasePath } from "@/lib/base-path";
 
 function Anchor({ href, children }: { href?: string; children?: React.ReactNode }) {
   return (
@@ -28,7 +29,17 @@ function InlineCode({ children, className }: { children?: React.ReactNode; class
   return <code className="bg-gray-700 px-1 rounded text-xs">{children}</code>;
 }
 
-const proseComponents: Components = {
+function attachmentImageUrl(src: string | undefined, attachmentSessionId: string | undefined): string | undefined {
+  if (!src || !attachmentSessionId) return src;
+  const normalized = src.replace(/\\/g, "/").replace(/^\.\//, "");
+  if (!normalized.startsWith("attachments/")) return src;
+  const filename = normalized.slice("attachments/".length);
+  if (!filename || filename.includes("/")) return src;
+  return withBasePath(`/api/evolve/attachment/${encodeURIComponent(attachmentSessionId)}?file=${encodeURIComponent(filename)}`);
+}
+
+function createProseComponents(attachmentSessionId?: string): Components {
+  return {
   p: ({ children }) => (
     <p className="text-xs text-gray-300 leading-relaxed mb-3">{children}</p>
   ),
@@ -65,12 +76,24 @@ const proseComponents: Components = {
     </blockquote>
   ),
   hr: () => <hr className="border-gray-700 mb-3" />,
-};
+  img: ({ src, alt }) => {
+    const resolvedSrc = attachmentImageUrl(typeof src === "string" ? src : undefined, attachmentSessionId);
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={resolvedSrc}
+        alt={alt ?? ""}
+        className="my-3 max-h-[28rem] w-auto max-w-full rounded border border-gray-800 object-contain"
+      />
+    );
+  },
+  };
+}
 
-export function MarkdownContent({ text, className }: { text: string; className?: string }) {
+export function MarkdownContent({ text, className, attachmentSessionId }: { text: string; className?: string; attachmentSessionId?: string }) {
   if (!text) return null;
   return (
-    <Streamdown mode="static" className={className} components={proseComponents}>
+    <Streamdown mode="static" className={className} components={createProseComponents(attachmentSessionId)}>
       {text}
     </Streamdown>
   );
