@@ -47,6 +47,7 @@ export type SessionEvent =
   | { type: 'metrics'; durationMs: number | null; inputTokens: number | null; outputTokens: number | null; costUsd: number | null; ts: number }
   | { type: 'log_line'; content: string; ts: number }
   | { type: 'thinking'; content: string; ts: number }
+  | { type: 'attachment_image'; file: string; alt?: string; caption?: string; ts: number }
   | { type: 'initial_request'; request: string; attachments?: string[]; presetId?: string; authSource?: string; harness?: string; model?: string; ts: number }
   | { type: 'followup_request'; request: string; attachments?: string[]; presetId?: string; authSource?: string; harness?: string; model?: string; ts: number }
   | { type: 'decision'; action: 'accepted' | 'rejected'; detail: string; ts: number };
@@ -55,8 +56,76 @@ export function getSessionNdjsonPath(worktreePath: string): string {
   return path.join(worktreePath, '.primordia-session.ndjson');
 }
 
+const ATTACHMENT_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.avif', '.bmp', '.ico']);
+
+function isAttachmentImagePath(value: string): boolean {
+  const normalized = value.replace(/\\/g, '/').replace(/^\.\//, '');
+  if (!normalized.startsWith('attachments/')) return false;
+  const filename = path.basename(normalized);
+  if (filename !== normalized.slice('attachments/'.length)) return false;
+  return ATTACHMENT_IMAGE_EXTENSIONS.has(path.extname(filename).toLowerCase());
+}
+
+function normalizeAttachmentImageFile(value: string): string | null {
+  const cleaned = value
+    .trim()
+    .replace(/^['"`(<]+/, '')
+    .replace(/[\]'"`)>.,;:]+$/, '')
+    .replace(/\\/g, '/')
+    .replace(/^\.\//, '');
+  if (!isAttachmentImagePath(cleaned)) return null;
+  return path.basename(cleaned);
+}
+
+function collectAttachmentImageFilesFromString(value: string): string[] {
+  const files = new Set<string>();
+
+  // Markdown image syntax lets agents add useful alt text in ordinary output:
+  // ![homepage](attachments/home.png)
+  const markdownImageRegex = /!\[[^\]]*\]\(([^)]+)\)/g;
+  for (const match of value.matchAll(markdownImageRegex)) {
+    const file = normalizeAttachmentImageFile(match[1] ?? '');
+    if (file) files.add(file);
+  }
+
+  // Generic references in tool inputs/logs, e.g.:
+  // agent-browser screenshot attachments/primordia-home.png
+  const genericAttachmentRegex = /(?:^|[\s"'`(])((?:\.\/)?attachments\/[A-Za-z0-9._ -]+\.(?:jpe?g|png|gif|webp|svg|avif|bmp|ico))(?:$|[\s"'`),.;:])/gi;
+  for (const match of value.matchAll(genericAttachmentRegex)) {
+    const file = normalizeAttachmentImageFile(match[1] ?? '');
+    if (file) files.add(file);
+  }
+
+  return [...files];
+}
+
+function collectAttachmentImageReferences(event: SessionEvent): Extract<SessionEvent, { type: 'attachment_image' }>[] {
+  if (event.type === 'attachment_image') return [];
+
+  const refs = new Set<string>();
+  const addFromString = (value: string) => {
+    for (const file of collectAttachmentImageFilesFromString(value)) refs.add(file);
+  };
+
+  if (event.type === 'text' || event.type === 'log_line') {
+    addFromString(event.content);
+  } else if (event.type === 'tool_use') {
+    for (const value of Object.values(event.input)) {
+      if (typeof value === 'string') addFromString(value);
+    }
+  }
+
+  return [...refs].map((file) => ({
+    type: 'attachment_image' as const,
+    file,
+    caption: `attachments/${file}`,
+    ts: event.ts,
+  }));
+}
+
 export function appendSessionEvent(ndjsonPath: string, event: SessionEvent): void {
-  fs.appendFileSync(ndjsonPath, JSON.stringify(event) + '\n', 'utf8');
+  const events = [event, ...collectAttachmentImageReferences(event)];
+  fs.appendFileSync(ndjsonPath, events.map((entry) => JSON.stringify(entry)).join('\n') + '\n', 'utf8');
 }
 
 export function readSessionEvents(
