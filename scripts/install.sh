@@ -273,12 +273,12 @@ else
 fi
 
 # ── Install sfw shim ──────────────────────────────────────────────────────────
-# A bun shim is installed that routes every bun invocation through sfw (Socket
-# Firewall Free) for network traffic filtering during package installs.
+# bun/bunx shims are installed that route package-downloading commands through
+# sfw (Socket Firewall Free) for network traffic filtering during package
+# installs, while non-downloading commands run the real bun directly.
 # A bun-real symlink points to the actual bun binary at ~/.bun/bin/bun.
-# On Linux the shim lives in /bin (universally on PATH for all callers including
-# systemd services). On macOS /bin is read-only even with sudo due to SIP, so
-# /usr/local/bin is used instead.
+# The shims live in /usr/local/bin, which is writable on macOS and available to
+# systemd services on Linux.
 
 _CURRENT_STEP="install sfw shim"
 
@@ -311,17 +311,38 @@ else
   success "Using ${SHIM_DIR}/bun-real"
 fi
 
-# Write the bun shim (idempotent)
+# Write the bun/bunx shims (idempotent). Only commands that can download npm
+# packages are wrapped by sfw; everything else bypasses sfw automatically.
 SHIM_CONTENT="#!/usr/bin/env bash
-exec ${SHIM_DIR}/bun-real --bun ~/.bun/bin/sfw ${SHIM_DIR}/bun-real \"\$@\"
-"
-if [[ ! -f "${SHIM_DIR}/bun" ]] || ! diff -q <(printf '%s' "$SHIM_CONTENT") "${SHIM_DIR}/bun" >/dev/null 2>&1; then
-  printf '%s' "$SHIM_CONTENT" | sudo tee "${SHIM_DIR}/bun" >/dev/null
-  sudo chmod +x "${SHIM_DIR}/bun"
-  success "Installed ${SHIM_DIR}/bun→sfw shim"
-else
-  success "Using ${SHIM_DIR}/bun→sfw shim"
+set -euo pipefail
+
+REAL_BUN=\"${SHIM_DIR}/bun-real\"
+SFW=\"\$HOME/.bun/bin/sfw\"
+INVOKED_AS=\"\$(basename \"\$0\")\"
+COMMAND=\"\${1:-}\"
+
+if [[ \"\$INVOKED_AS\" == \"bunx\" ]]; then
+  exec \"\$REAL_BUN\" --bun \"\$SFW\" \"\$REAL_BUN\" x \"\$@\"
 fi
+
+case \"\$COMMAND\" in
+  add|install|update|x|create|dlx)
+    exec \"\$REAL_BUN\" --bun \"\$SFW\" \"\$REAL_BUN\" \"\$@\"
+    ;;
+  *)
+    exec \"\$REAL_BUN\" \"\$@\"
+    ;;
+esac
+"
+for SHIM_NAME in bun bunx; do
+  if [[ ! -f "${SHIM_DIR}/${SHIM_NAME}" ]] || ! diff -q <(printf '%s' "$SHIM_CONTENT") "${SHIM_DIR}/${SHIM_NAME}" >/dev/null 2>&1; then
+    printf '%s' "$SHIM_CONTENT" | sudo tee "${SHIM_DIR}/${SHIM_NAME}" >/dev/null
+    sudo chmod +x "${SHIM_DIR}/${SHIM_NAME}"
+    success "Installed ${SHIM_DIR}/${SHIM_NAME} conditional sfw shim"
+  else
+    success "Using ${SHIM_DIR}/${SHIM_NAME} conditional sfw shim"
+  fi
+done
 
 # ── Install dependencies ──────────────────────────────────────────────────────
 
@@ -457,7 +478,7 @@ Environment=REVERSE_PROXY_PORT=${REVERSE_PROXY_PORT}
 Environment=HOME=${HOME}
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
 ${PARENT_URL_ENV_LINE}
-ExecStart=${SHIM_DIR}/bun-real ${PRIMORDIA_DIR}/reverse-proxy.ts
+ExecStart=${SHIM_DIR}/bun ${PRIMORDIA_DIR}/reverse-proxy.ts
 Restart=always
 RestartSec=5
 StandardOutput=journal

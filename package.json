@@ -4,9 +4,9 @@
   "private": true,
   "packageManager": "bun@1.2.0",
   "scripts": {
-    "dev": "bun-real run --bun next dev --turbopack",
-    "build": "bun-real run --bun next build",
-    "start": "bun-real run --bun next start",
+    "dev": "bun run --bun next dev --turbopack",
+    "build": "bun run --bun next build",
+    "start": "bun run --bun next start",
     "lint": "eslint .",
     "typecheck": "next typegen && tsc --noEmit",
     "deploy-to-exe.dev": "bash scripts/deploy-to-exe-dev.sh",
