@@ -21,7 +21,7 @@ function getModelLabel(harnessId: string, modelId: string): string {
   return MODEL_OPTIONS[harnessId]?.find((m) => m.id === modelId)?.label ?? modelId;
 }
 
-const MARKDOWN_SCREENSHOT_INSTRUCTION = `If you capture screenshots or create image files under the worktree's \`attachments/\` folder, you may include them in your final text output using Markdown image syntax like \`![description](attachments/screenshot.png)\`; the session page renders final text as Markdown and will display those images inline.`;
+const MARKDOWN_SCREENSHOT_INSTRUCTION = `If you capture screenshots or create image files under the worktree's \`attachments/\` folder, you may include them in your final text output using Markdown image syntax like \`![description](attachments/screenshot.png)\`; put the image syntax on its own line/paragraph, not inside a list item or inline code span. The session page renders final text as Markdown and will display those images inline with a figure caption from the alt text.`;
 
 export type LocalSessionStatus =
   | 'starting'
